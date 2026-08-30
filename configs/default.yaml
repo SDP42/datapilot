@@ -1,0 +1,22 @@
+# DataPilot default configuration (foundation stage).
+# Values here are placeholders; nothing consumes them yet beyond
+# datapilot.config.load_config().
+
+project:
+  name: DataPilot
+  phase: 0
+
+paths:
+  data_raw: data/raw
+  data_processed: data/processed
+  data_interim: data/interim
+  artifacts: artifacts
+
+# LLM provider abstraction — no provider is wired yet.
+ai_engine:
+  provider: null          # e.g. "anthropic" | "openai" | "local"
+  model: null
+  temperature: 0.0
+
+determinism:
+  global_seed: 42

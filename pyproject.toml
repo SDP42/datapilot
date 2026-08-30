@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "datapilot"
+version = "0.0.0"
+description = "DataPilot — Autonomous AI Data Science Platform (foundation stage)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Swayam Panchal", email = "panchalswayam35@gmail.com" }]
+keywords = ["data-science", "automl", "mlops", "llm", "autonomous-agent"]
+
+# Phase 0 keeps runtime dependencies deliberately minimal.
+# Engine-specific stacks (scikit-learn, xgboost, lightgbm, torch, shap,
+# mlflow, fastapi, sqlalchemy, duckdb ...) are added in the phase that
+# first needs them — see docs/roadmap.md.
+dependencies = [
+    "pandas>=2.2",
+    "numpy>=1.26",
+    "scipy>=1.13",
+    "pydantic>=2.7",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.5",
+    "mypy>=1.10",
+]
+
+[project.urls]
+Documentation = "https://github.com/your-org/datapilot/tree/main/docs"
+
+[tool.setuptools]
+packages = [
+    "datapilot",
+    "ai_engine",
+    "ai_engine.providers",
+    "backend",
+    "backend.datapilot_api",
+    "data_engine",
+    "data_engine.ingestion",
+    "data_engine.profiling",
+    "data_engine.quality",
+    "data_engine.cleaning",
+    "data_engine.preprocessing",
+    "data_engine.validation",
+    "data_engine.feature_engineering",
+    "database",
+    "dl_engine",
+    "experimentation",
+    "explainability",
+    "ml_engine",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

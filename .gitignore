@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# Tooling
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Notebooks
+.ipynb_checkpoints/
+
+# DataPilot runtime artifacts (never commit datasets or experiment outputs)
+data/raw/
+data/processed/
+data/interim/
+artifacts/
+mlruns/
+*.duckdb
+*.sqlite3
+
+# Secrets
+.env
+*.local
