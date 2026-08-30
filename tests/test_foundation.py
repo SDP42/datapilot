@@ -20,6 +20,7 @@ ENGINE_PACKAGES = [
     "data_engine.ingestion",
     "data_engine.profiling",
     "data_engine.quality",
+    "data_engine.quality.checks",
     "data_engine.cleaning",
     "data_engine.preprocessing",
     "data_engine.validation",

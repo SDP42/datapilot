@@ -60,7 +60,11 @@ and the shared data contracts in `datapilot/`. The interface between the
 two is specified in
 [data-engine-contract.md](data-engine-contract.md) — *implemented for CSV*.
 
-**Future-phase components:** everything else — data quality/cleaning,
+**Phase 2 (in progress):** `data_engine.quality` — a read-only quality
+*analysis* engine (`DatasetProfile` + data → `QualityReport`), specified
+in [data-quality.md](data-quality.md). The cleaning engine is not started.
+
+**Future-phase components:** everything else — data cleaning,
 validation & lineage, EDA, feature engineering, `ml_engine`, `dl_engine`,
 `experimentation`, `explainability`, `ai_engine`, `database`, `backend`,
 `frontend`, MLOps.

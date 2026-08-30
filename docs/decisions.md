@@ -4,6 +4,67 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0016 — Quality engine loads the DataFrame; profiling contract unchanged
+- **Decision:** the quality engine takes a `DatasetReference` (or a
+  DataFrame), loads the data read-only, and computes what it needs
+  (IQR fences, skewness, numeric-parse ratios, category variants)
+  itself. `DatasetProfile` / `ColumnProfile` were **not** extended.
+- **Reason:** IQR outlier *counts*, skewness, and full category-variant
+  lists are not in the profile and would bloat it if added; several are
+  genuinely quality-engine concerns, not profiling ones. Keeping the
+  Phase 1 contract frozen avoids a ripple change.
+- **Alternatives considered:** add `skewness`, `outlier_count`,
+  `all_distinct_values` to `ColumnProfile` (rejected — enlarges a stable
+  contract for one consumer); pass only the profile and approximate from
+  q25/q75 (rejected — cannot count affected rows without the data).
+- **Consequence:** the quality engine reads the raw copy a second time.
+  Acceptable; both reads are read-only. If profiling later needs skew for
+  its own reasons, it can be added then and the check can prefer it.
+
+## 0015 — Detection only; findings carry a *suggested* action, never perform it
+- **Decision:** `QualityFinding.recommended_action` is a `SuggestedAction`
+  enum (a pointer for humans / the AI planner). No check mutates data.
+- **Reason:** Principles 1, 3, 4 and the deliberate
+  Profiling → Quality → Cleaning split. What to do about an issue is a
+  goal-dependent judgement call handled in a separate, recorded phase.
+- **Alternatives considered:** returning ready-to-run cleaning ops
+  (rejected — couples analysis to cleaning, breaks auditability).
+- **Consequence:** the cleaning engine will translate approved findings
+  into typed operations later.
+
+## 0014 — Severity = impact/prevalence; certainty lives in `confidence`
+- **Decision:** severity is derived from documented thresholds on the
+  observed statistic (e.g. % missing). Heuristic checks additionally set
+  `confidence` (0–1); exact checks leave it `None`.
+- **Reason:** "how bad" and "how sure" are different axes. A 60%-missing
+  column is CRITICAL with full certainty; a categorical-inconsistency
+  guess may be MEDIUM impact but only ~0.7 confidence.
+- **Alternatives considered:** a single blended score (rejected — hides
+  the distinction the cleaning/AI layers need).
+
+## 0013 — IQR (Tukey k=1.5) for outliers, reported not removed
+- **Decision:** flag numeric values outside `[Q1-1.5·IQR, Q3+1.5·IQR]`
+  as *potential* outliers; report the fence and the min/max flagged
+  value; never remove or replace.
+- **Reason:** IQR is non-parametric, robust to the outliers it is
+  detecting, and standard. An outlier is not an error (see
+  data-quality.md). Removal is a later explicit decision.
+- **Alternatives considered:** z-score / 3σ (assumes normality, and the
+  mean/std are themselves distorted by outliers); isolation forest / LOF
+  (ML — out of scope for a deterministic Phase 2 check).
+- **Consequence:** heavy-tailed valid columns will produce LOW-severity
+  findings; that is intended (surface, don't act).
+
+## 0012 — One `check(ctx)` function per issue type, registered in a dict
+- **Decision:** each check is its own module exposing
+  `check(ctx: CheckContext) -> list[QualityFinding]`; the analyzer holds a
+  name→function registry and can run any subset.
+- **Reason:** the task's modularity requirement; each check is unit-tested
+  in isolation; adding a check is a new file + one registry line.
+- **Alternatives considered:** one `analyze_quality()` with all logic
+  (rejected — the exact monolith the task warns against); a class
+  hierarchy (rejected — functions + a dataclass context are enough).
+
 ## 0011 — `DatasetReference` describes the file, not its contents
 - **Decision:** ingestion metadata covers only file-level facts (id,
   filename, format, path, size, sha256, timestamp). Row/column counts and

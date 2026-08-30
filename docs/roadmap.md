@@ -5,9 +5,9 @@ future phases are not anticipated in code.
 
 | Phase | Name | Status |
 | --- | --- | --- |
-| 0 | Architecture / Foundation | **In progress (this step)** |
+| 0 | Architecture / Foundation | Done |
 | 1 | Data Ingestion & Profiling | **In progress** — CSV ingestion + profiling done; Parquet/Excel deferred |
-| 2 | Data Quality & Cleaning | Not started |
+| 2 | Data Quality & Cleaning | **In progress** — quality *analysis* engine done (detection only); cleaning not started |
 | 3 | Validation & Data Lineage | Not started |
 | 4 | EDA & Statistical Analysis | Not started |
 | 5 | Automated Problem Understanding | Not started |
@@ -56,6 +56,12 @@ future phases are not anticipated in code.
   operations driven by an approved `CleaningPlan`; `data_engine.preprocessing`.
 - **Output:** a data-quality report and a cleaned dataset produced from a
   recorded plan.
+- **Status:** `data_engine.quality` implemented — `analyze_quality`
+  (`DatasetReference → QualityReport`) plus 7 modular, read-only checks
+  (missing values, duplicate rows, potential type mismatch, inconsistent
+  categories, IQR outliers, high skew, class imbalance when a target is
+  supplied). Detection only; see [data-quality.md](data-quality.md).
+  The cleaning engine (`data_engine.cleaning`) is not started.
 
 ### Phase 3 — Validation & Data Lineage
 - **Objective:** guarantee transformations are safe and traceable.

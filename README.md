@@ -109,9 +109,12 @@ continuous Testing/Benchmarking/Docs. See [docs/roadmap.md](docs/roadmap.md).
 | `LLMProvider` contract | ✅ Interface only |
 | **Phase 1 — CSV ingestion** (`data_engine.ingestion`) | ✅ Implemented (CSV only) |
 | **Phase 1 — Dataset profiling** (`data_engine.profiling`) | ✅ Implemented |
+| **Phase 2 — Data-quality analysis** (`data_engine.quality`) | ✅ Implemented (detection only) |
+| Phase 2 — Cleaning engine | ⛔ Not started |
 | Everything else | ⛔ Not started |
 
-Phase 1 detail: [docs/data-engine-contract.md](docs/data-engine-contract.md).
+Detail: [docs/data-engine-contract.md](docs/data-engine-contract.md),
+[docs/data-quality.md](docs/data-quality.md).
 
 ## Development setup
 
