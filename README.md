@@ -105,9 +105,13 @@ continuous Testing/Benchmarking/Docs. See [docs/roadmap.md](docs/roadmap.md).
 | Repository structure & packaging | ✅ Done |
 | Architecture & principles docs | ✅ Done |
 | Roadmap & decision log | ✅ Done |
-| Shared core (`datapilot.config`, version) | ✅ Minimal |
+| Shared core (`datapilot.config`, version, contracts) | ✅ Minimal |
 | `LLMProvider` contract | ✅ Interface only |
+| **Phase 1 — CSV ingestion** (`data_engine.ingestion`) | ✅ Implemented (CSV only) |
+| **Phase 1 — Dataset profiling** (`data_engine.profiling`) | ✅ Implemented |
 | Everything else | ⛔ Not started |
+
+Phase 1 detail: [docs/data-engine-contract.md](docs/data-engine-contract.md).
 
 ## Development setup
 

@@ -10,6 +10,8 @@ import pytest
 ENGINE_PACKAGES = [
     "datapilot",
     "datapilot.config",
+    "datapilot.contracts",
+    "datapilot.paths",
     "ai_engine",
     "ai_engine.providers",
     "ai_engine.providers.base",

@@ -6,7 +6,7 @@ future phases are not anticipated in code.
 | Phase | Name | Status |
 | --- | --- | --- |
 | 0 | Architecture / Foundation | **In progress (this step)** |
-| 1 | Data Ingestion & Profiling | Not started |
+| 1 | Data Ingestion & Profiling | **In progress** — CSV ingestion + profiling done; Parquet/Excel deferred |
 | 2 | Data Quality & Cleaning | Not started |
 | 3 | Validation & Data Lineage | Not started |
 | 4 | EDA & Statistical Analysis | Not started |
@@ -41,6 +41,12 @@ future phases are not anticipated in code.
   (column stats, dtype detection, cardinality, distribution summaries),
   shared `DatasetProfile` result contract.
 - **Output:** a structured, serialisable dataset profile.
+- **Status:** `ingest_dataset` (CSV only, immutable raw copy in
+  `data/raw/`, `DatasetReference` handoff) and `profile_dataset` /
+  `profile_dataframe` (→ `DatasetProfile`) implemented. The
+  Ingestion ↔ Profiling contract is documented in
+  [data-engine-contract.md](data-engine-contract.md). Parquet/Excel
+  readers and richer distribution summaries come in later increments.
 
 ### Phase 2 — Data Quality & Cleaning
 - **Objective:** find data problems and fix them under explicit control.

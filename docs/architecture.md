@@ -56,7 +56,9 @@ keeps every step explicit, traceable, and reviewable, and uses an LLM as a
 ```
 
 **Phase 1 components:** `data_engine.ingestion`, `data_engine.profiling`,
-and the shared data contracts in `datapilot/`.
+and the shared data contracts in `datapilot/`. The interface between the
+two is specified in
+[data-engine-contract.md](data-engine-contract.md) — *implemented for CSV*.
 
 **Future-phase components:** everything else — data quality/cleaning,
 validation & lineage, EDA, feature engineering, `ml_engine`, `dl_engine`,

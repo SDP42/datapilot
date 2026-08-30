@@ -4,6 +4,59 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0011 — `DatasetReference` describes the file, not its contents
+- **Decision:** ingestion metadata covers only file-level facts (id,
+  filename, format, path, size, sha256, timestamp). Row/column counts and
+  types are produced solely by the profiler.
+- **Reason:** keeps stage responsibilities from leaking; ingestion stays
+  a thin, fast, transformation-free step.
+- **Alternatives considered:** putting a quick row/column count in the
+  reference (rejected — duplicates profiler logic and invites drift).
+- **Consequence:** callers that just want shape must run the profiler.
+
+## 0010 — Type inference labels, it never coerces
+- **Decision:** `infer_column_type` returns a best-effort `ColumnType`
+  label but the profiler never changes dtypes or values. A text column
+  that looks numeric is reported as `categorical` with its real
+  `pandas_dtype`.
+- **Reason:** Principle "profiling is read-only" and the deliberate
+  Ingestion → Profiling → Quality → Cleaning split; dtype mismatches are
+  a Phase 2 data-quality finding, not something profiling silently fixes.
+- **Alternatives considered:** coercing string-encoded numbers/dates for
+  "nicer" stats (rejected — silent transformation).
+- **Consequence:** datetime detection uses a guarded heuristic (separator/
+  letter check + ≥90% parse rate on a sample) to avoid reading plain
+  integers as years.
+
+## 0009 — Two profiling entrypoints (`profile_dataset` / `profile_dataframe`)
+- **Decision:** the contract call takes a `DatasetReference`; a lower-level
+  pure function takes a `DataFrame`. Filesystem access is isolated in
+  `loader.load_dataframe`.
+- **Reason:** decouples the profiler from paths/UI (per the task), and
+  makes the statistics logic trivially unit-testable with in-memory data.
+- **Alternatives considered:** profiler reads the path itself (rejected —
+  couples it to storage and complicates tests).
+- **Consequence:** slight API surface increase; both are exported.
+
+## 0008 — Raw copies are stored read-only with a JSON sidecar
+- **Decision:** `RawDataStore` writes `data/raw/<dataset_id>/<filename>`
+  at mode `0o444` plus `reference.json`. It refuses to reuse a directory.
+- **Reason:** enforces "raw data is immutable" at the OS level and keeps
+  provenance next to the data.
+- **Alternatives considered:** a database row for provenance (deferred to
+  Phase 3 lineage work); trusting code not to overwrite (rejected).
+- **Consequence:** processing stages must write elsewhere
+  (`data/processed/`), which matches Principle 12.
+
+## 0007 — Pydantic v2 models for `DatasetReference` and `DatasetProfile`
+- **Decision:** use the already-declared pydantic dependency for the
+  data-engine contract types.
+- **Reason:** free validation + JSON (de)serialisation; the profile must
+  be machine-readable for the quality engine, API, and AI engine.
+- **Alternatives considered:** dataclasses + manual `asdict` (more code,
+  no validation); TypedDict (no runtime guarantees).
+- **Consequence:** pydantic is now actually used (it was unused in Phase 0).
+
 ## 0006 — Minimal Phase 0 dependency set
 - **Decision:** `pyproject.toml` pins only pandas, numpy, scipy, pydantic,
   pyyaml (plus a `dev` extra: pytest, ruff, mypy). Engine stacks
