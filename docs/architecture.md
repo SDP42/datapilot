@@ -62,9 +62,12 @@ two is specified in
 
 **Phase 2 (in progress):** `data_engine.quality` — a read-only quality
 *analysis* engine (`DatasetProfile` + data → `QualityReport`), specified
-in [data-quality.md](data-quality.md). The cleaning engine is not started.
+in [data-quality.md](data-quality.md); and `data_engine.cleaning` — a
+deterministic, read-only cleaning *planner* (`QualityReport` →
+`CleaningPlan` of proposals), specified in [cleaning.md](cleaning.md).
+The cleaning *executor* is not started.
 
-**Future-phase components:** everything else — data cleaning,
+**Future-phase components:** everything else — cleaning execution,
 validation & lineage, EDA, feature engineering, `ml_engine`, `dl_engine`,
 `experimentation`, `explainability`, `ai_engine`, `database`, `backend`,
 `frontend`, MLOps.

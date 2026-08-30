@@ -22,6 +22,7 @@ ENGINE_PACKAGES = [
     "data_engine.quality",
     "data_engine.quality.checks",
     "data_engine.cleaning",
+    "data_engine.cleaning.rules",
     "data_engine.preprocessing",
     "data_engine.validation",
     "data_engine.feature_engineering",

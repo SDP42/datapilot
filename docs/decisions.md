@@ -4,6 +4,62 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0021 — Planner is deterministic and proposal-only; three safety statuses
+- **Decision:** `plan_cleaning` produces `CleaningOperation`s each tagged
+  `recommended` / `review_required` / `not_safe_to_automate`, with a
+  `status_reason`. Nothing executes. No LLM.
+- **Reason:** the prompt's DETECTION → PLANNING → EXECUTION split, and the
+  goal of a conservative system that surfaces choices rather than making
+  them. The status lets a later executor / AI planner triage safely.
+- **Alternatives considered:** a single boolean "auto/manual" (too coarse
+  — "drop a mostly-empty column" and "impute 30% missing" are both
+  "manual" but need different framing); emitting ready-to-run transforms
+  (rejected — that is execution).
+
+## 0020 — Planner takes an optional `DatasetProfile` alongside the report
+- **Decision:** `plan_cleaning(report, *, profile=None)`. With a profile
+  it picks median/mode by column type and verifies "strictly positive"
+  before proposing `log`; without one it degrades those to
+  `review_required` generic operations.
+- **Reason:** the `QualityReport` alone lacks column types and the column
+  minimum. Passing the profile (already a first-class pipeline artefact)
+  is cleaner than enlarging `QualityFinding.observed` for one consumer.
+- **Alternatives considered:** adding `inferred_type` / `minimum` to every
+  missing-value / skew finding (bloats the Phase 2 contract); making the
+  profile mandatory (the prompt's stated input is the `QualityReport`).
+- **Consequence:** `used_profile` is recorded on the `CleaningPlan`.
+
+## 0019 — Log transform proposed only for verified strictly-positive data
+- **Decision:** `high_skew` → `transform_distribution_log` **only** when
+  `profile.numeric_stats.minimum > 0`. Otherwise
+  `review_distribution_transform` with candidates (`log1p`, `yeo_johnson`,
+  `quantile`) and `plain_log_applicable: false`.
+- **Reason:** `log(x)` is undefined for `x ≤ 0`; blindly recommending it
+  is a correctness bug. The prompt calls this out explicitly.
+- **Alternatives considered:** always propose `log1p` (shifts the data and
+  is not always appropriate); propose `log` with a warning (still wrong).
+
+## 0018 — Outliers → an `investigation` operation, never a transformation
+- **Decision:** `potential_outliers` produces a `review_outliers`
+  operation with `category = investigation`,
+  `parameters.outlier_detected = true`,
+  `parameters.confirmed_error = false`, and no proposed treatment.
+- **Reason:** "outlier detected" ≠ "outlier is an error". Treatment needs
+  domain context (Principle 4). The planner must not propose deletion.
+- **Alternatives considered:** propose winsorising/capping as
+  `review_required` (rejected — still nudges toward altering real data
+  before anyone has looked at it).
+
+## 0017 — Class imbalance → `modeling_recommendation`, not a cleaning op
+- **Decision:** `class_imbalance` produces a `recommend_imbalance_strategy`
+  operation with `category = modeling_recommendation` and
+  `parameters.is_data_transformation = false`; the dataset is untouched.
+- **Reason:** imbalance is fixed during model training (class weights,
+  training-split resampling, threshold tuning), not by editing the data.
+- **Alternatives considered:** proposing dataset-level resampling here
+  (rejected — resampling anything but the training split leaks and
+  inflates metrics).
+
 ## 0016 — Quality engine loads the DataFrame; profiling contract unchanged
 - **Decision:** the quality engine takes a `DatasetReference` (or a
   DataFrame), loads the data read-only, and computes what it needs
