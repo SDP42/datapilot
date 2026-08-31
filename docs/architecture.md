@@ -84,7 +84,7 @@ structurally-invalid versions and **reports — never repairs**.
 earlier layers.
 
 **Phase 4 (in progress):** `data_engine.eda` — a deterministic,
-**analysis-only** layer. Nine foundations: (1) EDA — `analyze_dataframe`
+**analysis-only** layer. Ten foundations: (1) EDA — `analyze_dataframe`
 / `analyze_dataset_version` → a JSON-serialisable `EDAReport` (univariate
 numeric / categorical / datetime summaries, missingness, a small
 deterministic bivariate layer); (2) parametric hypothesis testing —
@@ -138,7 +138,15 @@ real effect sizes / p-values already produced by foundations 2–4
 chi-square p). `strength_score` is an association magnitude in [0, 1],
 explicitly not feature importance; p-value is a tie-break only; no new
 test, no MI estimator, no multiple-testing correction, no target
-inference; unavailable statistics stay `None` + a reason.
+inference; unavailable statistics stay `None` + a reason; (10) a **k-NN /
+Kraskov mutual-information estimator** —
+`estimate_mutual_information_knn(df, x_column, y_column, *, k=3)` →
+`KNNMutualInformationResult`, a **continuous** MI estimate for two
+**numeric** columns (KSG estimator 1, Chebyshev joint distance,
+`scipy.spatial.cKDTree`, `math.fsum` → row-order independent). It
+complements — never replaces — the binning-based `mutual_information`
+(identifier `"kraskov_knn"`); it is standalone (explicit columns, no
+target inference) and adds **no** `EDAReport` field.
 `EDAReport.statistical_tests`, `.effect_sizes`, `.nonparametric_tests`,
 `.distribution`, `.quality_cross_reference`, `.visualizations`,
 `.visualization_recommendations` and `.visualization_statistical_strength`

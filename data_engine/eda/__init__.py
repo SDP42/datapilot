@@ -57,6 +57,16 @@ from .effects import (
     cramers_v,
     mutual_information,
 )
+from .knn_mi import estimate_mutual_information_knn
+from .knn_mi_models import (
+    KNN_MI_DEFAULT_K,
+    KNN_MI_DISTANCE_METRIC,
+    KNN_MI_ENGINE_VERSION,
+    KNN_MI_ESTIMATOR_NAME,
+    KNN_MI_MIN_OBSERVATIONS,
+    KNNMutualInformationResult,
+    KNNMutualInformationStatus,
+)
 from .models import (
     EDA_ENGINE_VERSION,
     FIXED_QUANTILES,
@@ -158,6 +168,11 @@ __all__ = [
     "EDA_ENGINE_VERSION",
     "FIXED_QUANTILES",
     "HISTOGRAM_BIN_RULE",
+    "KNN_MI_DEFAULT_K",
+    "KNN_MI_DISTANCE_METRIC",
+    "KNN_MI_ENGINE_VERSION",
+    "KNN_MI_ESTIMATOR_NAME",
+    "KNN_MI_MIN_OBSERVATIONS",
     "MAX_ANOVA_COMBINATIONS",
     "MAX_BAR_CHARTS",
     "MAX_BOX_PLOTS",
@@ -203,6 +218,8 @@ __all__ = [
     "EffectStatus",
     "Histogram",
     "HistogramBin",
+    "KNNMutualInformationResult",
+    "KNNMutualInformationStatus",
     "MissingnessAnalysis",
     "NonParametricAnalysis",
     "NonParametricTestKind",
@@ -247,6 +264,7 @@ __all__ = [
     "correlation_ratio",
     "cramers_v",
     "cross_reference_eda_quality",
+    "estimate_mutual_information_knn",
     "export_visualization",
     "kendall_rank_correlation",
     "kruskal_wallis",

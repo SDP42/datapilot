@@ -9,7 +9,7 @@ future phases are not anticipated in code.
 | 1 | Data Ingestion & Profiling | **In progress** — CSV ingestion + profiling done; Parquet/Excel deferred |
 | 2 | Data Quality & Cleaning | **Done** — quality analysis + cleaning planning + safe cleaning execution (deterministic; no AI approval/reasoning yet) |
 | 3 | Validation & Data Lineage | **In progress** — `DatasetVersion` + store + lineage validation + lineage graph + opt-in auto-registration + cross-version diffing + version-integrity / family-consistency / version↔lineage-binding checks done; still filesystem-only (no database, no GC) |
-| 4 | EDA & Statistical Analysis | **In progress** — deterministic analysis-only `data_engine.eda`: EDA/univariate/bivariate, parametric tests, effect sizes, non-parametric tests, distribution analysis, EDA↔quality cross-reference, visualization foundation (chart-spec selection + in-memory Matplotlib **and Plotly** rendering + explicit chart export), target-aware visualization recommendation, statistical-strength visualization ranking. No dashboard/API; Phase 4 not complete |
+| 4 | EDA & Statistical Analysis | **In progress** — deterministic analysis-only `data_engine.eda`: EDA/univariate/bivariate, parametric tests, effect sizes, non-parametric tests, distribution analysis, EDA↔quality cross-reference, visualization foundation (chart-spec selection + in-memory Matplotlib **and Plotly** rendering + explicit chart export), target-aware visualization recommendation, statistical-strength visualization ranking, k-NN / Kraskov mutual-information estimator. No dashboard/API; Phase 4 not complete |
 | 5 | Automated Problem Understanding | Not started |
 | 6 | Feature Engineering | Not started |
 | 7 | Classical ML | Not started |
@@ -120,7 +120,7 @@ future phases are not anticipated in code.
   `None` + an explicit reason, never a fabricated `0` / `1` / `False`.
   Every section that `analyze_dataframe` populates is a backward-
   compatible **defaulted** field, so an `EDAReport` JSON serialised
-  before any given increment still validates. Nine foundations:
+  before any given increment still validates. Ten foundations:
 
   1. **EDA / univariate / bivariate** — numeric fixed-quantile stats,
      categorical deterministic top-N, datetime range, missingness; a
@@ -191,19 +191,34 @@ future phases are not anticipated in code.
      Target required; absent / datetime / all-missing / too-high-
      cardinality → `status = unavailable`. `analyze_dataframe`'s signature
      is unchanged and it leaves the field at its "no target" default.
+  10. **k-NN / Kraskov mutual-information estimator** —
+      `estimate_mutual_information_knn(df, x_column, y_column, *, k=3)` →
+      `KNNMutualInformationResult`. A **continuous** MI estimate for two
+      **numeric** columns using KSG estimator 1 (`I = ψ(k) + ψ(N) −
+      mean(ψ(n_x+1) + ψ(n_y+1))`, Chebyshev joint distance, strict-`<`
+      marginal counts via `np.nextafter(eps, 0)`, `scipy.spatial.cKDTree`,
+      `math.fsum` mean → row-order independent). Complements — does **not**
+      replace — the binning-based `mutual_information` (identifier
+      `estimator = "kraskov_knn"`, not `"mutual_information"`). Standalone
+      (explicit columns, no target inference, **not** wired into
+      `analyze_dataframe`, no `EDAReport` field). NaN / ±inf excluded;
+      small negatives clamped to `0.0` and noted; `unavailable` + reason
+      for absent / same / non-numeric column, too few observations,
+      invalid `k` (`bool` / non-`int` / `< 1` / `>= N`), or a constant
+      column. No new dependency (NumPy / SciPy).
 
   **Completed Phase-4 items:** (1) EDA / univariate / bivariate,
   (2) parametric tests, (3) effect sizes, (4) non-parametric tests,
   (5) distribution analysis, (6) EDA ↔ quality cross-reference,
   (7) visualization foundation, (8) target-aware visualization
   recommendation, (9) Plotly / chart export, (10) statistical-strength
-  visualization ranking.
+  visualization ranking, (11) k-NN / Kraskov mutual-information
+  estimator.
 
-  See [eda.md](eda.md). **Still remaining in Phase 4:** a k-NN / Kraskov
-  mutual-information estimator; mutual information for datetime columns;
-  paired / one-sided non-parametric tests (Wilcoxon signed-rank, sign,
-  Friedman); multiple-testing correction. Phase 4 is **not complete** and
-  is **not** marked Done.
+  See [eda.md](eda.md). **Still remaining in Phase 4:** mutual
+  information for datetime columns; paired / one-sided non-parametric
+  tests (Wilcoxon signed-rank, sign, Friedman); multiple-testing
+  correction. Phase 4 is **not complete** and is **not** marked Done.
 
 ### Phase 5 — Automated Problem Understanding
 - **Objective:** identify the ML task from data + objective.

@@ -4,7 +4,7 @@
 dataset (a DataFrame, or a registered `DatasetVersion`) into a structured,
 JSON-serialisable `EDAReport`.
 
-Phase 4 now contains nine foundations (all deterministic, read-only):
+Phase 4 now contains ten foundations (all deterministic, read-only):
 
 1. the **EDA foundation** — column classification, univariate analysis,
    missingness, and a small bivariate layer;
@@ -35,7 +35,13 @@ Phase 4 now contains nine foundations (all deterministic, read-only):
    the *strength of the statistical evidence* for the relationship each
    depicts, using real effect sizes / p-values already produced by
    foundations 2–4. Distinct from #8 (usefulness ≠ evidence strength);
-   no new statistical test, no MI estimator, no target inference.
+   no new statistical test, no MI estimator, no target inference;
+10. the **k-NN / Kraskov mutual-information estimator** —
+    `estimate_mutual_information_knn(df, x_column, y_column, *, k=3)`, a
+    **continuous** MI estimate for two numeric columns (KSG estimator 1,
+    no binning). Complements — does not replace — the binning-based
+    `mutual_information` in the effect-size foundation. Standalone,
+    explicit columns, no target inference.
 
 Phase 4 remains **in progress**.
 
@@ -684,8 +690,76 @@ independent categorical pair → Cramér's V = 0) is a real result, kept as
 ### Not implemented (later increments)
 
 Multiple-testing correction; a composite score that blends p-value into
-the magnitude; k-NN / Kraskov MI; datetime MI; any predictive or
-model-based ranking.
+the magnitude; any predictive or model-based ranking.
+
+## k-NN / Kraskov mutual-information estimator (`estimate_mutual_information_knn`)
+
+`estimate_mutual_information_knn(df, x_column, y_column, *, k=3) ->
+KNNMutualInformationResult` gives a **continuous** mutual-information
+estimate for **two numeric columns**, without any binning. It is a
+**standalone** analysis function — `x_column` / `y_column` are explicit,
+no target is inferred, and it is **not** wired into `analyze_dataframe`
+(no `EDAReport` field was added).
+
+### Distinct from the binning-based MI
+
+| | `effects.mutual_information` (foundation 3) | `estimate_mutual_information_knn` (this) |
+| --- | --- | --- |
+| method | discrete plug-in; numeric columns quantile-binned (`MI_NUMERIC_BINS = 10`) | continuous Kraskov / KSG estimator 1, no binning |
+| identifier | `mutual_information` | `estimator = "kraskov_knn"` |
+| inputs | any pair (numeric ∪ low-cardinality categorical) | numeric ↔ numeric only |
+
+The two are **not expected to agree numerically** — a test asserts they
+differ. The existing `mutual_information` / `EffectSizeAnalysis` /
+`analyze_effect_sizes` are unchanged.
+
+### Estimator (documented, reproducible)
+
+For the `N` rows where **both** values are finite (NaN and ±inf
+excluded), over `k` nearest neighbours:
+
+```
+I(X; Y) = ψ(k) + ψ(N) − (1/N) Σ_i [ ψ(n_x(i) + 1) + ψ(n_y(i) + 1) ]
+```
+
+- **Joint space** = the 2-D point `(x_i, y_i)`; **distance = Chebyshev /
+  L∞** (`distance_metric = "chebyshev"`).
+- `eps_i` = distance from point `i` to its `k`-th nearest neighbour in
+  the joint space (self excluded).
+- `n_x(i)` = number of *other* points with `|x − x_i|` **strictly less
+  than** `eps_i`, implemented as a closed-ball count at radius
+  `np.nextafter(eps_i, 0)` (the largest float below `eps_i`) — the
+  deterministic strict-`<` convention used by scikit-learn. `n_y(i)`
+  likewise on the Y marginal.
+- `ψ` = digamma. Neighbour search uses `scipy.spatial.cKDTree`; the
+  per-point mean is accumulated with `math.fsum`, so the result is
+  independent of DataFrame row order. The estimate is in **nats**.
+
+### Negative estimates
+
+KSG estimator 1 is **not bounded below** — near-independent variables can
+yield a tiny negative value from floating-point error. The result is
+rounded to 10 dp; a negative rounded value is **clamped to `0.0`** and
+the raw value is recorded in `notes`. A genuinely computed `0.0` is a
+`completed` result, distinct from `unavailable` / `None`.
+
+### Result model (`KNNMutualInformationResult`)
+
+`knn_mi_engine_version`, `estimator`, `distance_metric`, `x_column`,
+`y_column`, `status` (`completed` / `unavailable`), `reason`, `k`,
+`n_observations` (= paired finite rows), `mutual_information` (nats, ≥ 0,
+or `None`), `finite_pair_filtering`, `tie_handling`, `notes`. JSON
+primitive only; round-trips exactly.
+
+### `k` handling and unavailable behaviour
+
+`k` default **3** (Kraskov's recommendation). `status = unavailable` +
+`reason` when: a column is absent; `x_column == y_column`; a column is
+datetime / categorical / an unsupported type; no paired finite
+observations remain; fewer than `max(KNN_MI_MIN_OBSERVATIONS = 5, k + 1)`
+remain; `k` is a `bool` / non-`int` / `< 1` / `>= N`; a column is
+constant over the paired observations; or the estimate is non-finite.
+`k` is **never silently changed**. No randomness, no jitter, no seed.
 
 ## Missing / invalid data behaviour
 
@@ -722,8 +796,7 @@ the CSV read-only and analyses it.
 
 ## What remains for Phase 4
 
-- A k-NN / Kraskov mutual-information estimator; mutual information for
-  datetime columns.
+- Mutual information for datetime columns.
 - Paired / one-sided non-parametric tests (Wilcoxon signed-rank, sign
   test, Friedman).
 - Multiple-testing correction.

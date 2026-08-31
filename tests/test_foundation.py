@@ -56,6 +56,8 @@ ENGINE_PACKAGES = [
     "data_engine.eda.plotly_visualization",
     "data_engine.eda.statistical_strength_models",
     "data_engine.eda.statistical_strength",
+    "data_engine.eda.knn_mi_models",
+    "data_engine.eda.knn_mi",
     "data_engine.feature_engineering",
     "database",
     "dl_engine",

@@ -4,6 +4,43 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0056 — k-NN / Kraskov MI estimator: continuous KSG-1, standalone, additive to the binned MI
+- **Decision:** `data_engine/eda/knn_mi_models.py` + `knn_mi.py` add
+  `estimate_mutual_information_knn(df, x_column, y_column, *, k=3) ->
+  KNNMutualInformationResult`. The existing binning-based
+  `mutual_information` in `effects.py`, `EffectSizeAnalysis`, and
+  `analyze_effect_sizes` are **unchanged**. **No `EDAReport` field** is
+  added — the estimator is a standalone pairwise analysis function with
+  no natural battery and no target, so it follows the standalone
+  precedent; `analyze_dataframe`'s signature is unchanged.
+- **Reason:** Prompt 11 (Phase 4: "k-NN / Kraskov Mutual Information
+  Estimator") — the next roadmap item. "The implementation must use a
+  genuine k-NN / Kraskov-style MI estimator rather than simply delegating
+  to the existing binned `mutual_information()`"; "Do not automatically
+  wire the estimator into `analyze_dataframe`"; "Prefer implementing the
+  estimator directly with existing NumPy/SciPy".
+- **Estimator (KSG estimator 1, documented):** `I(X;Y) = ψ(k) + ψ(N) −
+  (1/N) Σ ψ(n_x+1) + ψ(n_y+1)`, in **nats**. Joint space = the 2-D point,
+  **Chebyshev / L∞** distance; `eps_i` = distance to the k-th joint
+  neighbour (`scipy.spatial.cKDTree.query`, self excluded); marginal
+  counts `n_x(i)` / `n_y(i)` = points **strictly within** `eps_i`,
+  implemented as a closed-ball count at radius `np.nextafter(eps_i, 0)`
+  (the scikit-learn strict-`<` convention); `ψ` = `scipy.special.digamma`.
+  The per-point mean uses `math.fsum`, so the result is **independent of
+  DataFrame row order** — no sorting of the input.
+- **Negative handling:** KSG-1 is not bounded below; the result is
+  rounded to 10 dp and a negative rounded value is **clamped to `0.0`**
+  with the raw value recorded in `notes`. A genuine `0.0` stays a
+  `completed` result, distinct from `unavailable` / `None`.
+- **Unavailable + reason:** column absent; `x_column == y_column`; a
+  column datetime / categorical / unsupported; no paired finite
+  observations; fewer than `max(KNN_MI_MIN_OBSERVATIONS = 5, k + 1)`;
+  `k` is `bool` / non-`int` / `< 1` / `>= N`; a column constant; or the
+  estimate non-finite. NaN / ±inf rows excluded (never imputed). `k`
+  default **3**, never silently changed. No randomness, no jitter, no
+  seed. `estimator = "kraskov_knn"` (never `"mutual_information"`). No new
+  dependency.
+
 ## 0055 — Statistical-strength visualization ranking: a distinct layer over existing evidence
 - **Decision:** `data_engine/eda/statistical_strength_models.py` +
   `statistical_strength.py` add
