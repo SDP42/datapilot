@@ -4,6 +4,49 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0055 — Statistical-strength visualization ranking: a distinct layer over existing evidence
+- **Decision:** `data_engine/eda/statistical_strength_models.py` +
+  `statistical_strength.py` add
+  `rank_visualizations_by_statistical_strength(df, target_column, *,
+  max_recommendations=10) -> VisualizationStatisticalStrengthAnalysis`,
+  plus `EDAReport.visualization_statistical_strength` (defaulted, left
+  unavailable by `analyze_dataframe` — signature unchanged). It is
+  **separate from** `recommend_visualizations`: that layer's fixed
+  usefulness heuristic, score constants, ordering, and target validation
+  are untouched, and the `score` / `strength_score` fields are never
+  conflated.
+- **Reason:** Prompt 10 (Phase 4: "Statistical-Strength Visualization
+  Ranking") — the next roadmap item. "The statistical-strength score must
+  … be based on actual statistical quantities, not fixed arbitrary
+  usefulness constants"; "Re-use existing implementations and outputs
+  wherever possible"; "Do NOT add new hypothesis-test families" / MI
+  estimators / multiple-testing correction; "Do not modify the semantics
+  of `recommend_visualizations`".
+- **Evidence, reused only:** scatter (numeric↔numeric target) → effect =
+  |Pearson r| from `analyze_bivariate`, p-value = Spearman from
+  `analyze_nonparametric` (the parametric layer provides no correlation
+  significance test); box plot (categorical↔numeric target) → effect =
+  correlation ratio η from `analyze_effect_sizes`, p-value = one-way
+  ANOVA from `analyze_statistics`; bar chart of a **non-target
+  categorical predictor** (categorical↔categorical target) → effect =
+  Cramér's V, p-value = chi-square. Histograms and the target's own bar
+  chart are never ranked (distribution ≠ relationship). Lookups key on
+  `frozenset({predictor, target})`, so battery caps / absences surface as
+  `None` + a reason.
+- **Ranking policy (documented, deterministic):** `strength_score` = the
+  association-magnitude effect size in [0, 1]. Order:
+  `(score-available, -strength_score, -effect_magnitude, p_value,
+  kind.value, tuple(columns))` — p-value is a **tie-break only**, never
+  the primary key, and is never blended into the magnitude. Ranks 1..N,
+  unique, then capped. Every entry carries `source_family` +
+  `source_index` (same convention as `VisualizationRecommendation`). The
+  score is explicitly **not** feature importance / predictive
+  performance. Unavailable p-value / effect size / score stay `None` +
+  `*_reason`; a genuinely computed `0.0` is kept as a real value. Target
+  validation mirrors the recommendation layer (missing / datetime /
+  unsupported / all-missing / cardinality > `MAX_VISUALIZATION_CATEGORIES`
+  → `status = unavailable`). No new dependency.
+
 ## 0054 — Plotly is a second rendering backend for the existing spec; export is a separate explicit step
 - **Decision:** `data_engine/eda/plotly_visualization.py` adds
   `render_plotly_visualization(df, spec) -> plotly.graph_objects.Figure`

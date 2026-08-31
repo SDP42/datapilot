@@ -84,7 +84,7 @@ structurally-invalid versions and **reports — never repairs**.
 earlier layers.
 
 **Phase 4 (in progress):** `data_engine.eda` — a deterministic,
-**analysis-only** layer. Eight foundations: (1) EDA — `analyze_dataframe`
+**analysis-only** layer. Nine foundations: (1) EDA — `analyze_dataframe`
 / `analyze_dataset_version` → a JSON-serialisable `EDAReport` (univariate
 numeric / categorical / datetime summaries, missingness, a small
 deterministic bivariate layer); (2) parametric hypothesis testing —
@@ -128,10 +128,21 @@ target_column, *, max_recommendations=10)` →
 *existing* specs against an **explicit, never-inferred** target by a
 documented visualisation-usefulness heuristic (score ∈ [0, 100], not
 predictive importance); absent / unsupported / empty targets return
-`unavailable` + a reason. `EDAReport.statistical_tests`, `.effect_sizes`,
-`.nonparametric_tests`, `.distribution`, `.quality_cross_reference`,
-`.visualizations` and `.visualization_recommendations` are
-backward-compatible defaulted fields. Read-only — no dataset, version
+`unavailable` + a reason; (9) a **statistical-strength** visualization
+ranking — `rank_visualizations_by_statistical_strength(df, target_column,
+*, max_recommendations=10)` → `VisualizationStatisticalStrengthAnalysis`,
+a **distinct** layer that ranks the same existing specs by the *strength
+of the statistical evidence* for the relationship each depicts, reading
+real effect sizes / p-values already produced by foundations 2–4
+(|Pearson r| + Spearman p, correlation ratio η + ANOVA p, Cramér's V +
+chi-square p). `strength_score` is an association magnitude in [0, 1],
+explicitly not feature importance; p-value is a tie-break only; no new
+test, no MI estimator, no multiple-testing correction, no target
+inference; unavailable statistics stay `None` + a reason.
+`EDAReport.statistical_tests`, `.effect_sizes`, `.nonparametric_tests`,
+`.distribution`, `.quality_cross_reference`, `.visualizations`,
+`.visualization_recommendations` and `.visualization_statistical_strength`
+are backward-compatible defaulted fields. Read-only — no dataset, version
 record, or lineage is modified; no new version is registered.
 [eda.md](eda.md).
 

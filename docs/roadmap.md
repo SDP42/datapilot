@@ -9,7 +9,7 @@ future phases are not anticipated in code.
 | 1 | Data Ingestion & Profiling | **In progress** — CSV ingestion + profiling done; Parquet/Excel deferred |
 | 2 | Data Quality & Cleaning | **Done** — quality analysis + cleaning planning + safe cleaning execution (deterministic; no AI approval/reasoning yet) |
 | 3 | Validation & Data Lineage | **In progress** — `DatasetVersion` + store + lineage validation + lineage graph + opt-in auto-registration + cross-version diffing + version-integrity / family-consistency / version↔lineage-binding checks done; still filesystem-only (no database, no GC) |
-| 4 | EDA & Statistical Analysis | **In progress** — deterministic analysis-only `data_engine.eda` with eight foundations: EDA/univariate/bivariate, parametric tests, effect sizes, non-parametric tests, distribution analysis, EDA↔quality cross-reference, visualization foundation (chart-spec selection + in-memory Matplotlib **and Plotly** rendering + explicit chart export), target-aware visualization recommendation. No dashboard/API; Phase 4 not complete |
+| 4 | EDA & Statistical Analysis | **In progress** — deterministic analysis-only `data_engine.eda`: EDA/univariate/bivariate, parametric tests, effect sizes, non-parametric tests, distribution analysis, EDA↔quality cross-reference, visualization foundation (chart-spec selection + in-memory Matplotlib **and Plotly** rendering + explicit chart export), target-aware visualization recommendation, statistical-strength visualization ranking. No dashboard/API; Phase 4 not complete |
 | 5 | Automated Problem Understanding | Not started |
 | 6 | Feature Engineering | Not started |
 | 7 | Classical ML | Not started |
@@ -120,7 +120,7 @@ future phases are not anticipated in code.
   `None` + an explicit reason, never a fabricated `0` / `1` / `False`.
   Every section that `analyze_dataframe` populates is a backward-
   compatible **defaulted** field, so an `EDAReport` JSON serialised
-  before any given increment still validates. Eight foundations:
+  before any given increment still validates. Nine foundations:
 
   1. **EDA / univariate / bivariate** — numeric fixed-quantile stats,
      categorical deterministic top-N, datetime range, missingness; a
@@ -175,12 +175,35 @@ future phases are not anticipated in code.
      all-missing / too-high-cardinality target returns
      `status = unavailable` + a reason. `analyze_dataframe`'s signature
      is unchanged and it leaves the field at its "no target" default.
+  9. **Statistical-strength visualization ranking** —
+     `rank_visualizations_by_statistical_strength(df, target_column, *,
+     max_recommendations=10)` → `VisualizationStatisticalStrengthAnalysis`.
+     A **distinct** layer from #8: it ranks the *existing* specs by the
+     **strength of the statistical evidence** for the relationship each
+     depicts, reading real effect sizes / p-values already produced by
+     foundations 2–4 — |Pearson r| + Spearman p (numeric↔numeric,
+     scatter), correlation ratio η + ANOVA p (categorical↔numeric, box),
+     Cramér's V + chi-square p (categorical↔categorical, predictor bar
+     chart). `strength_score` is an association magnitude in [0, 1],
+     explicitly **not** feature importance; the p-value is a tie-break
+     only. No new test, no MI estimator, no multiple-testing correction,
+     no target inference. Unavailable statistics stay `None` + a reason.
+     Target required; absent / datetime / all-missing / too-high-
+     cardinality → `status = unavailable`. `analyze_dataframe`'s signature
+     is unchanged and it leaves the field at its "no target" default.
 
-  See [eda.md](eda.md). **Remaining in Phase 4:** ranking visualizations
-  by statistical strength; a k-NN / Kraskov MI estimator and MI for
-  datetime columns; paired / one-sided non-parametric tests (Wilcoxon
-  signed-rank, sign, Friedman); multiple-testing correction. Phase 4 is
-  **not complete**.
+  **Completed Phase-4 items:** (1) EDA / univariate / bivariate,
+  (2) parametric tests, (3) effect sizes, (4) non-parametric tests,
+  (5) distribution analysis, (6) EDA ↔ quality cross-reference,
+  (7) visualization foundation, (8) target-aware visualization
+  recommendation, (9) Plotly / chart export, (10) statistical-strength
+  visualization ranking.
+
+  See [eda.md](eda.md). **Still remaining in Phase 4:** a k-NN / Kraskov
+  mutual-information estimator; mutual information for datetime columns;
+  paired / one-sided non-parametric tests (Wilcoxon signed-rank, sign,
+  Friedman); multiple-testing correction. Phase 4 is **not complete** and
+  is **not** marked Done.
 
 ### Phase 5 — Automated Problem Understanding
 - **Objective:** identify the ML task from data + objective.

@@ -21,6 +21,7 @@ from .effect_models import EffectSizeAnalysis
 from .nonparametric_models import NonParametricAnalysis
 from .recommendation_models import VisualizationRecommendationAnalysis
 from .statistical_models import StatisticalAnalysis
+from .statistical_strength_models import VisualizationStatisticalStrengthAnalysis
 from .visualization_models import VisualizationAnalysis
 
 EDA_ENGINE_VERSION = "1"
@@ -243,8 +244,19 @@ class EDAReport(BaseModel):
     visualization_recommendations: VisualizationRecommendationAnalysis = Field(
         default_factory=VisualizationRecommendationAnalysis,
         description=(
-            "Target-aware ranking of the visualization specs above. Empty/unavailable "
-            "unless populated via recommend_visualizations(df, target_column); "
+            "Target-aware *structural usefulness* ranking of the visualization specs "
+            "above. Empty/unavailable unless populated via "
+            "recommend_visualizations(df, target_column); analyze_dataframe takes no "
+            "target, so it leaves this at its default. Additive and defaulted."
+        ),
+    )
+    visualization_statistical_strength: VisualizationStatisticalStrengthAnalysis = Field(
+        default_factory=VisualizationStatisticalStrengthAnalysis,
+        description=(
+            "Target-aware *statistical-strength* ranking of the visualization specs "
+            "above (real effect sizes / p-values from the existing EDA layers). Distinct "
+            "from visualization_recommendations. Empty/unavailable unless populated via "
+            "rank_visualizations_by_statistical_strength(df, target_column); "
             "analyze_dataframe takes no target, so it leaves this at its default. "
             "Additive and defaulted."
         ),

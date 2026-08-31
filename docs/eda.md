@@ -4,7 +4,7 @@
 dataset (a DataFrame, or a registered `DatasetVersion`) into a structured,
 JSON-serialisable `EDAReport`.
 
-Phase 4 now contains eight foundations (all deterministic, read-only):
+Phase 4 now contains nine foundations (all deterministic, read-only):
 
 1. the **EDA foundation** — column classification, univariate analysis,
    missingness, and a small bivariate layer;
@@ -29,7 +29,13 @@ Phase 4 now contains eight foundations (all deterministic, read-only):
 8. the **target-aware visualization recommendation** — given an
    explicitly supplied target column, deterministically ranks the
    existing chart specs by a visualisation-usefulness heuristic (no
-   target inference, no model, no new chart kinds).
+   target inference, no model, no new chart kinds);
+9. the **statistical-strength visualization ranking** — given an
+   explicitly supplied target column, ranks the existing chart specs by
+   the *strength of the statistical evidence* for the relationship each
+   depicts, using real effect sizes / p-values already produced by
+   foundations 2–4. Distinct from #8 (usefulness ≠ evidence strength);
+   no new statistical test, no MI estimator, no target inference.
 
 Phase 4 remains **in progress**.
 
@@ -597,9 +603,89 @@ crash.
 
 ### Not implemented (later increments)
 
-Any use of statistical strength (correlation / effect size / p-value) to
-rank; target-type feasibility checks; a `ProblemSpec`; anything
-predictive.
+Target-type feasibility checks; a `ProblemSpec`; anything predictive.
+(Ranking by *statistical strength* is the next section — a separate
+layer.)
+
+## Statistical-strength visualization ranking (`rank_visualizations_by_statistical_strength`)
+
+`rank_visualizations_by_statistical_strength(df, target_column, *,
+max_recommendations=10) -> VisualizationStatisticalStrengthAnalysis`
+answers a **different** question from `recommend_visualizations`:
+
+| Layer | Question | Score meaning |
+| --- | --- | --- |
+| `recommend_visualizations` | which chart is *worth looking at*? | fixed usefulness heuristic (0–100) |
+| `rank_visualizations_by_statistical_strength` | which relationship has the *strongest measured association*? | real effect-size magnitude (0–1) |
+
+The two layers are independent; neither changes the other, and the
+`score` / `strength_score` fields are **never** reinterpreted across them.
+
+### Not wired into `analyze_dataframe`
+
+`analyze_dataframe` takes no target, so
+`EDAReport.visualization_statistical_strength` is a defaulted field left
+at `status = unavailable` / "no target column supplied". Populate it
+explicitly:
+
+```python
+eda = analyze_dataframe(df)
+strength = rank_visualizations_by_statistical_strength(df, "price")
+eda = eda.model_copy(update={"visualization_statistical_strength": strength})
+```
+
+### Evidence — reused from existing foundations only
+
+| Relationship | Visualization ranked | Effect size (magnitude) | p-value (supporting) |
+| --- | --- | --- | --- |
+| numeric ↔ numeric | scatter plot where the target is one column | `pearson_abs_r` = \|Pearson r\| (bivariate layer) | Spearman rank-correlation p (non-parametric layer) |
+| categorical ↔ numeric | box plot where the target is one column | `correlation_ratio_eta` = η (effect-size layer) | one-way ANOVA p (statistical layer) |
+| categorical ↔ categorical | bar chart of a **non-target categorical predictor** | `cramers_v` = Cramér's V (effect-size layer) | chi-square p (statistical layer) |
+
+No new test, distribution, normality, regression, permutation, bootstrap,
+or MI estimator is introduced. Histograms, and the target's own bar
+chart, are **never** ranked — they show a distribution, not a
+relationship, so assigning them a relationship strength would be
+fabrication.
+
+### Ranking policy (documented, deterministic)
+
+`strength_score` = the association-magnitude effect size on a **0–1
+scale**. It is **not** feature importance and **not** predictive
+performance; the p-value is supporting evidence only and a tiny p-value
+is never treated as a large effect. Entries are ordered by:
+
+1. an available `strength_score` first;
+2. `strength_score` descending;
+3. effect-size magnitude descending;
+4. `p_value` ascending — **tie-break only**, never the primary key;
+5. visualization kind;
+6. column names.
+
+Ranks are `1..N`, unique and sequential, then truncated to
+`max_recommendations` (with a note). Each entry carries
+`source_family` + `source_index` — a stable pointer into
+`EDAReport.visualizations`.
+
+### Unavailable / degenerate behaviour
+
+Whole-analysis `status = unavailable` (+ reason, empty list): target
+absent from the DataFrame; **datetime** target (datetime MI is a later
+increment); unsupported type; entirely missing; or a categorical target
+above `MAX_VISUALIZATION_CATEGORIES` (50). Per relationship: when the
+existing layer did not compute a statistic (battery cap, constant column,
+degenerate groups, …) the corresponding `p_value` / `effect_size_value` /
+`strength_score` is `None` with an explicit `*_reason` — never a
+fabricated `0` / `1` / `False`. A genuinely computed `0.0` (e.g. an
+independent categorical pair → Cramér's V = 0) is a real result, kept as
+`effect_size_value = 0.0`. An invalid `max_recommendations` is treated as
+`0` / the default with a note.
+
+### Not implemented (later increments)
+
+Multiple-testing correction; a composite score that blends p-value into
+the magnitude; k-NN / Kraskov MI; datetime MI; any predictive or
+model-based ranking.
 
 ## Missing / invalid data behaviour
 
@@ -636,11 +722,11 @@ the CSV read-only and analyses it.
 
 ## What remains for Phase 4
 
-- Ranking visualizations by *statistical* strength (correlation, effect
-  size, p-value) rather than the current structural heuristic.
-- A k-NN / Kraskov mutual-information estimator; MI for datetime columns.
+- A k-NN / Kraskov mutual-information estimator; mutual information for
+  datetime columns.
 - Paired / one-sided non-parametric tests (Wilcoxon signed-rank, sign
-  test, Friedman) and multiple-testing correction.
+  test, Friedman).
+- Multiple-testing correction.
 
 ## What is intentionally NOT implemented (Phase 5+ / out of scope)
 
