@@ -110,9 +110,18 @@ column keeps its location stats while only the undefined shape measures
 become `None`; (7) a visualization foundation — `analyze_visualizations`
 → `VisualizationAnalysis` of render-free `VisualizationSpec`s (histogram
 / bar chart / scatter plot / box plot), selected deterministically by
-DataFrame structure alone, plus `render_visualization(df, spec)` →
-an **in-memory** `matplotlib.figure.Figure` (Matplotlib only, no Plotly,
-no files, `df` unchanged); it is **not** a dashboard / frontend / API; (8) a target-aware
+DataFrame structure alone. The pipeline is **selection → rendering →
+export**: the same spec renders **in memory** through either
+`render_visualization(df, spec)` → `matplotlib.figure.Figure` or
+`render_plotly_visualization(df, spec)` → `plotly.graph_objects.Figure`
+(both reuse the shared `sturges_bin_count`, both raise on an unavailable
+spec, `df` unchanged); `export_visualization(figure, output_path, *,
+format=None, overwrite=False)` writes an already-rendered **Plotly**
+figure to the caller's **explicit** path (HTML always; PNG/SVG/PDF via
+the optional `kaleido` extra; no implicit directories, no silent
+overwrite). No analysis or rendering function writes a file; no `Figure`
+is stored in a Pydantic model. It is **not** a dashboard / frontend /
+API; (8) a target-aware
 visualization recommendation — `recommend_visualizations(df,
 target_column, *, max_recommendations=10)` →
 `VisualizationRecommendationAnalysis`, a deterministic ranking of the

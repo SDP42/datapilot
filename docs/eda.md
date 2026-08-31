@@ -21,9 +21,11 @@ Phase 4 now contains eight foundations (all deterministic, read-only):
 6. the **EDA ↔ data-quality cross-reference** — an observational layer
    that correlates EDA signals with existing `QualityReport` findings;
 7. the **visualization foundation** — deterministic structural selection
-   of chart specs (histogram / bar chart / scatter plot / box plot) plus
-   an optional in-memory Matplotlib renderer. **Not** a dashboard,
-   frontend, or API layer, and it writes no files;
+   of chart specs (histogram / bar chart / scatter plot / box plot),
+   in-memory rendering via **either** Matplotlib **or** Plotly, and
+   explicit chart export (HTML always; PNG/SVG/PDF with `kaleido`).
+   **Not** a dashboard, frontend, or API layer; only `export_visualization`
+   writes a file, and only where told;
 8. the **target-aware visualization recommendation** — given an
    explicitly supplied target column, deterministically ranks the
    existing chart specs by a visualisation-usefulness heuristic (no
@@ -415,13 +417,24 @@ Entries are sorted deterministically by
 Any new quality detection; severity re-scoring; natural-language
 explanation; a reverse "quality ← EDA" flow that would create findings.
 
-## Visualization foundation (`analyze_visualizations` / `render_visualization`)
+## Visualization foundation (`analyze_visualizations` / `render_visualization` / `render_plotly_visualization` / `export_visualization`)
 
-A deterministic chart layer with two separate steps. **Selection**
-produces render-free `VisualizationSpec` descriptions; **rendering** turns
-one spec into an in-memory Matplotlib figure. This is **not** a
-dashboard, frontend, or API layer; no image files are ever written and
-nothing is committed to the repo.
+A deterministic chart layer with three separate steps:
+
+```
+selection  ->  VisualizationSpec   (analyze_visualizations)
+rendering  ->  Figure              (render_visualization  |  render_plotly_visualization)
+export     ->  file                (export_visualization)
+```
+
+**Selection** produces render-free `VisualizationSpec` descriptions;
+**rendering** turns one spec into an in-memory figure (Matplotlib *or*
+Plotly — same spec, backend chosen by the caller); **export** writes an
+already-rendered Plotly figure to an explicit path. This is **not** a
+dashboard, frontend, or API layer. No analysis or rendering function
+writes a file — only `export_visualization` does, and only to the path
+the caller supplies. No `Figure` is ever stored in `EDAReport` or any
+Pydantic model.
 
 ### Supported chart kinds (exactly four)
 
@@ -465,28 +478,60 @@ constant numeric column (histogram — reuses the distribution layer's
 values (bar chart); no rows where both numerics are finite (scatter); no
 category with a finite numeric observation (box plot).
 
-### Rendering (`render_visualization(df, spec) -> matplotlib.figure.Figure`)
+### Two rendering backends — same spec, in memory only
 
-- **Matplotlib only** (object-oriented API — `matplotlib.figure.Figure`,
-  no `pyplot` global state). No Plotly.
-- The figure **stays in memory** — no file is written.
-- `df` is **not modified**; missing / non-finite values are **excluded,
-  never filled**; no synthetic data, no feature creation, no version
-  registration.
-- Histogram bin count reuses the **shared `sturges_bin_count`** helper —
-  the single source of truth, so the distribution layer and the
-  visualization layer never diverge.
-- Bar charts use the `(-count, value)` category order; box plots use
-  ascending category order — both matching the rest of EDA.
-- An **unavailable spec**, an unknown kind, or data that turns out to be
-  unplottable raises `VisualizationError`. A misleading empty figure is
-  never returned.
+Selection is **backend-independent**: a `VisualizationSpec` can be
+rendered by either backend, and neither backend performs selection,
+target inference, or ranking. Both:
+
+- keep the figure **in memory** — no file is written during rendering;
+- never modify `df`; **exclude** missing / non-finite values (never
+  fill); create no synthetic data, no columns, no version;
+- reuse the **shared `sturges_bin_count`** helper for the histogram bin
+  count — the single source of truth, so distribution / Matplotlib /
+  Plotly never diverge;
+- use the `(-count, value)` category order for bar charts and ascending
+  category order for box plots — matching the rest of EDA, with Plotly's
+  automatic category reordering explicitly frozen;
+- raise on an **unavailable spec**, an unknown kind, missing metadata, an
+  absent column, or data that has become unplottable — never a
+  misleading empty figure.
+
+| Function | Returns | Raises |
+| --- | --- | --- |
+| `render_visualization(df, spec)` | `matplotlib.figure.Figure` (object-oriented API, no `pyplot`) | `VisualizationError` |
+| `render_plotly_visualization(df, spec)` | `plotly.graph_objects.Figure` | `PlotlyVisualizationError` |
+
+The Matplotlib path is unchanged by the Plotly addition.
+
+### Chart export (`export_visualization`)
+
+`export_visualization(figure, output_path, *, format=None, overwrite=False)
+-> Path` writes an **already-rendered Plotly figure** to an explicit
+path. It is the only place in the EDA layer that writes a chart file —
+`analyze_dataframe`, `analyze_visualizations`, and both renderers never
+touch the filesystem.
+
+- **Plotly figures only** — a Matplotlib figure is rejected with
+  `PlotlyVisualizationError`.
+- **Format** is taken from `format=` if given, otherwise from the
+  `output_path` extension. Supported: **`html`** (needs no extra
+  tooling), **`png` / `svg` / `pdf`** (need the optional **`kaleido`**
+  package — `pip install "datapilot[export]"`). There is **no fallback**
+  between formats; an unsupported/missing format raises
+  `PlotlyVisualizationError`, and a missing `kaleido` raises an
+  actionable error.
+- **Explicit destination only** — writes exactly to `output_path`, never
+  chooses a location, and **does not create parent directories** (a
+  missing parent raises).
+- **Overwrite policy:** refuses to replace an existing file unless
+  `overwrite=True`.
+- The figure, `df`, and any spec are **not modified**.
 
 ### Not implemented (later increments)
 
-Plotly; chart export / image files; dashboards; a frontend or API; any
-styling/theming system. (Target-aware *ranking* of the specs is the next
-section.)
+Dashboards; a frontend or API; any styling/theming system; export of
+Matplotlib figures through this API; automatic file output from analysis.
 
 ## Target-aware visualization recommendation (`recommend_visualizations`)
 
@@ -591,18 +636,19 @@ the CSV read-only and analyses it.
 
 ## What remains for Phase 4
 
-- Plotly; chart export / image files.
 - Ranking visualizations by *statistical* strength (correlation, effect
-  size) rather than the current structural heuristic.
+  size, p-value) rather than the current structural heuristic.
 - A k-NN / Kraskov mutual-information estimator; MI for datetime columns.
 - Paired / one-sided non-parametric tests (Wilcoxon signed-rank, sign
   test, Friedman) and multiple-testing correction.
 
 ## What is intentionally NOT implemented (Phase 5+ / out of scope)
 
-- No Plotly, no dashboard / frontend / API, no chart export or committed
-  image files. The visualization foundation renders in memory only; the
-  recommendation layer needs an **explicit** target and never infers one.
+- No dashboard / frontend / API. Rendering (Matplotlib or Plotly) is
+  in-memory only; the **only** file writer is `export_visualization`,
+  and only to the caller's explicit path — never from `analyze_dataframe`.
+  The recommendation layer needs an **explicit** target and never infers
+  one.
 - No automated problem understanding, target inference, or feature
   selection / feature engineering.
 - No ML / DL / experiment tracking / SHAP / LLM / API / frontend /

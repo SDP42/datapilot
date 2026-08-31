@@ -94,6 +94,11 @@ from .nonparametric_models import (
     NonParametricTestResult,
     NonParametricTestStatus,
 )
+from .plotly_visualization import (
+    PlotlyVisualizationError,
+    export_visualization,
+    render_plotly_visualization,
+)
 from .recommendation_models import (
     MAX_VISUALIZATION_RECOMMENDATIONS,
     RECOMMENDATION_ENGINE_VERSION,
@@ -193,6 +198,7 @@ __all__ = [
     "NumericColumnAnalysis",
     "NumericDistribution",
     "NumericPairCorrelation",
+    "PlotlyVisualizationError",
     "QuantileValue",
     "StatisticalAnalysis",
     "StatisticalTestResult",
@@ -224,12 +230,14 @@ __all__ = [
     "correlation_ratio",
     "cramers_v",
     "cross_reference_eda_quality",
+    "export_visualization",
     "kendall_rank_correlation",
     "kruskal_wallis",
     "mann_whitney_u",
     "mutual_information",
     "one_way_anova",
     "recommend_visualizations",
+    "render_plotly_visualization",
     "render_visualization",
     "spearman_rank_correlation",
     "welch_t_test",

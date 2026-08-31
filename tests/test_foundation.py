@@ -53,6 +53,7 @@ ENGINE_PACKAGES = [
     "data_engine.eda.visualization",
     "data_engine.eda.recommendation_models",
     "data_engine.eda.recommendations",
+    "data_engine.eda.plotly_visualization",
     "data_engine.feature_engineering",
     "database",
     "dl_engine",

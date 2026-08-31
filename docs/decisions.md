@@ -4,6 +4,38 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0054 — Plotly is a second rendering backend for the existing spec; export is a separate explicit step
+- **Decision:** `data_engine/eda/plotly_visualization.py` adds
+  `render_plotly_visualization(df, spec) -> plotly.graph_objects.Figure`
+  and `export_visualization(figure, output_path, *, format=None,
+  overwrite=False) -> Path`, plus `PlotlyVisualizationError`. The
+  Matplotlib path (`render_visualization`), `analyze_visualizations`, and
+  the target-aware recommendation scoring are **unchanged**. **No new
+  `EDAReport` field** — the existing `VisualizationSpec`s plus standalone
+  render/export functions are sufficient, and a `Figure` must never live
+  in a Pydantic model. `plotly>=5.0` is added to `[project.dependencies]`;
+  `kaleido` is an optional `[project.optional-dependencies] export` extra.
+- **Reason:** Prompt 10 (Phase 4: "Plotly Visualization + Chart Export
+  Foundation"): "Do NOT replace Matplotlib with Plotly"; "The Plotly
+  implementation must consume the EXISTING `VisualizationSpec`"; "prefer
+  NO new EDAReport field"; "No analysis function should silently write
+  files." Plotly / chart export was an explicit remaining Phase-4 item in
+  the roadmap.
+- **How it works:** both backends share the same degenerate-data rules
+  and reuse `sturges_bin_count` for the histogram bin count (numpy
+  `histogram` → `go.Bar`, so Plotly's auto-binning can't drift). Bar and
+  box charts freeze category order with
+  `update_xaxes(categoryorder="array", categoryarray=...)`. Rendering
+  raises `PlotlyVisualizationError` for an unavailable spec, unknown
+  kind, missing metadata, an absent column, or data that has become
+  unplottable — never an empty figure. `export_visualization` accepts
+  **only** a `plotly.graph_objects.Figure`; resolves the format from
+  `format=` or the path extension (`html` / `png` / `svg` / `pdf`, no
+  fallback between them); writes **only** to the given path; never
+  creates parent directories; refuses to overwrite unless
+  `overwrite=True`; HTML needs no extra tooling, PNG/SVG/PDF raise an
+  actionable error when `kaleido` is absent.
+
 ## 0053 — Target-aware visualization recommendation: ranks existing specs, explicit target, fixed heuristic score
 - **Decision:** `data_engine/eda/recommendation_models.py` +
   `recommendations.py` add `recommend_visualizations(df, target_column,

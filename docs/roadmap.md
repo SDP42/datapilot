@@ -9,7 +9,7 @@ future phases are not anticipated in code.
 | 1 | Data Ingestion & Profiling | **In progress** — CSV ingestion + profiling done; Parquet/Excel deferred |
 | 2 | Data Quality & Cleaning | **Done** — quality analysis + cleaning planning + safe cleaning execution (deterministic; no AI approval/reasoning yet) |
 | 3 | Validation & Data Lineage | **In progress** — `DatasetVersion` + store + lineage validation + lineage graph + opt-in auto-registration + cross-version diffing + version-integrity / family-consistency / version↔lineage-binding checks done; still filesystem-only (no database, no GC) |
-| 4 | EDA & Statistical Analysis | **In progress** — deterministic analysis-only EDA foundation + parametric tests (Welch t-test, one-way ANOVA, chi-square) + effect sizes (Cramér's V, correlation ratio, mutual information) + non-parametric tests (Spearman, Kendall, Mann-Whitney U, Kruskal-Wallis H) + richer distribution analysis (variance/skew/excess-kurtosis, full quantiles, structured histogram) + EDA↔quality cross-reference + visualization foundation (deterministic chart-spec selection + in-memory Matplotlib rendering; histogram / bar / scatter / box) + target-aware visualization recommendation (deterministic ranking of existing specs against an explicit target) in `data_engine.eda`; no dashboard/API |
+| 4 | EDA & Statistical Analysis | **In progress** — deterministic analysis-only `data_engine.eda` with eight foundations: EDA/univariate/bivariate, parametric tests, effect sizes, non-parametric tests, distribution analysis, EDA↔quality cross-reference, visualization foundation (chart-spec selection + in-memory Matplotlib **and Plotly** rendering + explicit chart export), target-aware visualization recommendation. No dashboard/API; Phase 4 not complete |
 | 5 | Automated Problem Understanding | Not started |
 | 6 | Feature Engineering | Not started |
 | 7 | Classical ML | Not started |
@@ -106,73 +106,81 @@ future phases are not anticipated in code.
 ### Phase 4 — EDA & Statistical Analysis
 - **Objective:** understand relationships in the data.
 - **Components:** univariate/bivariate analysis, correlation, statistical
-  tests (SciPy/statsmodels), Matplotlib/Plotly figure generation.
-- **Output:** structured EDA report with figures.
-- **Status:** `data_engine.eda` implemented — a deterministic,
-  **analysis-only** foundation: `analyze_dataframe` /
-  `analyze_dataset_version` → a JSON-serialisable `EDAReport` with
-  univariate summaries (numeric fixed-quantile stats, categorical
-  deterministic top-N, datetime range, missingness) and a small
-  deterministic bivariate layer (numeric↔numeric Pearson correlation,
-  categorical↔numeric grouped stats, categorical↔categorical contingency
-  counts). Read-only — no dataset / version record / lineage is modified,
-  no new version is registered; the version-aware entrypoint reuses
-  `verify_version_integrity`. A **statistical hypothesis-testing
-  foundation** is now added — `analyze_statistics` /
-  `welch_t_test` / `one_way_anova` / `chi_square_independence` →
-  `StatisticalTestResult` / `StatisticalAnalysis` (SciPy, deterministic,
-  bounded caps, `EDAReport.statistical_tests` defaulted for backward
-  compatibility). An **effect-size / association-measure foundation** is
-  also added — `analyze_effect_sizes` / `cramers_v` / `correlation_ratio`
-  / `mutual_information` → `EffectSizeResult` / `EffectSizeAnalysis`
-  (Cramér's V, correlation ratio η, discrete plug-in mutual information;
-  bounded deterministic caps; `EDAReport.effect_sizes` defaulted for
-  backward compatibility). Unavailable tests / measures report `None` +
-  an explicit reason, never a fake value; mutual information involving a
-  numeric column is a documented binning-based estimate. A
-  **non-parametric hypothesis-testing foundation** is also added —
-  `analyze_nonparametric` / `spearman_rank_correlation` /
-  `kendall_rank_correlation` / `mann_whitney_u` / `kruskal_wallis` →
-  `NonParametricTestResult` / `NonParametricAnalysis` (SciPy,
-  deterministic, bounded caps, fixed `alternative="two-sided"` for
-  Mann-Whitney; `EDAReport.nonparametric_tests` defaulted for backward
-  compatibility). A **distribution-analysis foundation** is also added —
-  `analyze_distribution` → `NumericDistribution` / `DistributionAnalysis`
-  (variance, adjusted Fisher–Pearson skewness, excess/Fisher kurtosis,
-  a 0.00–1.00 quantile set, and a structured render-free histogram with a
-  documented Sturges bin rule; constant columns keep location stats while
-  undefined shape measures are `None`; `EDAReport.distribution`
-  defaulted). Finally an **EDA ↔ data-quality cross-reference** —
-  `cross_reference_eda_quality(eda_result, quality_report)` →
-  `EDAQualityCrossReference`, an observational layer that correlates
-  existing EDA signals with existing `QualityReport` findings (no new
-  detection, no target inference, no LLM text, inputs never mutated); it
-  is independently callable and `EDAReport.quality_cross_reference` is a
-  defaulted field that `analyze_dataframe` leaves empty (its signature is
-  unchanged). Finally a **visualization foundation** —
-  `analyze_visualizations(df)` → `VisualizationAnalysis` of render-free
-  `VisualizationSpec`s (histogram / bar chart / scatter plot / box plot),
-  selected deterministically by DataFrame structure alone (alphabetical
-  order, per-family caps of 50, unavailable-with-reason for degenerate
-  columns, no target inference), plus `render_visualization(df, spec)`
-  which produces an **in-memory** `matplotlib.figure.Figure` (Matplotlib
-  only, no Plotly, no files written, `df` unchanged, missing values
-  excluded). `EDAReport.visualizations` is a defaulted field populated by
-  `analyze_dataframe`. Matplotlib is added as a runtime dependency in that
-  increment. On top of it, a **target-aware visualization recommendation**
-  layer — `recommend_visualizations(df, target_column, *,
-  max_recommendations=10)` → `VisualizationRecommendationAnalysis` —
-  deterministically ranks the *existing* specs by a documented
-  visualisation-usefulness heuristic (score ∈ [0, 100], **not** predictive
-  importance; ties broken by kind then column names). The target is
-  **required and never inferred**; an absent / datetime / all-missing /
-  too-high-cardinality target returns `status = unavailable` + a reason.
-  `EDAReport.visualization_recommendations` is a defaulted field that
-  `analyze_dataframe` leaves at its "no target" default (its signature is
-  unchanged). See [eda.md](eda.md). **Not yet:** Plotly, chart export /
-  dashboards / API, ranking by statistical strength, a k-NN MI estimator,
-  paired / one-sided non-parametric tests, multiple-testing correction.
-  Phase 4 is **not complete**.
+  tests (SciPy), deterministic distribution analysis, an EDA↔quality
+  cross-reference, in-memory Matplotlib **and** Plotly figure generation,
+  and explicit chart export.
+- **Output:** a JSON-serialisable `EDAReport`; renderable chart specs;
+  optional exported chart files (only when the caller asks).
+- **Status:** `data_engine.eda` — a deterministic, **analysis-only**
+  layer. `analyze_dataframe(df, *, dataset_id="adhoc",
+  dataset_version_id=None)` / `analyze_dataset_version(version)` →
+  `EDAReport`. Read-only — no dataset / version record / lineage is
+  modified, no new version is registered; the version-aware entrypoint
+  reuses `verify_version_integrity`. Every unavailable statistic is
+  `None` + an explicit reason, never a fabricated `0` / `1` / `False`.
+  Every section that `analyze_dataframe` populates is a backward-
+  compatible **defaulted** field, so an `EDAReport` JSON serialised
+  before any given increment still validates. Eight foundations:
+
+  1. **EDA / univariate / bivariate** — numeric fixed-quantile stats,
+     categorical deterministic top-N, datetime range, missingness; a
+     small bivariate layer (numeric↔numeric Pearson, categorical↔numeric
+     grouped stats, categorical↔categorical contingency counts).
+  2. **Parametric tests** — `analyze_statistics` / `welch_t_test` /
+     `one_way_anova` / `chi_square_independence` → `StatisticalAnalysis`.
+  3. **Effect sizes** — `analyze_effect_sizes` / `cramers_v` /
+     `correlation_ratio` / `mutual_information` → `EffectSizeAnalysis`
+     (MI involving a numeric column is a documented binning estimate).
+  4. **Non-parametric tests** — `analyze_nonparametric` /
+     `spearman_rank_correlation` / `kendall_rank_correlation` /
+     `mann_whitney_u` / `kruskal_wallis` → `NonParametricAnalysis`
+     (Mann-Whitney fixed to `alternative="two-sided"`).
+  5. **Distribution analysis** — `analyze_distribution` →
+     `DistributionAnalysis` (variance, adjusted Fisher–Pearson skewness,
+     excess/Fisher kurtosis, a 0.00–1.00 quantile set, a structured
+     render-free histogram with a documented Sturges bin rule; constant
+     columns keep location stats while undefined shape measures are
+     `None`).
+  6. **EDA ↔ data-quality cross-reference** —
+     `cross_reference_eda_quality(eda_result, quality_report)` →
+     `EDAQualityCrossReference`, observational only (no new detection, no
+     target inference, no LLM text, inputs never mutated). Independently
+     callable; `analyze_dataframe` takes no `QualityReport` so it leaves
+     the field empty.
+  7. **Visualization foundation** — `analyze_visualizations(df)` →
+     `VisualizationAnalysis` of render-free `VisualizationSpec`s
+     (histogram / bar chart / scatter plot / box plot), selected
+     deterministically by DataFrame structure alone (alphabetical order,
+     per-family caps of 50, `unavailable` + reason for degenerate
+     columns, no target inference). The same spec renders through
+     **either** backend — `render_visualization(df, spec)` →
+     `matplotlib.figure.Figure`, or `render_plotly_visualization(df,
+     spec)` → `plotly.graph_objects.Figure` — both **in-memory**, both
+     reusing the shared `sturges_bin_count`, both raising on an
+     unavailable / unplottable spec. `export_visualization(figure,
+     output_path, *, format=None, overwrite=False)` writes an
+     already-rendered Plotly figure to an **explicit** path (HTML with no
+     extra tooling; PNG / SVG / PDF via the optional `kaleido` extra;
+     never creates directories, refuses silent overwrite). No `Figure` is
+     stored in `EDAReport`; only `export_visualization` writes a file.
+     Adds `matplotlib>=3.8` and `plotly>=5.0` as runtime dependencies
+     (`kaleido` is an optional `[export]` extra).
+  8. **Target-aware visualization recommendation** —
+     `recommend_visualizations(df, target_column, *,
+     max_recommendations=10)` → `VisualizationRecommendationAnalysis`,
+     a deterministic ranking of the *existing* specs by a documented
+     visualisation-usefulness heuristic (score ∈ [0, 100], **not**
+     predictive importance; ties broken by kind then column names). The
+     target is **required and never inferred**; an absent / datetime /
+     all-missing / too-high-cardinality target returns
+     `status = unavailable` + a reason. `analyze_dataframe`'s signature
+     is unchanged and it leaves the field at its "no target" default.
+
+  See [eda.md](eda.md). **Remaining in Phase 4:** ranking visualizations
+  by statistical strength; a k-NN / Kraskov MI estimator and MI for
+  datetime columns; paired / one-sided non-parametric tests (Wilcoxon
+  signed-rank, sign, Friedman); multiple-testing correction. Phase 4 is
+  **not complete**.
 
 ### Phase 5 — Automated Problem Understanding
 - **Objective:** identify the ML task from data + objective.
