@@ -4,7 +4,7 @@
 dataset (a DataFrame, or a registered `DatasetVersion`) into a structured,
 JSON-serialisable `EDAReport`.
 
-Phase 4 now contains seven foundations (all deterministic, read-only):
+Phase 4 now contains eight foundations (all deterministic, read-only):
 
 1. the **EDA foundation** — column classification, univariate analysis,
    missingness, and a small bivariate layer;
@@ -23,7 +23,11 @@ Phase 4 now contains seven foundations (all deterministic, read-only):
 7. the **visualization foundation** — deterministic structural selection
    of chart specs (histogram / bar chart / scatter plot / box plot) plus
    an optional in-memory Matplotlib renderer. **Not** a dashboard,
-   frontend, or API layer, and it writes no files.
+   frontend, or API layer, and it writes no files;
+8. the **target-aware visualization recommendation** — given an
+   explicitly supplied target column, deterministically ranks the
+   existing chart specs by a visualisation-usefulness heuristic (no
+   target inference, no model, no new chart kinds).
 
 Phase 4 remains **in progress**.
 
@@ -480,8 +484,77 @@ category with a finite numeric observation (box plot).
 
 ### Not implemented (later increments)
 
-Plotly; automated chart *recommendation* (target-aware); chart export /
-image files; dashboards; a frontend or API; any styling/theming system.
+Plotly; chart export / image files; dashboards; a frontend or API; any
+styling/theming system. (Target-aware *ranking* of the specs is the next
+section.)
+
+## Target-aware visualization recommendation (`recommend_visualizations`)
+
+`recommend_visualizations(df, target_column, *, max_recommendations=10)
+-> VisualizationRecommendationAnalysis` ranks the **existing** chart specs
+(from `analyze_visualizations`) by how useful each is for looking at a
+relationship with an **explicitly supplied** target column. It is a thin
+layer on top of the visualization foundation: it adds **no new chart
+kinds**, runs **no model**, **never infers a target**, and uses no
+randomness.
+
+### Not wired into `analyze_dataframe`
+
+`analyze_dataframe` takes no target and its signature is unchanged, so
+`EDAReport.visualization_recommendations` is a defaulted field left at its
+"no target supplied" default (`status = unavailable`, empty
+`recommendations`). Populate it explicitly:
+
+```python
+eda = analyze_dataframe(df)
+eda = eda.model_copy(
+    update={"visualization_recommendations": recommend_visualizations(df, "price")}
+)
+```
+
+### Scoring convention (fixed, documented — NOT predictive importance)
+
+The `score` is a `0-100` visualisation-usefulness heuristic. It does
+**not** represent predictive importance or any statistical quantity.
+
+| Target kind | Chart | Score |
+| --- | --- | --- |
+| **numeric** | scatter plot where the target is one of the two columns | 90 |
+| **numeric** | box plot where the target is the numeric value and the other column is categorical | 80 |
+| **numeric** | histogram of the target | 70 |
+| **categorical** | box plot where the target is the category and the other column is numeric | 90 |
+| **categorical** | bar chart of the target | 80 |
+| **categorical** | histogram of a numeric predictor that *also* has a box plot against the target | 50 |
+
+Only `available` specs are eligible. Anything not matching a rule above is
+not recommended.
+
+### Deterministic ranking
+
+Recommendations are sorted by **(1) score descending, (2) visualization
+kind, (3) column names**, then assigned unique `rank`s `1..N` and
+truncated to `max_recommendations` (a truncation note is added). Each
+recommendation carries `source_family` + `source_index` — a deterministic
+pointer back to the exact spec in `EDAReport.visualizations`.
+
+### Unavailable / degenerate behaviour
+
+`status = unavailable` with an explicit `reason` (and empty
+`recommendations`) when the target column: does not exist in the
+DataFrame; is a datetime column (only numeric / categorical targets are
+supported); has no non-null observations; or (categorical only) has
+cardinality above `MAX_VISUALIZATION_CATEGORIES` (50). A valid target
+with no matching available spec returns `status = recommended` with an
+empty list and a note — it does not fabricate a recommendation. An
+invalid `max_recommendations` (negative, or not an `int`) is handled
+deterministically (treated as `0` / the default) with a note, never a
+crash.
+
+### Not implemented (later increments)
+
+Any use of statistical strength (correlation / effect size / p-value) to
+rank; target-type feasibility checks; a `ProblemSpec`; anything
+predictive.
 
 ## Missing / invalid data behaviour
 
@@ -518,9 +591,9 @@ the CSV read-only and analyses it.
 
 ## What remains for Phase 4
 
-- Automated, target-aware chart *recommendation* (the current
-  visualization layer is deliberately structural only); Plotly; chart
-  export.
+- Plotly; chart export / image files.
+- Ranking visualizations by *statistical* strength (correlation, effect
+  size) rather than the current structural heuristic.
 - A k-NN / Kraskov mutual-information estimator; MI for datetime columns.
 - Paired / one-sided non-parametric tests (Wilcoxon signed-rank, sign
   test, Friedman) and multiple-testing correction.
@@ -528,8 +601,8 @@ the CSV read-only and analyses it.
 ## What is intentionally NOT implemented (Phase 5+ / out of scope)
 
 - No Plotly, no dashboard / frontend / API, no chart export or committed
-  image files, no target-aware chart recommendation. The visualization
-  foundation renders in memory only.
+  image files. The visualization foundation renders in memory only; the
+  recommendation layer needs an **explicit** target and never infers one.
 - No automated problem understanding, target inference, or feature
   selection / feature engineering.
 - No ML / DL / experiment tracking / SHAP / LLM / API / frontend /

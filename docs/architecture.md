@@ -84,7 +84,7 @@ structurally-invalid versions and **reports — never repairs**.
 earlier layers.
 
 **Phase 4 (in progress):** `data_engine.eda` — a deterministic,
-**analysis-only** layer. Seven foundations: (1) EDA — `analyze_dataframe`
+**analysis-only** layer. Eight foundations: (1) EDA — `analyze_dataframe`
 / `analyze_dataset_version` → a JSON-serialisable `EDAReport` (univariate
 numeric / categorical / datetime summaries, missingness, a small
 deterministic bivariate layer); (2) parametric hypothesis testing —
@@ -112,9 +112,16 @@ become `None`; (7) a visualization foundation — `analyze_visualizations`
 / bar chart / scatter plot / box plot), selected deterministically by
 DataFrame structure alone, plus `render_visualization(df, spec)` →
 an **in-memory** `matplotlib.figure.Figure` (Matplotlib only, no Plotly,
-no files, `df` unchanged); it is **not** a dashboard / frontend / API.
-`EDAReport.statistical_tests`, `.effect_sizes`, `.nonparametric_tests`,
-`.distribution`, `.quality_cross_reference` and `.visualizations` are
+no files, `df` unchanged); it is **not** a dashboard / frontend / API; (8) a target-aware
+visualization recommendation — `recommend_visualizations(df,
+target_column, *, max_recommendations=10)` →
+`VisualizationRecommendationAnalysis`, a deterministic ranking of the
+*existing* specs against an **explicit, never-inferred** target by a
+documented visualisation-usefulness heuristic (score ∈ [0, 100], not
+predictive importance); absent / unsupported / empty targets return
+`unavailable` + a reason. `EDAReport.statistical_tests`, `.effect_sizes`,
+`.nonparametric_tests`, `.distribution`, `.quality_cross_reference`,
+`.visualizations` and `.visualization_recommendations` are
 backward-compatible defaulted fields. Read-only — no dataset, version
 record, or lineage is modified; no new version is registered.
 [eda.md](eda.md).

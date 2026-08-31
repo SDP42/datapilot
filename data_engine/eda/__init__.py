@@ -94,6 +94,15 @@ from .nonparametric_models import (
     NonParametricTestResult,
     NonParametricTestStatus,
 )
+from .recommendation_models import (
+    MAX_VISUALIZATION_RECOMMENDATIONS,
+    RECOMMENDATION_ENGINE_VERSION,
+    VisualizationRecommendation,
+    VisualizationRecommendationAnalysis,
+    VisualizationRecommendationKind,
+    VisualizationRecommendationStatus,
+)
+from .recommendations import recommend_visualizations
 from .statistical_models import (
     DEFAULT_ALPHA,
     MAX_ANOVA_COMBINATIONS,
@@ -151,7 +160,9 @@ __all__ = [
     "MAX_SPEARMAN_PAIRS",
     "MAX_TTEST_PAIRS",
     "MAX_VISUALIZATION_CATEGORIES",
+    "MAX_VISUALIZATION_RECOMMENDATIONS",
     "MI_NUMERIC_BINS",
+    "RECOMMENDATION_ENGINE_VERSION",
     "BivariateSummary",
     "CategoricalColumnAnalysis",
     "CategoricalContingency",
@@ -192,6 +203,10 @@ __all__ = [
     "VisualizationAnalysis",
     "VisualizationError",
     "VisualizationKind",
+    "VisualizationRecommendation",
+    "VisualizationRecommendationAnalysis",
+    "VisualizationRecommendationKind",
+    "VisualizationRecommendationStatus",
     "VisualizationSpec",
     "VisualizationStatus",
     "analyze_bivariate",
@@ -214,6 +229,7 @@ __all__ = [
     "mann_whitney_u",
     "mutual_information",
     "one_way_anova",
+    "recommend_visualizations",
     "render_visualization",
     "spearman_rank_correlation",
     "welch_t_test",

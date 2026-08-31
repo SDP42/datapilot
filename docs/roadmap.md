@@ -9,7 +9,7 @@ future phases are not anticipated in code.
 | 1 | Data Ingestion & Profiling | **In progress** — CSV ingestion + profiling done; Parquet/Excel deferred |
 | 2 | Data Quality & Cleaning | **Done** — quality analysis + cleaning planning + safe cleaning execution (deterministic; no AI approval/reasoning yet) |
 | 3 | Validation & Data Lineage | **In progress** — `DatasetVersion` + store + lineage validation + lineage graph + opt-in auto-registration + cross-version diffing + version-integrity / family-consistency / version↔lineage-binding checks done; still filesystem-only (no database, no GC) |
-| 4 | EDA & Statistical Analysis | **In progress** — deterministic analysis-only EDA foundation + parametric tests (Welch t-test, one-way ANOVA, chi-square) + effect sizes (Cramér's V, correlation ratio, mutual information) + non-parametric tests (Spearman, Kendall, Mann-Whitney U, Kruskal-Wallis H) + richer distribution analysis (variance/skew/excess-kurtosis, full quantiles, structured histogram) + EDA↔quality cross-reference + visualization foundation (deterministic chart-spec selection + in-memory Matplotlib rendering; histogram / bar / scatter / box) in `data_engine.eda`; no dashboard/API |
+| 4 | EDA & Statistical Analysis | **In progress** — deterministic analysis-only EDA foundation + parametric tests (Welch t-test, one-way ANOVA, chi-square) + effect sizes (Cramér's V, correlation ratio, mutual information) + non-parametric tests (Spearman, Kendall, Mann-Whitney U, Kruskal-Wallis H) + richer distribution analysis (variance/skew/excess-kurtosis, full quantiles, structured histogram) + EDA↔quality cross-reference + visualization foundation (deterministic chart-spec selection + in-memory Matplotlib rendering; histogram / bar / scatter / box) + target-aware visualization recommendation (deterministic ranking of existing specs against an explicit target) in `data_engine.eda`; no dashboard/API |
 | 5 | Automated Problem Understanding | Not started |
 | 6 | Feature Engineering | Not started |
 | 7 | Classical ML | Not started |
@@ -158,11 +158,21 @@ future phases are not anticipated in code.
   which produces an **in-memory** `matplotlib.figure.Figure` (Matplotlib
   only, no Plotly, no files written, `df` unchanged, missing values
   excluded). `EDAReport.visualizations` is a defaulted field populated by
-  `analyze_dataframe`. Matplotlib is added as a runtime dependency in this
-  increment. See [eda.md](eda.md). **Not yet:** target-aware chart
-  recommendation, Plotly, chart export / dashboards / API, a k-NN MI
-  estimator, paired / one-sided non-parametric tests, multiple-testing
-  correction. Phase 4 is **not complete**.
+  `analyze_dataframe`. Matplotlib is added as a runtime dependency in that
+  increment. On top of it, a **target-aware visualization recommendation**
+  layer — `recommend_visualizations(df, target_column, *,
+  max_recommendations=10)` → `VisualizationRecommendationAnalysis` —
+  deterministically ranks the *existing* specs by a documented
+  visualisation-usefulness heuristic (score ∈ [0, 100], **not** predictive
+  importance; ties broken by kind then column names). The target is
+  **required and never inferred**; an absent / datetime / all-missing /
+  too-high-cardinality target returns `status = unavailable` + a reason.
+  `EDAReport.visualization_recommendations` is a defaulted field that
+  `analyze_dataframe` leaves at its "no target" default (its signature is
+  unchanged). See [eda.md](eda.md). **Not yet:** Plotly, chart export /
+  dashboards / API, ranking by statistical strength, a k-NN MI estimator,
+  paired / one-sided non-parametric tests, multiple-testing correction.
+  Phase 4 is **not complete**.
 
 ### Phase 5 — Automated Problem Understanding
 - **Objective:** identify the ML task from data + objective.

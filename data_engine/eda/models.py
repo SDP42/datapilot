@@ -19,6 +19,7 @@ from .crossref_models import EDAQualityCrossReference
 from .distribution_models import DistributionAnalysis
 from .effect_models import EffectSizeAnalysis
 from .nonparametric_models import NonParametricAnalysis
+from .recommendation_models import VisualizationRecommendationAnalysis
 from .statistical_models import StatisticalAnalysis
 from .visualization_models import VisualizationAnalysis
 
@@ -237,5 +238,14 @@ class EDAReport(BaseModel):
             "scatter plot / box plot). Render-free descriptions only — no figure objects, "
             "no files. Additive and defaulted, so EDA reports serialised before this field "
             "still validate."
+        ),
+    )
+    visualization_recommendations: VisualizationRecommendationAnalysis = Field(
+        default_factory=VisualizationRecommendationAnalysis,
+        description=(
+            "Target-aware ranking of the visualization specs above. Empty/unavailable "
+            "unless populated via recommend_visualizations(df, target_column); "
+            "analyze_dataframe takes no target, so it leaves this at its default. "
+            "Additive and defaulted."
         ),
     )

@@ -4,6 +4,40 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0053 — Target-aware visualization recommendation: ranks existing specs, explicit target, fixed heuristic score
+- **Decision:** `data_engine/eda/recommendation_models.py` +
+  `recommendations.py` add `recommend_visualizations(df, target_column,
+  *, max_recommendations=10) -> VisualizationRecommendationAnalysis`. It
+  calls `analyze_visualizations(df)` and **ranks the specs it produces** —
+  it never creates a chart kind, never renders, never trains a model,
+  never infers the target. `EDAReport.visualization_recommendations` is a
+  defaulted field; `analyze_dataframe`'s signature is unchanged and it
+  leaves the field at its "no target supplied" default
+  (`status = unavailable`, empty). Callers merge explicitly via
+  `eda.model_copy(update={...})`.
+- **Reason:** Phase-4 prompt "Target-Aware Visualization Recommendation" —
+  "add a separate recommendation layer that uses an explicitly supplied
+  target column to rank/recommend useful existing visualization specs";
+  "Do not redesign or rewrite the existing visualization system"; "Do NOT
+  make `analyze_dataframe` infer or accept a target."
+- **Scoring convention (fixed, documented, NOT predictive importance —
+  0-100):** numeric target — scatter involving target `90`, box plot of
+  the numeric target by a category `80`, histogram of the target `70`;
+  categorical target — box plot of a numeric by the target category `90`,
+  bar chart of the target `80`, histogram of a numeric predictor that
+  also has a box plot against the target `50`. Only `available` specs are
+  eligible. Ranking key: `(-score, kind.value, tuple(columns))`; ranks
+  `1..N` unique; truncated to `max_recommendations` with a note. Each
+  recommendation stores `source_family` + `source_index` — a
+  deterministic pointer back into `EDAReport.visualizations`.
+- **Degenerate handling:** `status = unavailable` + `reason` when the
+  target is missing from the DataFrame, is datetime, has no non-null
+  values, or (categorical) exceeds `MAX_VISUALIZATION_CATEGORIES` (50). A
+  valid target with no matching spec → `status = recommended`, empty
+  list, note. Invalid `max_recommendations` (negative / non-int) →
+  deterministically treated as `0` / the default with a note, never a
+  crash. No new dependency.
+
 ## 0052 — Histogram bin count has one source of truth: `sturges_bin_count`
 - **Decision:** the Sturges bin-count logic (`ceil(log2(n)) + 1`, clamped
   to `[1, MAX_HISTOGRAM_BINS]`) is extracted into
