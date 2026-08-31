@@ -105,10 +105,116 @@ JSON, reloads it, re-runs `validate_lineage` on both, and confirms the
 result is unchanged — lineage survives a JSON round-trip without losing
 information.
 
+## `LineageGraph` — read-only DAG navigation
+
+`LineageGraph` is an in-memory navigation layer over **one dataset
+family's** registered versions. The filesystem `DatasetVersionStore`
+stays the source of truth — the graph holds no state of its own.
+
+```python
+graph = LineageGraph.from_store(store, dataset_id)  # or LineageGraph(list_of_versions)
+
+graph.parent(version_id)  # DatasetVersion | None
+graph.children(version_id)  # deterministic order: (version_number, id)
+graph.ancestors(version_id)  # [parent, grandparent, ..., root]
+graph.descendants(version_id)  # transitive children, BFS, deterministic
+graph.root(version_id)  # the raw version
+graph.path_to(version_id)  # [root, ..., version_id]
+graph.same_family(a_id, b_id)  # bool
+graph.is_ancestor(a_id, b_id)  # bool
+```
+
+For `raw → exec-A → exec-B` and `raw → exec-C`:
+`root(exec-B) == raw`, `path_to(exec-B) == [raw, exec-A, exec-B]`,
+`children(raw) == [exec-A, exec-C]`.
+
+**Deterministic:** the same registered versions always produce the same
+graph and the same traversal order, regardless of input order.
+
+**No silent repair** — construction raises `LineageGraphError` on:
+versions spanning more than one `dataset_id`; a `parent_version_id` that
+is not in the graph; a parent in another family; a self-parent; more than
+one root (or a root that is not `kind == raw`); a cycle.
+
+**Cycle protection:** `ancestors` / `descendants` also carry a visited
+guard and raise `LineageGraphError` rather than looping forever, even if
+the graph was built with the internal `_validate=False` escape hatch.
+
+## Optional auto-registration — `execute_and_register_cleaning`
+
+The default cleaning flow is **unchanged**: `execute_cleaning(...)` still
+returns a `CleaningExecutionReport` and registers nothing. No field was
+added to `CleaningExecutionReport`.
+
+Opt in with the additive wrapper:
+
+```python
+from data_engine.validation import execute_and_register_cleaning
+
+result = execute_and_register_cleaning(
+    reference,
+    plan,
+    version_store=store,
+    approved_operation_ids=[...],
+    context=ExecutionContext(allow_full_data_fit=True),
+)  # -> RegisteredCleaningResult
+```
+
+It runs `execute_cleaning` verbatim (all kwargs forwarded), then:
+
+1. registers the **raw** version (idempotent — a prior identical
+   registration is reused), attaching the raw quality snapshot from the
+   report's `before_quality_summary`;
+2. registers the **processed** version with `parent_version_id` = the raw
+   version id, using the existing deterministic identity, the correct
+   execution id, plan fingerprint, and processed file hash;
+3. runs `validate_lineage(report, raw_reference=..., parent_version=...,
+   child_version=...)`.
+
+`RegisteredCleaningResult` (Pydantic, JSON round-trips):
+`execution_report`, `raw_version`, `processed_version`,
+`lineage_validation`.
+
+**Failure is surfaced, never hidden:** a conflicting registration, a hash
+mismatch, or a failed lineage validation raises `AutoRegistrationError`
+(or the underlying `VersionStoreError`). The raw dataset and the plan are
+never modified.
+
+## Cross-version diffing — `diff_versions`
+
+```python
+from data_engine.validation import diff_versions, diff_registered_versions
+
+diff = diff_versions(from_version, to_version, graph=graph)  # -> VersionDiff
+# or, resolving ids through a graph:
+diff = diff_registered_versions(graph, from_id, to_id)
+```
+
+`diff_versions` **rejects versions from different `dataset_id` families**
+(`VersionDiffError`). Within a family, `raw → processed` and
+`processed → processed` are valid.
+
+`VersionDiff` (Pydantic, JSON round-trips, deterministically ordered):
+
+| Section | Contents |
+| --- | --- |
+| top level | `dataset_id`, `from_version_id`, `to_version_id`, `lineage_relationship` (`same_version` / `ancestor_to_descendant` / `descendant_to_ancestor` / `siblings` / `unknown_same_family`), `ancestor_version_id`, `descendant_version_id` |
+| `metadata` | `FieldChange` list for `parent_version_id`, `kind`, `status`, `row_count`, `column_count`, `size_bytes`, `sha256`, `version_number` |
+| `schema_diff` | `added_columns`, `removed_columns`, `dtype_changes`, `column_order_changed`, `common_columns` |
+| `quality` | `available`; score / total-findings / has-critical / missing-cells before+after; per-finding-type `FieldChange` list; deterministic `improvements` / `regressions` strings |
+| `content` | **only when both data files are readable**; otherwise `available=false` with an `unavailable_reason` and `identical_content=null` (never assumed identical). When available: row count, duplicate-row count, missing-cell count before+after, and `identical_content` |
+
+The lineage relationship is resolved from the `graph` when supplied
+(full ancestor check); without a graph only a direct parent link can be
+proven and deeper relationships report `unknown_same_family`. The diff
+never infers a transformation that is not in the lineage.
+
 ## What is deliberately NOT here yet
 
-- No lineage DAG store, "latest version" pointer, or cross-version diffing.
-- No automatic version registration inside `execute_cleaning` (the caller
-  registers explicitly — keeps the executor contract untouched).
+- No "latest version" policy beyond the graph's single-root rule, no
+  version deletion / garbage collection.
 - No database, no schema migration, no remote/object storage.
+- No automatic schema-difference *correction*, no semantic data
+  reconciliation.
+- No auto-registration by default — it stays opt-in via the wrapper.
 - No AI, no ML, no train/test splitting.

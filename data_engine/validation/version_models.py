@@ -17,8 +17,10 @@ quality snapshot, parent/child lineage, and a stable identity.
 from __future__ import annotations
 
 import datetime as _dt
+from collections.abc import Mapping
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 from pydantic import BaseModel, Field, model_validator
@@ -66,6 +68,24 @@ class QualitySnapshot(BaseModel):
     total_findings: int
     has_critical: bool
     findings_by_type: dict[str, int] = Field(default_factory=dict)
+    missing_cells: int | None = Field(
+        default=None, description="Total missing cells, when the count is available."
+    )
+
+    @classmethod
+    def from_summary(cls, summary: Mapping[str, Any] | None) -> QualitySnapshot | None:
+        """Build from an execution report's before/after quality summary dict."""
+        if not summary:
+            return None
+        raw_missing = summary.get("total_missing_cells")
+        raw_findings: Mapping[str, Any] = summary.get("findings_by_type") or {}
+        return cls(
+            score=float(summary.get("score", 0.0)),
+            total_findings=int(summary.get("total_findings", 0)),
+            has_critical=bool(summary.get("has_critical", False)),
+            findings_by_type={str(k): int(v) for k, v in raw_findings.items()},
+            missing_cells=None if raw_missing is None else int(raw_missing),
+        )
 
 
 class DatasetVersion(BaseModel):
@@ -190,15 +210,7 @@ class DatasetVersion(BaseModel):
             )
 
         applied = [op.operation_id for op in report.operations if op.status.value == "success"]
-        after = report.after_quality_summary
-        quality = None
-        if after:
-            quality = QualitySnapshot(
-                score=float(after.get("score", 0.0)),
-                total_findings=int(after.get("total_findings", 0)),
-                has_critical=bool(after.get("has_critical", False)),
-                findings_by_type=dict(after.get("findings_by_type", {})),
-            )
+        quality = QualitySnapshot.from_summary(report.after_quality_summary)
 
         return cls(
             dataset_version_id=ref.dataset_id,

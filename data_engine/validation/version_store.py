@@ -33,6 +33,7 @@ from .version_models import (
     DatasetVersion,
     DatasetVersionKind,
     DatasetVersionStatus,
+    QualitySnapshot,
 )
 
 _READ_ONLY = 0o444
@@ -185,12 +186,14 @@ class DatasetVersionStore:
         df: pd.DataFrame,
         *,
         created_by: str = "data_engine.ingestion",
+        quality: QualitySnapshot | None = None,
     ) -> DatasetVersion:
         version = DatasetVersion.from_raw(
             reference,
             df,
             version_number=self._next_version_number(reference.dataset_id),
             created_by=created_by,
+            quality=quality,
         )
         return self.register(version)
 

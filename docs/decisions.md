@@ -4,6 +4,48 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0034 — Cross-version diff rejects different families; content diff is opt-in-by-availability
+- **Decision:** `diff_versions(a, b)` raises `VersionDiffError` when
+  `a.dataset_id != b.dataset_id`. The metadata/schema/quality diff comes
+  from the `DatasetVersion` records; the **content** diff runs only when
+  both data files are readable, otherwise `content.available = false`
+  with a reason and `identical_content = null`.
+- **Reason:** Phase 3 rules — "different dataset family → error"; "do not
+  pretend the data is identical / do not silently skip".
+- **Alternatives considered:** allowing metadata-only cross-family diffs
+  (rejected — no compelling use case, and it invites accidental
+  comparison of unrelated datasets).
+
+## 0033 — Auto-registration is an opt-in wrapper, not a parameter or a report field
+- **Decision:** `execute_and_register_cleaning(...)` in
+  `data_engine.validation` wraps `execute_cleaning` (all kwargs
+  forwarded), then registers the raw + processed versions and runs
+  `validate_lineage`. It returns an additive `RegisteredCleaningResult`.
+  `execute_cleaning` and `CleaningExecutionReport` are unchanged; no
+  `output_dataset_version_id` field was added.
+- **Reason:** Phase 3 rules — the default flow must "behave exactly as
+  before"; "prefer an explicit opt-in parameter or separate wrapper";
+  "prefer an additive result/wrapper object".
+- **Alternatives considered:** `execute_cleaning(..., register_version=)`
+  (rejected — changes the executor signature/contract);
+  `output_dataset_version_id` on the report (rejected — a contract change
+  the wrapper makes unnecessary).
+- **Consequence:** registration failures raise `AutoRegistrationError`
+  (never a silent success); re-runs are idempotent via the deterministic
+  version identity.
+
+## 0032 — `LineageGraph` is in-memory, single-family, and validated on construction
+- **Decision:** `LineageGraph` is built from a set of `DatasetVersion`
+  records for one `dataset_id`. Construction raises `LineageGraphError`
+  on multi-family input, a missing/cross-family/self parent, more than
+  one root, or a cycle. The store stays the source of truth.
+- **Reason:** Phase 3 rules — "deterministic", "no silent repair",
+  "cycle protection", "raw root", "no database-backed DAG".
+- **Alternatives considered:** a persisted DAG index (rejected — "no
+  database"); lazy validation on traversal only (rejected — a bad graph
+  should fail loudly at build time). Traversal *also* carries a visited
+  guard for defence in depth.
+
 ## 0031 — Lineage validation reports errors; it never repairs
 - **Decision:** `validate_lineage(report, ...)` returns
   `LineageValidationResult(valid, checks_run, errors)` and mutates

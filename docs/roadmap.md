@@ -8,7 +8,7 @@ future phases are not anticipated in code.
 | 0 | Architecture / Foundation | Done |
 | 1 | Data Ingestion & Profiling | **In progress** — CSV ingestion + profiling done; Parquet/Excel deferred |
 | 2 | Data Quality & Cleaning | **Done** — quality analysis + cleaning planning + safe cleaning execution (deterministic; no AI approval/reasoning yet) |
-| 3 | Validation & Data Lineage | **In progress** — first-class `DatasetVersion`, deterministic version store, lineage validation done; lineage DAG / auto-registration / diffing not started |
+| 3 | Validation & Data Lineage | **In progress** — `DatasetVersion` + store + lineage validation + lineage graph + opt-in auto-registration + cross-version diffing done; still filesystem-only (no database, no GC) |
 | 4 | EDA & Statistical Analysis | Not started |
 | 5 | Automated Problem Understanding | Not started |
 | 6 | Feature Engineering | Not started |
@@ -83,11 +83,18 @@ future phases are not anticipated in code.
   JSON-serialisable `DatasetVersion` (schema + quality + lineage
   snapshot); `DatasetVersionStore`, a deterministic filesystem registry
   under `data/versions/` (no database) that rejects duplicate/conflicting
-  registrations and verifies file hashes; and `validate_lineage`, which
+  registrations and verifies file hashes; `validate_lineage`, which
   checks an execution report's provenance against the real files and
-  version records and **fails clearly rather than repairing**. See
-  [data-lineage.md](data-lineage.md). Not yet: a lineage DAG store,
-  auto-registration inside `execute_cleaning`, cross-version diffing.
+  version records and **fails clearly rather than repairing**;
+  `LineageGraph`, a read-only DAG navigation layer (parent / children /
+  ancestors / descendants / root / path) that raises on missing parents,
+  cross-family parents, self-parents, multiple roots, and cycles;
+  `execute_and_register_cleaning`, an **opt-in** wrapper that leaves the
+  default `execute_cleaning` flow untouched; and `diff_versions`,
+  deterministic metadata / schema / quality / content comparison of two
+  same-family versions. See [data-lineage.md](data-lineage.md). Still
+  filesystem-only. Not yet: database persistence, version deletion / GC,
+  automatic schema-difference correction, a "latest version" policy.
 
 ### Phase 4 — EDA & Statistical Analysis
 - **Objective:** understand relationships in the data.
