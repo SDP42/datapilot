@@ -8,7 +8,7 @@ future phases are not anticipated in code.
 | 0 | Architecture / Foundation | Done |
 | 1 | Data Ingestion & Profiling | **In progress** — CSV ingestion + profiling done; Parquet/Excel deferred |
 | 2 | Data Quality & Cleaning | **Done** — quality analysis + cleaning planning + safe cleaning execution (deterministic; no AI approval/reasoning yet) |
-| 3 | Validation & Data Lineage | Not started |
+| 3 | Validation & Data Lineage | **In progress** — first-class `DatasetVersion`, deterministic version store, lineage validation done; lineage DAG / auto-registration / diffing not started |
 | 4 | EDA & Statistical Analysis | Not started |
 | 5 | Automated Problem Understanding | Not started |
 | 6 | Feature Engineering | Not started |
@@ -79,6 +79,15 @@ future phases are not anticipated in code.
   `database` linking raw → each processed version with the operations
   applied.
 - **Output:** validated processed datasets with a full transformation log.
+- **Status:** `data_engine.validation` implemented — a first-class,
+  JSON-serialisable `DatasetVersion` (schema + quality + lineage
+  snapshot); `DatasetVersionStore`, a deterministic filesystem registry
+  under `data/versions/` (no database) that rejects duplicate/conflicting
+  registrations and verifies file hashes; and `validate_lineage`, which
+  checks an execution report's provenance against the real files and
+  version records and **fails clearly rather than repairing**. See
+  [data-lineage.md](data-lineage.md). Not yet: a lineage DAG store,
+  auto-registration inside `execute_cleaning`, cross-version diffing.
 
 ### Phase 4 — EDA & Statistical Analysis
 - **Objective:** understand relationships in the data.

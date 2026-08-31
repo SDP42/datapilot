@@ -4,6 +4,54 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0031 — Lineage validation reports errors; it never repairs
+- **Decision:** `validate_lineage(report, ...)` returns
+  `LineageValidationResult(valid, checks_run, errors)` and mutates
+  nothing. `raise_for_status()` raises `LineageValidationError`.
+- **Reason:** Phase 3 rule — "fail clearly rather than silently repairing
+  inconsistent lineage". Auto-repair would hide provenance corruption.
+- **Alternatives considered:** a "best effort fix" mode (rejected);
+  raising immediately instead of collecting all errors (rejected — a full
+  error list is more useful for auditing).
+
+## 0030 — `DatasetVersionStore` is filesystem-only and never overwrites
+- **Decision:** one read-only JSON per version under
+  `data/versions/<dataset_id>/{raw,exec-<id>}.json`. Re-registering the
+  same identity → `DuplicateVersionError`; a different record at that
+  identity → `ConflictingVersionError`.
+- **Reason:** Phase 3 rules — no database yet; consistent with
+  `ProcessedDataStore`; "do not silently overwrite an existing version".
+- **Alternatives considered:** SQLite index (rejected — "no database");
+  overwrite-on-match (rejected — silent mutation of a version record).
+
+## 0029 — Version registration is a separate step, not wired into the executor
+- **Decision:** the caller runs
+  `store.register_raw(reference, df)` then
+  `store.register_from_execution(report, parent_version_id=...)`. No
+  `version_store` parameter was added to `execute_cleaning`, and
+  `CleaningExecutionReport` was not changed.
+- **Reason:** "prefer additive changes; do not rewrite existing contracts
+  unless absolutely required." Keeping the executor untouched is the most
+  conservative option; auto-registration can be layered on later.
+- **Alternatives considered:** adding `version_store=` to
+  `execute_cleaning` and an `output_dataset_version_id` field to the
+  report (deferred — a later phase can add it once the DAG store exists).
+
+## 0028 — `DatasetVersion` reuses existing references; deterministic id
+- **Decision:** `DatasetVersion` is a new model that *links*
+  `DatasetReference` / `ProcessedDatasetReference` /
+  `CleaningExecutionReport` / `DatasetLineage` and adds a schema snapshot,
+  a quality snapshot, and parent/child lineage. Its identity is
+  `<dataset_id>:raw` or `<dataset_id>:exec-<execution_id>` — reusing the
+  executor's already-deterministic `execution_id`.
+- **Reason:** Phase 3 Task 1 — "do not duplicate existing models"; the
+  existing deterministic `execution_id` is the natural version key.
+- **Alternatives considered:** a fresh UUID per version (rejected — not
+  deterministic); extending `ProcessedDatasetReference` in place
+  (rejected — it is a frozen file pointer, a version is more).
+- **Consequence:** `version_number` is store-assigned (registration
+  order) and is *not* the identity.
+
 ## 0027 — Executor takes an explicit `approved_operation_ids` allow-list
 - **Decision:** an operation executes only if its id is in
   `approved_operation_ids` (or it is `recommended` and the opt-in

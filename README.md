@@ -112,13 +112,15 @@ continuous Testing/Benchmarking/Docs. See [docs/roadmap.md](docs/roadmap.md).
 | **Phase 2 — Data-quality analysis** (`data_engine.quality`) | ✅ Implemented (detection only) |
 | **Phase 2 — Cleaning planner** (`data_engine.cleaning`) | ✅ Implemented (proposals only) |
 | **Phase 2 — Cleaning executor** (`data_engine.cleaning`) | ✅ Implemented (deterministic; runs only explicitly approved operations on a derived copy) |
+| **Phase 3 — Validation & Data Lineage** (`data_engine.validation`) | ✅ In progress — `DatasetVersion`, deterministic version store, lineage validation |
 | AI-driven cleaning approval / reasoning | ⛔ Not started (Phase 11+) |
 | ML experimentation | ⛔ Not started |
 | Everything else | ⛔ Not started |
 
 Detail: [docs/data-engine-contract.md](docs/data-engine-contract.md),
 [docs/data-quality.md](docs/data-quality.md), [docs/cleaning.md](docs/cleaning.md),
-[docs/cleaning-execution.md](docs/cleaning-execution.md).
+[docs/cleaning-execution.md](docs/cleaning-execution.md),
+[docs/data-lineage.md](docs/data-lineage.md).
 
 ## Development setup
 

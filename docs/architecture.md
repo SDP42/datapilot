@@ -69,8 +69,14 @@ proposals), [cleaning.md](cleaning.md); and a deterministic, safe cleaning
 + a processed dataset version), [cleaning-execution.md](cleaning-execution.md).
 AI-driven cleaning approval / reasoning is a later phase.
 
+**Phase 3 (in progress):** `data_engine.validation` — a first-class
+`DatasetVersion` model, a deterministic filesystem `DatasetVersionStore`
+(no database), and `validate_lineage` (checkable provenance that fails
+clearly, never repairs). [data-lineage.md](data-lineage.md). Additive —
+it does not change the earlier layers.
+
 **Future-phase components:** everything else —
-validation & lineage, EDA, feature engineering, `ml_engine`, `dl_engine`,
+EDA, feature engineering, `ml_engine`, `dl_engine`,
 `experimentation`, `explainability`, `ai_engine`, `database`, `backend`,
 `frontend`, MLOps.
 
