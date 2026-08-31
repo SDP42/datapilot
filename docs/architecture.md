@@ -84,7 +84,7 @@ structurally-invalid versions and **reports — never repairs**.
 earlier layers.
 
 **Phase 4 (in progress):** `data_engine.eda` — a deterministic,
-**analysis-only** layer. Six foundations: (1) EDA — `analyze_dataframe`
+**analysis-only** layer. Seven foundations: (1) EDA — `analyze_dataframe`
 / `analyze_dataset_version` → a JSON-serialisable `EDAReport` (univariate
 numeric / categorical / datetime summaries, missingness, a small
 deterministic bivariate layer); (2) parametric hypothesis testing —
@@ -107,11 +107,16 @@ unchanged. SciPy-based, bounded deterministic caps; unavailable
 tests/measures report `None` + a reason, never a fake value; MI involving
 a numeric column is a documented binning-based estimate; a constant
 column keeps its location stats while only the undefined shape measures
-become `None`; `EDAReport.statistical_tests`, `.effect_sizes`,
-`.nonparametric_tests`, `.distribution` and `.quality_cross_reference`
-are backward-compatible defaulted fields. Read-only — no dataset, version
-record, or lineage is modified; no new version is registered. No
-visualization.
+become `None`; (7) a visualization foundation — `analyze_visualizations`
+→ `VisualizationAnalysis` of render-free `VisualizationSpec`s (histogram
+/ bar chart / scatter plot / box plot), selected deterministically by
+DataFrame structure alone, plus `render_visualization(df, spec)` →
+an **in-memory** `matplotlib.figure.Figure` (Matplotlib only, no Plotly,
+no files, `df` unchanged); it is **not** a dashboard / frontend / API.
+`EDAReport.statistical_tests`, `.effect_sizes`, `.nonparametric_tests`,
+`.distribution`, `.quality_cross_reference` and `.visualizations` are
+backward-compatible defaulted fields. Read-only — no dataset, version
+record, or lineage is modified; no new version is registered.
 [eda.md](eda.md).
 
 **Future-phase components:** everything else —

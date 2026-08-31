@@ -20,6 +20,7 @@ from .distribution_models import DistributionAnalysis
 from .effect_models import EffectSizeAnalysis
 from .nonparametric_models import NonParametricAnalysis
 from .statistical_models import StatisticalAnalysis
+from .visualization_models import VisualizationAnalysis
 
 EDA_ENGINE_VERSION = "1"
 
@@ -227,5 +228,14 @@ class EDAReport(BaseModel):
             "Observed correspondences between EDA signals and data-quality findings. "
             "Empty unless populated via cross_reference_eda_quality(); analyze_dataframe "
             "has no QualityReport input, so it leaves this empty. Additive and defaulted."
+        ),
+    )
+    visualizations: VisualizationAnalysis = Field(
+        default_factory=VisualizationAnalysis,
+        description=(
+            "Deterministically selected chart specifications (histogram / bar chart / "
+            "scatter plot / box plot). Render-free descriptions only — no figure objects, "
+            "no files. Additive and defaulted, so EDA reports serialised before this field "
+            "still validate."
         ),
     )

@@ -111,6 +111,22 @@ from .statistics import (
     welch_t_test,
 )
 from .univariate import analyze_univariate, classify_columns
+from .visualization import (
+    VisualizationError,
+    analyze_visualizations,
+    render_visualization,
+)
+from .visualization_models import (
+    MAX_BAR_CHARTS,
+    MAX_BOX_PLOTS,
+    MAX_HISTOGRAMS,
+    MAX_SCATTER_PLOTS,
+    MAX_VISUALIZATION_CATEGORIES,
+    VisualizationAnalysis,
+    VisualizationKind,
+    VisualizationSpec,
+    VisualizationStatus,
+)
 
 __all__ = [
     "DEFAULT_ALPHA",
@@ -119,17 +135,22 @@ __all__ = [
     "FIXED_QUANTILES",
     "HISTOGRAM_BIN_RULE",
     "MAX_ANOVA_COMBINATIONS",
+    "MAX_BAR_CHARTS",
+    "MAX_BOX_PLOTS",
     "MAX_CHI_SQUARE_PAIRS",
     "MAX_CORRELATION_RATIO_COMBINATIONS",
     "MAX_CRAMERS_V_PAIRS",
     "MAX_DISTRIBUTION_COLUMNS",
+    "MAX_HISTOGRAMS",
     "MAX_HISTOGRAM_BINS",
     "MAX_KENDALL_PAIRS",
     "MAX_KRUSKAL_WALLIS_COMBINATIONS",
     "MAX_MANN_WHITNEY_COMBINATIONS",
     "MAX_MUTUAL_INFORMATION_PAIRS",
+    "MAX_SCATTER_PLOTS",
     "MAX_SPEARMAN_PAIRS",
     "MAX_TTEST_PAIRS",
+    "MAX_VISUALIZATION_CATEGORIES",
     "MI_NUMERIC_BINS",
     "BivariateSummary",
     "CategoricalColumnAnalysis",
@@ -168,6 +189,11 @@ __all__ = [
     "TestStatus",
     "TopValue",
     "UnivariateAnalysis",
+    "VisualizationAnalysis",
+    "VisualizationError",
+    "VisualizationKind",
+    "VisualizationSpec",
+    "VisualizationStatus",
     "analyze_bivariate",
     "analyze_dataframe",
     "analyze_dataset_version",
@@ -177,6 +203,7 @@ __all__ = [
     "analyze_numeric_distribution",
     "analyze_statistics",
     "analyze_univariate",
+    "analyze_visualizations",
     "chi_square_independence",
     "classify_columns",
     "correlation_ratio",
@@ -187,6 +214,7 @@ __all__ = [
     "mann_whitney_u",
     "mutual_information",
     "one_way_anova",
+    "render_visualization",
     "spearman_rank_correlation",
     "welch_t_test",
 ]

@@ -4,7 +4,7 @@
 dataset (a DataFrame, or a registered `DatasetVersion`) into a structured,
 JSON-serialisable `EDAReport`.
 
-Phase 4 now contains six foundations (all deterministic, read-only):
+Phase 4 now contains seven foundations (all deterministic, read-only):
 
 1. the **EDA foundation** — column classification, univariate analysis,
    missingness, and a small bivariate layer;
@@ -19,7 +19,11 @@ Phase 4 now contains six foundations (all deterministic, read-only):
    variance, skewness, excess kurtosis, a full 0.00–1.00 quantile set,
    and a structured (render-free) histogram;
 6. the **EDA ↔ data-quality cross-reference** — an observational layer
-   that correlates EDA signals with existing `QualityReport` findings.
+   that correlates EDA signals with existing `QualityReport` findings;
+7. the **visualization foundation** — deterministic structural selection
+   of chart specs (histogram / bar chart / scatter plot / box plot) plus
+   an optional in-memory Matplotlib renderer. **Not** a dashboard,
+   frontend, or API layer, and it writes no files.
 
 Phase 4 remains **in progress**.
 
@@ -321,8 +325,9 @@ the whole column is unavailable), `count` (non-null), `missing_count`,
 
 `histogram` is a `Histogram`: `status`, `reason`, `bin_rule`, `n_bins`,
 `bin_edges` (length `n_bins + 1`), `bins` (`left_edge` / `right_edge` /
-`count`), `total_count`. Enough to reconstruct a chart later — the
-visualization layer is a **separate, later** increment.
+`count`), `total_count`. Enough to reconstruct a chart — the
+visualization layer (below) is a **separate step** and reuses the same
+`sturges_bin_count` helper.
 
 **Bin-count rule (`bin_rule = "sturges"`):** `k = ceil(log2(n)) + 1`
 (Sturges' rule, `n` = finite observation count), clamped to
@@ -406,6 +411,78 @@ Entries are sorted deterministically by
 Any new quality detection; severity re-scoring; natural-language
 explanation; a reverse "quality ← EDA" flow that would create findings.
 
+## Visualization foundation (`analyze_visualizations` / `render_visualization`)
+
+A deterministic chart layer with two separate steps. **Selection**
+produces render-free `VisualizationSpec` descriptions; **rendering** turns
+one spec into an in-memory Matplotlib figure. This is **not** a
+dashboard, frontend, or API layer; no image files are ever written and
+nothing is committed to the repo.
+
+### Supported chart kinds (exactly four)
+
+| DataFrame shape | Chart | Selected for |
+| --- | --- | --- |
+| one numeric column | **histogram** | every numeric column |
+| one categorical column | **bar chart** | every categorical column with cardinality ≤ `MAX_VISUALIZATION_CATEGORIES` (50) |
+| two numeric columns | **scatter plot** | every unordered numeric pair |
+| one categorical + one numeric column | **box plot** | every `(categorical, numeric)` combination |
+
+### Deterministic selection (`analyze_visualizations(df) -> VisualizationAnalysis`)
+
+Structural only — **no target inference, no importance ranking, no
+randomness, no sampling**. Numeric and categorical columns are taken in
+**alphabetical order**; numeric pairs and `(categorical, numeric)`
+combinations are generated in alphabetical order. It is embedded in
+`analyze_dataframe` as `EDAReport.visualizations` (a defaulted,
+backward-compatible field). `df` is not modified.
+
+Each family has a documented module-constant cap — `MAX_HISTOGRAMS`,
+`MAX_BAR_CHARTS`, `MAX_SCATTER_PLOTS`, `MAX_BOX_PLOTS` (50 each). When a
+cap is hit the first candidates (in deterministic order) are kept and a
+truncation note is added, so a very wide DataFrame can never generate an
+unbounded number of specs.
+
+`VisualizationSpec` — `kind`, `title`, `columns`, `status`
+(`available` / `unavailable`), `reason` (set only when unavailable),
+`x_label`, `y_label`, `metadata` (deterministic JSON-primitive rendering
+info — e.g. `value_column`, `bin_rule = "sturges"`, `n_bins`, the ordered
+`categories` / `counts` list), `notes`. It never holds a `Figure`.
+`VisualizationAnalysis` groups specs into `histograms` / `bar_charts` /
+`scatter_plots` / `box_plots` plus `notes`.
+
+### Degenerate / missing-data behaviour (selection)
+
+A column/pair that cannot produce a meaningful chart yields a spec with
+`status = unavailable` and an explicit `reason` — it is **not silently
+dropped**. Triggers: a numeric column with no finite observations, or a
+constant numeric column (histogram — reuses the distribution layer's
+"needs a non-zero range" rule); a categorical column with no non-null
+values (bar chart); no rows where both numerics are finite (scatter); no
+category with a finite numeric observation (box plot).
+
+### Rendering (`render_visualization(df, spec) -> matplotlib.figure.Figure`)
+
+- **Matplotlib only** (object-oriented API — `matplotlib.figure.Figure`,
+  no `pyplot` global state). No Plotly.
+- The figure **stays in memory** — no file is written.
+- `df` is **not modified**; missing / non-finite values are **excluded,
+  never filled**; no synthetic data, no feature creation, no version
+  registration.
+- Histogram bin count reuses the **shared `sturges_bin_count`** helper —
+  the single source of truth, so the distribution layer and the
+  visualization layer never diverge.
+- Bar charts use the `(-count, value)` category order; box plots use
+  ascending category order — both matching the rest of EDA.
+- An **unavailable spec**, an unknown kind, or data that turns out to be
+  unplottable raises `VisualizationError`. A misleading empty figure is
+  never returned.
+
+### Not implemented (later increments)
+
+Plotly; automated chart *recommendation* (target-aware); chart export /
+image files; dashboards; a frontend or API; any styling/theming system.
+
 ## Missing / invalid data behaviour
 
 EDA is **observational**. If a statistic cannot be calculated it is
@@ -441,14 +518,18 @@ the CSV read-only and analyses it.
 
 ## What remains for Phase 4
 
-- Visualization — figure generation, automated chart selection.
+- Automated, target-aware chart *recommendation* (the current
+  visualization layer is deliberately structural only); Plotly; chart
+  export.
 - A k-NN / Kraskov mutual-information estimator; MI for datetime columns.
 - Paired / one-sided non-parametric tests (Wilcoxon signed-rank, sign
   test, Friedman) and multiple-testing correction.
 
 ## What is intentionally NOT implemented (Phase 5+ / out of scope)
 
-- No visualization — no Matplotlib/Plotly, no chart selection.
+- No Plotly, no dashboard / frontend / API, no chart export or committed
+  image files, no target-aware chart recommendation. The visualization
+  foundation renders in memory only.
 - No automated problem understanding, target inference, or feature
   selection / feature engineering.
 - No ML / DL / experiment tracking / SHAP / LLM / API / frontend /

@@ -49,6 +49,8 @@ ENGINE_PACKAGES = [
     "data_engine.eda.distribution",
     "data_engine.eda.crossref_models",
     "data_engine.eda.crossref",
+    "data_engine.eda.visualization_models",
+    "data_engine.eda.visualization",
     "data_engine.feature_engineering",
     "database",
     "dl_engine",

@@ -55,6 +55,19 @@ def _empty_quantiles() -> list[DistributionQuantile]:
     return [DistributionQuantile(quantile=q, value=None) for q in DISTRIBUTION_QUANTILES]
 
 
+def sturges_bin_count(n: int) -> int:
+    """Deterministic histogram bin count — Sturges' rule ``ceil(log2(n)) + 1``,
+    clamped to ``[1, MAX_HISTOGRAM_BINS]``.
+
+    The single source of truth for the bin count, shared by this layer
+    and the visualization layer so the two never diverge.
+    """
+    if n <= 1:
+        return 1
+    k = int(np.ceil(np.log2(n))) + 1
+    return max(1, min(k, MAX_HISTOGRAM_BINS))
+
+
 def _histogram(values: np.ndarray) -> Histogram:
     """Structured equal-width histogram over the finite ``values``.
 
@@ -73,8 +86,7 @@ def _histogram(values: np.ndarray) -> Histogram:
             reason="constant column: a histogram needs a non-zero value range",
         )
 
-    k = int(np.ceil(np.log2(n))) + 1 if n > 1 else 1
-    k = max(1, min(k, MAX_HISTOGRAM_BINS))
+    k = sturges_bin_count(n)
 
     counts, edges = np.histogram(values, bins=k)
     bins = [

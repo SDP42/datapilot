@@ -4,6 +4,59 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0052 — Histogram bin count has one source of truth: `sturges_bin_count`
+- **Decision:** the Sturges bin-count logic (`ceil(log2(n)) + 1`, clamped
+  to `[1, MAX_HISTOGRAM_BINS]`) is extracted into
+  `data_engine/eda/distribution.py::sturges_bin_count(n)` and imported by
+  both the distribution layer (`_histogram`) and the visualization layer
+  (`analyze_visualizations` metadata + `render_visualization`).
+- **Reason:** Phase-4 prompt — "Reuse the existing deterministic
+  distribution conventions where practical, especially the existing
+  Sturges/bin-count logic. Do not create a second conflicting histogram
+  convention." The distribution layer's behaviour is unchanged (the same
+  formula, now via a named helper; existing distribution tests still
+  pass).
+- **How it works:** `render_visualization` for a histogram recomputes the
+  finite values from `df` and calls `sturges_bin_count(len(finite))`, so
+  the rendered figure's bin count always equals the spec's
+  `metadata["n_bins"]`.
+
+## 0051 — Visualization foundation: structural selection + separate in-memory renderer; Matplotlib added
+- **Decision:** `data_engine/eda/visualization_models.py` +
+  `visualization.py` add exactly four chart kinds — `histogram`,
+  `bar_chart`, `scatter_plot`, `box_plot` — via two separated functions:
+  `analyze_visualizations(df) -> VisualizationAnalysis` (pure,
+  deterministic **selection** of render-free `VisualizationSpec`s) and
+  `render_visualization(df, spec) -> matplotlib.figure.Figure`
+  (**rendering**, in memory only). `EDAReport.visualizations` is a
+  defaulted, backward-compatible field populated by `analyze_dataframe`
+  (signature unchanged). `matplotlib>=3.8` is added to
+  `[project.dependencies]` — this is the phase that first needs it (per
+  the pyproject comment / roadmap).
+- **Reason:** Phase-4 prompt "Visualization Foundation" — deterministic
+  chart selection by DataFrame structure only ("no target inference, no
+  semantic importance ranking, no randomness, no sampling"), documented
+  per-family caps, in-memory Matplotlib rendering ("no files", "no
+  Plotly", "figure remains in memory"), and explicit handling of
+  unavailable specs ("Do not silently create a misleading figure").
+- **How it works:** selection classifies columns by dtype (reusing
+  `classify_columns` / `EDAColumnKind`), takes numeric + categorical
+  columns alphabetically, generates numeric pairs and
+  `(categorical, numeric)` combinations alphabetically, and caps each
+  family at 50 (`MAX_HISTOGRAMS` / `MAX_BAR_CHARTS` / `MAX_SCATTER_PLOTS`
+  / `MAX_BOX_PLOTS`) with a truncation note. Categorical columns above
+  `MAX_VISUALIZATION_CATEGORIES` (50) distinct values are excluded.
+  Degenerate columns/pairs (no finite obs, constant numeric, no paired
+  finite rows, no non-empty category group) yield a spec with
+  `status = unavailable` + `reason` — never dropped, never a fake chart.
+  `render_visualization` uses the object-oriented `matplotlib.figure.Figure`
+  API (no `pyplot` global state), recomputes from `df` excluding
+  missing/non-finite values, and raises `VisualizationError` for an
+  unavailable spec or unplottable data. `matplotlib` is imported lazily
+  inside `render_visualization` so selection needs no Matplotlib.
+- **Not done:** target-aware chart *recommendation*, Plotly, chart export
+  / committed image files, dashboards, frontend, API, styling/theming.
+
 ## 0050 — EDA ↔ quality cross-reference is independently callable, not wired into `analyze_dataframe`
 - **Decision:** `data_engine/eda/crossref_models.py` + `crossref.py`
   provide `cross_reference_eda_quality(eda_result, quality_report) ->

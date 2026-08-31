@@ -25,6 +25,7 @@ from .models import EDAReport
 from .nonparametric import analyze_nonparametric
 from .statistics import analyze_statistics
 from .univariate import analyze_univariate, classify_columns
+from .visualization import analyze_visualizations
 
 
 def analyze_dataframe(
@@ -51,6 +52,7 @@ def analyze_dataframe(
         effect_sizes=analyze_effect_sizes(df),
         nonparametric_tests=analyze_nonparametric(df),
         distribution=analyze_distribution(df),
+        visualizations=analyze_visualizations(df),
     )
 
 
