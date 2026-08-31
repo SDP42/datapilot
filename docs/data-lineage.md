@@ -209,6 +209,82 @@ The lineage relationship is resolved from the `graph` when supplied
 proven and deeper relationships report `unknown_same_family`. The diff
 never infers a transformation that is not in the lineage.
 
+## Version integrity verification
+
+`verify_version_integrity(version) -> VersionIntegrityResult` checks one
+`DatasetVersion` against the **actual filesystem state** — for raw and
+processed versions alike. It never touches the dataset file and never
+repairs metadata.
+
+Checks:
+
+1. the version metadata still parses / round-trips;
+2. the identity is internally consistent — id prefixed with `dataset_id`;
+   `raw_dataset_id == dataset_id`; `column_count` matches the schema
+   snapshot; raw ↔ `<dataset_id>:raw` / no parent; processed ↔
+   `<dataset_id>:exec-<execution_id>` / has parent + execution id;
+3. the referenced file **exists**;
+4. the file is **readable**;
+5. the file **size** matches `size_bytes`;
+6. the file **SHA-256** matches `sha256`.
+
+`verify_registered_version(store, dataset_version_id)` loads the record
+from disk first and reports a **corrupted / unparseable** record file as
+an error (it does not raise). `VersionIntegrityResult` has
+`dataset_version_id`, `valid`, `checks_run`, `errors[]`, and
+`raise_for_status()` → raises the existing `VersionIntegrityError`.
+
+## Version-store consistency check
+
+`check_family_consistency(store, dataset_id, *, verify_files=True) ->
+FamilyConsistencyResult` validates **every registered version for one
+dataset family together** and reports **all** discovered problems (it does
+not stop at the first). It reuses `LineageGraph` for structural / cycle
+detection rather than re-implementing traversal.
+
+Detects: unparseable version records; duplicate / conflicting version
+identities; versions that do not belong to the family or disagree on the
+raw dataset identity; a `parent_version_id` that is a self-reference,
+unregistered, or from a foreign family; missing or multiple roots; a root
+that is not `kind == raw`; cycles; and any version whose referenced file
+fails integrity verification.
+
+`FamilyConsistencyResult`: `dataset_id`, `valid`, `version_count`,
+`checks_run`, `errors[]`, `integrity` (per-version
+`VersionIntegrityResult`), `raise_for_status()` → `VersionStoreError`.
+
+## Version ↔ lineage binding
+
+`check_version_lineage_binding(processed_version, report, *,
+parent_version=None, raw_reference=None) -> LineageValidationResult`
+strengthens the check that ties a **registered** processed
+`DatasetVersion` to its `CleaningExecutionReport`. It runs the existing
+`validate_lineage(...)` and adds:
+
+* processed version id ↔ processed dataset reference id;
+* processed version id **encodes** its `execution_id`;
+* `execution_id` ↔ execution report;
+* `plan_fingerprint` present **and** equal to the report;
+* `lineage_step_count` ↔ number of report lineage steps;
+* `applied_operation_ids` ↔ the ids of the report's **successful**
+  operation records;
+* registered `sha256` / `row_count` / `column_count` ↔ the processed
+  dataset reference;
+* parent version raw identity ↔ processed version, and the processed
+  version references that parent.
+
+It verifies only information already present in the current
+models/reports — no new lineage data is invented.
+
+## How corruption is handled
+
+Every check in this layer **detects and reports**; nothing is ever
+repaired or overwritten. A `verify_*` / `check_*` call returns a
+structured result with an `errors[]` list and a `valid` flag; the record
+files and dataset files are left byte-for-byte unchanged. `raise_for_status()`
+turns a failed result into the appropriate existing exception
+(`VersionIntegrityError` / `VersionStoreError` / `LineageValidationError`).
+
 ## What is deliberately NOT here yet
 
 - No "latest version" policy beyond the graph's single-root rule, no
@@ -217,4 +293,14 @@ never infers a transformation that is not in the lineage.
 - No automatic schema-difference *correction*, no semantic data
   reconciliation.
 - No auto-registration by default — it stays opt-in via the wrapper.
+- No automatic re-hashing / re-registration of a version whose file
+  changed — the change is reported, not absorbed.
 - No AI, no ML, no train/test splitting.
+
+## What remains in Phase 3 afterward
+
+The lineage layer is now functionally complete for filesystem-only use.
+What is left before Phase 3 can be marked done is polish, not new
+architecture: broader documentation, and a decision on whether a future
+increment adds a database-backed store, a "latest version" pointer, or
+version GC — all explicitly out of scope here.

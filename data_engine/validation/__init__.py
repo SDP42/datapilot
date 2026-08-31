@@ -30,12 +30,22 @@ from .auto_register import (
     RegisteredCleaningResult,
     execute_and_register_cleaning,
 )
+from .integrity import (
+    VersionIntegrityResult,
+    verify_registered_version,
+    verify_version_integrity,
+)
 from .lineage_graph import LineageGraph, LineageGraphError
 from .lineage_validation import (
     LineageValidationError,
     LineageValidationResult,
     assert_roundtrip_consistent,
     validate_lineage,
+)
+from .store_consistency import (
+    FamilyConsistencyResult,
+    check_family_consistency,
+    check_version_lineage_binding,
 )
 from .version_diff import (
     ContentDiff,
@@ -78,6 +88,7 @@ __all__ = [
     "DatasetVersionStore",
     "DtypeChange",
     "DuplicateVersionError",
+    "FamilyConsistencyResult",
     "FieldChange",
     "LineageGraph",
     "LineageGraphError",
@@ -93,11 +104,16 @@ __all__ = [
     "VersionDiff",
     "VersionDiffError",
     "VersionIntegrityError",
+    "VersionIntegrityResult",
     "VersionNotFoundError",
     "VersionStoreError",
     "assert_roundtrip_consistent",
+    "check_family_consistency",
+    "check_version_lineage_binding",
     "diff_registered_versions",
     "diff_versions",
     "execute_and_register_cleaning",
     "validate_lineage",
+    "verify_registered_version",
+    "verify_version_integrity",
 ]

@@ -4,6 +4,50 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0037 — `check_version_lineage_binding` is a new function layered on `validate_lineage`
+- **Decision:** the strengthened "registered processed version ↔
+  execution report" relationships (id encodes execution_id, plan
+  fingerprint present & equal, `lineage_step_count` ↔ steps,
+  `applied_operation_ids` ↔ successful records, row/col/sha ↔ processed
+  ref) live in a **new** function that calls `validate_lineage` and adds
+  checks. `validate_lineage`'s own signature and behaviour are unchanged.
+- **Reason:** Phase-3 backward-compat rule — "prefer new
+  methods/functions over changing existing contracts". Only information
+  already in the models/reports is verified; no new lineage data.
+- **Alternatives considered:** adding the checks inside `validate_lineage`
+  (rejected — changes an existing contract's behaviour).
+
+## 0036 — Family consistency reuses `LineageGraph` but also collects errors independently
+- **Decision:** `check_family_consistency` runs its own per-version
+  relational checks (self/missing/foreign parent, root count/kind, raw
+  identity) so it can report **all** of them, and *additionally*
+  constructs a `LineageGraph` as a backstop (mainly for cycle detection).
+- **Reason:** the prompt wants "report all discovered errors, not stop at
+  the first" **and** "reuse the existing `LineageGraph` rather than
+  duplicating algorithms". `LineageGraph` raises on the first structural
+  fault, so it cannot be the sole mechanism; cycle detection is the one
+  algorithm genuinely reused.
+- **Alternatives considered:** re-implementing full multi-error graph
+  validation (rejected — duplicates `LineageGraph`); using only
+  `LineageGraph` (rejected — stops at first error).
+
+## 0035 — Integrity verification detects and reports; it never repairs
+- **Decision:** `verify_version_integrity` / `verify_registered_version` /
+  `check_family_consistency` return a structured result
+  (`VersionIntegrityResult` / `FamilyConsistencyResult`) with an
+  `errors[]` list; `raise_for_status()` raises the existing
+  `VersionIntegrityError` / `VersionStoreError`. A corrupted record file
+  is *reported*, not raised. Nothing rewrites a record or a data file.
+  Two additive store helpers were added — `version_file_path` and
+  `iter_version_files` (path computation / globbing, no parsing) — so
+  integrity code can reach a record without going through `get`.
+- **Reason:** Phase-3 rules — "do not silently repair metadata",
+  "corruption is detected and reported; the system never silently repairs
+  or overwrites the record", filesystem-only, deterministic.
+- **Alternatives considered:** re-hashing and rewriting a stale record
+  (rejected outright); raising immediately on the first problem (rejected
+  — a full error list is more auditable).
+
 ## 0034 — Cross-version diff rejects different families; content diff is opt-in-by-availability
 - **Decision:** `diff_versions(a, b)` raises `VersionDiffError` when
   `a.dataset_id != b.dataset_id`. The metadata/schema/quality diff comes

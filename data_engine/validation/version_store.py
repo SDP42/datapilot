@@ -82,6 +82,24 @@ class DatasetVersionStore:
     def _version_path(self, version: DatasetVersion) -> Path:
         return self.dataset_dir(version.dataset_id) / f"{_file_stem(version)}.json"
 
+    def version_file_path(self, dataset_version_id: str) -> Path:
+        """The on-disk record path for a version id, computed without parsing.
+
+        ``<dataset_id>:raw`` -> ``<root>/<dataset_id>/raw.json``;
+        ``<dataset_id>:exec-<id>`` -> ``<root>/<dataset_id>/exec-<id>.json``.
+        """
+        dataset_id, sep, stem = dataset_version_id.partition(":")
+        if not sep or not stem:
+            raise VersionStoreError(f"malformed dataset_version_id {dataset_version_id!r}")
+        return self.dataset_dir(dataset_id) / f"{stem}.json"
+
+    def iter_version_files(self, dataset_id: str) -> list[Path]:
+        """Every version-record file for a family, sorted, without parsing."""
+        directory = self.dataset_dir(dataset_id)
+        if not directory.is_dir():
+            return []
+        return sorted(directory.glob("*.json"))
+
     # ---- read ----------------------------------------------------------
 
     def get(self, dataset_version_id: str) -> DatasetVersion:

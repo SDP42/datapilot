@@ -75,8 +75,11 @@ AI-driven cleaning approval / reasoning is a later phase.
 clearly, never repairs), a read-only `LineageGraph` (parent / children /
 ancestors / descendants / root / path, with cycle and cross-family
 protection), an **opt-in** `execute_and_register_cleaning` wrapper that
-does not change the default cleaning flow, and deterministic
-`diff_versions` (metadata / schema / quality / content).
+does not change the default cleaning flow, deterministic `diff_versions`
+(metadata / schema / quality / content), and an integrity/validation
+layer (`verify_version_integrity`, `check_family_consistency`,
+`check_version_lineage_binding`) that detects tampered / stale /
+structurally-invalid versions and **reports — never repairs**.
 [data-lineage.md](data-lineage.md). Additive — it does not change the
 earlier layers.
 

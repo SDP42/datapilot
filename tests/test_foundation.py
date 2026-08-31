@@ -32,6 +32,8 @@ ENGINE_PACKAGES = [
     "data_engine.validation.lineage_graph",
     "data_engine.validation.auto_register",
     "data_engine.validation.version_diff",
+    "data_engine.validation.integrity",
+    "data_engine.validation.store_consistency",
     "data_engine.feature_engineering",
     "database",
     "dl_engine",

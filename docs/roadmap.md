@@ -8,7 +8,7 @@ future phases are not anticipated in code.
 | 0 | Architecture / Foundation | Done |
 | 1 | Data Ingestion & Profiling | **In progress** — CSV ingestion + profiling done; Parquet/Excel deferred |
 | 2 | Data Quality & Cleaning | **Done** — quality analysis + cleaning planning + safe cleaning execution (deterministic; no AI approval/reasoning yet) |
-| 3 | Validation & Data Lineage | **In progress** — `DatasetVersion` + store + lineage validation + lineage graph + opt-in auto-registration + cross-version diffing done; still filesystem-only (no database, no GC) |
+| 3 | Validation & Data Lineage | **In progress** — `DatasetVersion` + store + lineage validation + lineage graph + opt-in auto-registration + cross-version diffing + version-integrity / family-consistency / version↔lineage-binding checks done; still filesystem-only (no database, no GC) |
 | 4 | EDA & Statistical Analysis | Not started |
 | 5 | Automated Problem Understanding | Not started |
 | 6 | Feature Engineering | Not started |
@@ -90,11 +90,18 @@ future phases are not anticipated in code.
   ancestors / descendants / root / path) that raises on missing parents,
   cross-family parents, self-parents, multiple roots, and cycles;
   `execute_and_register_cleaning`, an **opt-in** wrapper that leaves the
-  default `execute_cleaning` flow untouched; and `diff_versions`,
+  default `execute_cleaning` flow untouched; `diff_versions`,
   deterministic metadata / schema / quality / content comparison of two
-  same-family versions. See [data-lineage.md](data-lineage.md). Still
-  filesystem-only. Not yet: database persistence, version deletion / GC,
-  automatic schema-difference correction, a "latest version" policy.
+  same-family versions; and an integrity/validation layer —
+  `verify_version_integrity` / `verify_registered_version` (file exists /
+  readable / size / SHA-256 / metadata consistency, for raw and processed
+  versions), `check_family_consistency` (all registered versions for a
+  family, reusing `LineageGraph`, reporting every discovered error), and
+  `check_version_lineage_binding` (registered processed version ↔
+  execution report). All of it **detects and reports; never repairs**.
+  See [data-lineage.md](data-lineage.md). Still filesystem-only. Not yet:
+  database persistence, version deletion / GC, automatic schema-difference
+  correction, a "latest version" policy.
 
 ### Phase 4 — EDA & Statistical Analysis
 - **Objective:** understand relationships in the data.
