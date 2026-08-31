@@ -83,8 +83,17 @@ structurally-invalid versions and **reports — never repairs**.
 [data-lineage.md](data-lineage.md). Additive — it does not change the
 earlier layers.
 
+**Phase 4 (in progress):** `data_engine.eda` — a deterministic,
+**analysis-only** EDA foundation (`analyze_dataframe` /
+`analyze_dataset_version` → a JSON-serialisable `EDAReport`: univariate
+numeric / categorical / datetime summaries, missingness, and a small
+deterministic bivariate layer). Read-only — no dataset, version record,
+or lineage is modified; no new version is registered. No statistical
+testing, no visualization. [eda.md](eda.md).
+
 **Future-phase components:** everything else —
-EDA, feature engineering, `ml_engine`, `dl_engine`,
+statistical hypothesis testing, figure generation, feature engineering,
+`ml_engine`, `dl_engine`,
 `experimentation`, `explainability`, `ai_engine`, `database`, `backend`,
 `frontend`, MLOps.
 

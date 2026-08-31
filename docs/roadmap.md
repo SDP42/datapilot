@@ -9,7 +9,7 @@ future phases are not anticipated in code.
 | 1 | Data Ingestion & Profiling | **In progress** — CSV ingestion + profiling done; Parquet/Excel deferred |
 | 2 | Data Quality & Cleaning | **Done** — quality analysis + cleaning planning + safe cleaning execution (deterministic; no AI approval/reasoning yet) |
 | 3 | Validation & Data Lineage | **In progress** — `DatasetVersion` + store + lineage validation + lineage graph + opt-in auto-registration + cross-version diffing + version-integrity / family-consistency / version↔lineage-binding checks done; still filesystem-only (no database, no GC) |
-| 4 | EDA & Statistical Analysis | Not started |
+| 4 | EDA & Statistical Analysis | **In progress** — deterministic, analysis-only univariate EDA + a small basic bivariate layer (`data_engine.eda`); no statistical testing or visualization yet |
 | 5 | Automated Problem Understanding | Not started |
 | 6 | Feature Engineering | Not started |
 | 7 | Classical ML | Not started |
@@ -108,6 +108,18 @@ future phases are not anticipated in code.
 - **Components:** univariate/bivariate analysis, correlation, statistical
   tests (SciPy/statsmodels), Matplotlib/Plotly figure generation.
 - **Output:** structured EDA report with figures.
+- **Status:** `data_engine.eda` implemented — a deterministic,
+  **analysis-only** foundation: `analyze_dataframe` /
+  `analyze_dataset_version` → a JSON-serialisable `EDAReport` with
+  univariate summaries (numeric fixed-quantile stats, categorical
+  deterministic top-N, datetime range, missingness) and a small
+  deterministic bivariate layer (numeric↔numeric Pearson correlation,
+  categorical↔numeric grouped stats, categorical↔categorical contingency
+  counts). Read-only — no dataset / version record / lineage is modified,
+  no new version is registered; the version-aware entrypoint reuses
+  `verify_version_integrity`. See [eda.md](eda.md). **Not yet:**
+  statistical hypothesis testing (SciPy/statsmodels), mutual information /
+  association measures, any Matplotlib/Plotly figure generation.
 
 ### Phase 5 — Automated Problem Understanding
 - **Objective:** identify the ML task from data + objective.

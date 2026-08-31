@@ -4,6 +4,46 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0040 — EDA `analyze_dataset_version` reuses `verify_version_integrity`, registers nothing
+- **Decision:** the version-aware EDA entrypoint calls the existing
+  `verify_version_integrity` (raising `VersionIntegrityError` on failure),
+  then `pd.read_csv(version.path)` read-only, then `analyze_dataframe`. It
+  never writes a file and never registers a `DatasetVersion`.
+- **Reason:** Phase-4 rules — "reuse existing integrity validation rather
+  than creating a second file-integrity system"; "EDA is an analysis
+  operation, not a transformation"; "do not register a new dataset
+  version merely because EDA was performed".
+- **Alternatives considered:** a bespoke file check in EDA (rejected —
+  duplicate system); auto-registering an "EDA-ran" marker (rejected —
+  EDA changes nothing).
+
+## 0039 — EDA has its own small bivariate layer; no SciPy/statsmodels
+- **Decision:** `analyze_bivariate` implements only Pearson correlation
+  (numeric↔numeric, with paired-obs count), grouped count/mean/median
+  (categorical↔numeric), and contingency counts (categorical↔categorical).
+  No p-values, no chi-square, no ANOVA, no mutual information.
+- **Reason:** Phase-4 scope for this increment explicitly stops before
+  statistical significance testing; no new dependency is added.
+- **Alternatives considered:** pulling in SciPy now (rejected —
+  out of scope, adds a dependency); skipping bivariate entirely
+  (rejected — the prompt asks for the three basic relationship types).
+- **Consequence:** deterministic caps (≤50 pairs / ≤50-cardinality
+  categoricals / ≤200 contingency rows) keep output bounded, each with a
+  `notes[]` entry when hit.
+
+## 0038 — EDA classifies columns by pandas dtype, not the profiling heuristic
+- **Decision:** `data_engine.eda` classifies each column strictly by its
+  actual pandas dtype (datetime64 → datetime, bool → categorical,
+  numeric → numeric, else → categorical). It does **not** use
+  `profiling.infer_column_type`, which labels text-that-looks-like-dates
+  as `DATETIME`.
+- **Reason:** Phase-4 rule — "if a column is still a string/object, do
+  not magically reinterpret it as datetime merely because values look
+  date-like"; type conversion is a *cleaning* concern, not EDA's.
+- **Alternatives considered:** reusing `infer_column_type` for
+  consistency with profiling (rejected — would violate the read-only /
+  no-reinterpretation requirement).
+
 ## 0037 — `check_version_lineage_binding` is a new function layered on `validate_lineage`
 - **Decision:** the strengthened "registered processed version ↔
   execution report" relationships (id encodes execution_id, plan
