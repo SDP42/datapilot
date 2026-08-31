@@ -4,14 +4,17 @@
 dataset (a DataFrame, or a registered `DatasetVersion`) into a structured,
 JSON-serialisable `EDAReport`.
 
-Phase 4 now contains three foundations (all deterministic, read-only):
+Phase 4 now contains four foundations (all deterministic, read-only):
 
 1. the **EDA foundation** — column classification, univariate analysis,
    missingness, and a small bivariate layer;
-2. the **statistical hypothesis-testing foundation** — Welch's t-test,
+2. the **parametric hypothesis-testing foundation** — Welch's t-test,
    one-way ANOVA, and the chi-square test of independence;
 3. the **effect-size / association-measure foundation** — Cramér's V,
-   the correlation ratio (η), and mutual information.
+   the correlation ratio (η), and mutual information;
+4. the **non-parametric hypothesis-testing foundation** — Spearman and
+   Kendall rank correlation, the Mann-Whitney U test, and the
+   Kruskal-Wallis H test.
 
 Phase 4 remains **in progress**.
 
@@ -139,8 +142,9 @@ counts < 5 still completes but adds a note.
 
 ### Not implemented (later increments)
 
-Spearman / Kendall / Mann-Whitney / Kruskal-Wallis, regression or
-normality tests, and multiple-testing correction.
+Regression or normality tests, and multiple-testing correction. (Spearman
+/ Kendall / Mann-Whitney / Kruskal-Wallis are in the non-parametric
+section below.)
 
 ## Effect sizes & association measures (`analyze_effect_sizes`)
 
@@ -206,6 +210,82 @@ deterministic representation, matching the statistical layer.
 Any other association measure (e.g. Theil's U, distance correlation), a
 k-NN / Kraskov MI estimator, and MI for datetime columns.
 
+## Non-parametric hypothesis testing (`analyze_nonparametric`)
+
+Non-parametric tests make no distributional assumption (no normality, no
+equal variance) — they work on **ranks**. They complement the parametric
+tests: use them when the numeric data is skewed, ordinal, or has
+outliers. `analyze_nonparametric(df, *, alpha=0.05) -> NonParametricAnalysis`
+runs a bounded deterministic battery, and it is embedded in
+`analyze_dataframe` as `EDAReport.nonparametric_tests` (a defaulted,
+backward-compatible field — an `EDAReport` serialised before this
+increment still validates).
+
+### Tests implemented (SciPy — already a project dependency)
+
+| Test | Inputs | SciPy call | Reports |
+| --- | --- | --- | --- |
+| **Spearman rank correlation** (`spearman_rank_correlation`) | two numeric columns, over rows where both are observed | `scipy.stats.spearmanr` | `statistic` (ρ), `p_value`, `n_observations`, `significant` |
+| **Kendall rank correlation** (`kendall_rank_correlation`) | two numeric columns | `scipy.stats.kendalltau` (default: τ-b, `method="auto"`) | `statistic` (τ), `p_value`, `n_observations`, `significant` |
+| **Mann-Whitney U test** (`mann_whitney_u`) | a categorical column with **exactly two** groups + a numeric column | `scipy.stats.mannwhitneyu(..., alternative="two-sided")` | `statistic` (U), `p_value`, `n_observations`, `n_groups = 2`, per-group sizes in `notes`, `significant` |
+| **Kruskal-Wallis H test** (`kruskal_wallis`) | a categorical column + a numeric column, ≥ 2 usable groups | `scipy.stats.kruskal` | `statistic` (H), `p_value`, `degrees_of_freedom` (k−1), `n_observations`, `n_groups`, `significant` |
+
+**Supported variable types**: Spearman / Kendall — numeric ↔ numeric.
+Mann-Whitney / Kruskal-Wallis — categorical ↔ numeric.
+
+**Fixed deterministic configuration**: Mann-Whitney always uses
+`alternative="two-sided"` (the direction of the alternative is never
+inferred); Kendall uses SciPy's default τ-b. No randomness anywhere.
+
+### Result model
+
+`NonParametricTestResult` — `test_kind` (`NonParametricTestKind`),
+`test_name`, `columns`, `status` (`NonParametricTestStatus`:
+`completed` / `unavailable`), `reason` (set only when unavailable),
+`statistic`, `p_value`, `degrees_of_freedom` (Kruskal-Wallis only),
+`n_observations`, `n_groups`, `alpha`, `significant` (`p_value < alpha`),
+`notes`. `NonParametricAnalysis` groups results into `spearman` /
+`kendall` / `mann_whitney_u` / `kruskal_wallis` plus `notes`, mirroring
+`StatisticalAnalysis`.
+
+### Automatic selection and deterministic caps
+
+Spearman and Kendall run over every unordered numeric pair; Mann-Whitney
+and Kruskal-Wallis over every `(categorical, numeric)` combination.
+Categorical columns with cardinality above `MAX_BIVARIATE_CARDINALITY`
+(50) are excluded. Documented module-constant caps:
+
+| Constant | Default |
+| --- | --- |
+| `MAX_SPEARMAN_PAIRS` | 50 |
+| `MAX_KENDALL_PAIRS` | 50 |
+| `MAX_MANN_WHITNEY_COMBINATIONS` | 50 |
+| `MAX_KRUSKAL_WALLIS_COMBINATIONS` | 50 |
+
+Pairs are ordered by sorted column name; hitting a cap keeps the first N
+and records a `notes[]` entry.
+
+### Missing-value & unavailable / degenerate behaviour
+
+Missing rows are **excluded, never imputed / filled / replaced**; each
+result reports the `n_observations` actually used. A test that cannot be
+computed returns `status = unavailable` with a `reason` and `None` for
+`statistic` / `p_value` / `degrees_of_freedom` / `n_observations` /
+`n_groups` / `significant` — never a fake `0` / `1` / `False`. Triggers:
+no valid paired observations; fewer than 3 valid paired observations
+(rank correlation); a constant column (rank correlation); fewer than two
+groups, or a group with fewer than 2 observations, for Mann-Whitney;
+**more than two groups** for Mann-Whitney (it never silently picks two);
+fewer than 2 groups with ≥ 2 observations for Kruskal-Wallis (smaller
+groups are dropped and each drop is recorded in `notes`); zero numeric
+variance; a non-finite SciPy result. Statistics are rounded to 10 decimal
+places for cross-platform determinism, matching the other layers.
+
+### Not implemented (later increments)
+
+Sign test, Wilcoxon signed-rank (paired), Friedman test, one-sided
+alternatives, and any normality / regression test.
+
 ## Missing / invalid data behaviour
 
 EDA is **observational**. If a statistic cannot be calculated it is
@@ -241,11 +321,12 @@ the CSV read-only and analyses it.
 
 ## What remains for Phase 4
 
-- Spearman / Kendall rank correlation (and other non-parametric tests).
 - Visualization — figure generation, automated chart selection.
 - Richer distribution analysis (histograms/bins, skew/kurtosis).
 - An EDA ↔ quality cross-reference.
 - A k-NN / Kraskov mutual-information estimator; MI for datetime columns.
+- Paired / one-sided non-parametric tests (Wilcoxon signed-rank, sign
+  test, Friedman) and multiple-testing correction.
 
 ## What is intentionally NOT implemented (Phase 5+ / out of scope)
 
@@ -254,7 +335,8 @@ the CSV read-only and analyses it.
   selection / feature engineering.
 - No ML / DL / experiment tracking / SHAP / LLM / API / frontend /
   database / train-test splitting.
-- Within statistics / effect sizes: no Spearman/Kendall/Mann-Whitney/
-  Kruskal-Wallis, no regression/normality tests, no multiple-testing
-  correction, and no association measures beyond the three listed above.
+- Within statistics / effect sizes / non-parametric tests: no
+  regression/normality tests, no multiple-testing correction, no paired
+  or one-sided non-parametric tests, and no association measures beyond
+  the three listed above.
 - CSV only (matches the rest of the project so far).

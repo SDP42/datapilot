@@ -4,6 +4,48 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0048 — Mann-Whitney: exactly two groups, two-sided; more than two → unavailable
+- **Decision:** `mann_whitney_u` requires the categorical column to have
+  **exactly two** distinct values. Fewer → `unavailable` ("fewer than two
+  groups"); more → `unavailable` ("more than two groups; requires exactly
+  two"). It always calls SciPy with `alternative="two-sided"`.
+- **Reason:** Phase-4 prompt — "If more than two groups exist, return
+  unavailable rather than silently choosing two"; "Do not invent a
+  direction of the alternative hypothesis." Kruskal-Wallis is the
+  multi-group option.
+- **How it works:** the two groups are `sub[cat] == labels[0/1]` where
+  `labels` is the sorted list of distinct string values; each group must
+  have ≥ `MANN_WHITNEY_MIN_GROUP_SIZE` (2) observations, else
+  `unavailable`. Group sizes are recorded in `notes`.
+
+## 0047 — Non-parametric layer mirrors the parametric layer; SciPy only
+- **Decision:** `data_engine/eda/nonparametric_models.py` +
+  `nonparametric.py` implement exactly Spearman, Kendall, Mann-Whitney U,
+  and Kruskal-Wallis H, with `NonParametricTestResult` /
+  `NonParametricAnalysis` shaped like `StatisticalTestResult` /
+  `StatisticalAnalysis`. `analyze_nonparametric` runs Spearman/Kendall
+  over every numeric pair and Mann-Whitney/Kruskal-Wallis over every
+  `(categorical, numeric)` combination, capped by `MAX_SPEARMAN_PAIRS` /
+  `MAX_KENDALL_PAIRS` / `MAX_MANN_WHITNEY_COMBINATIONS` /
+  `MAX_KRUSKAL_WALLIS_COMBINATIONS` (50 each), high-cardinality
+  categoricals excluded, ordered by sorted column name, truncations
+  noted. `EDAReport.nonparametric_tests` is a defaulted, backward-
+  compatible field populated by `analyze_dataframe`.
+- **Reason:** consistency with the two immediately-preceding increments;
+  SciPy is already a dependency (`scipy.stats.{spearmanr, kendalltau,
+  mannwhitneyu, kruskal}`) — no new dependency; the caps mirror the other
+  auto-batteries.
+- **How it works:** rank correlations drop NaN rows, require ≥ 3 valid
+  pairs and both columns non-constant, then call SciPy and check the
+  result is finite. Kruskal-Wallis drops NaN rows, keeps sorted category
+  groups with ≥ 2 observations (each drop recorded in `notes`), requires
+  ≥ 2 remaining groups and non-zero variance, then calls
+  `scipy.stats.kruskal` and reports `H`, `p`, `df = k − 1`. Statistics
+  are rounded to 10 dp (matches `statistics._ROUND`). An unavailable test
+  returns `None` + a reason (decision 0043 applies unchanged).
+- **Not done:** paired / one-sided non-parametric tests (Wilcoxon
+  signed-rank, sign test, Friedman), multiple-testing correction.
+
 ## 0046 — Effect sizes: `EDAReport.effect_sizes` is an additive, defaulted field
 - **Decision:** `EDAReport` gains `effect_sizes: EffectSizeAnalysis =
   Field(default_factory=EffectSizeAnalysis)`, populated by

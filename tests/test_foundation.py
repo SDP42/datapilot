@@ -43,6 +43,8 @@ ENGINE_PACKAGES = [
     "data_engine.eda.statistics",
     "data_engine.eda.effect_models",
     "data_engine.eda.effects",
+    "data_engine.eda.nonparametric_models",
+    "data_engine.eda.nonparametric",
     "data_engine.feature_engineering",
     "database",
     "dl_engine",

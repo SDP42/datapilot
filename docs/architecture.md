@@ -84,24 +84,27 @@ structurally-invalid versions and **reports — never repairs**.
 earlier layers.
 
 **Phase 4 (in progress):** `data_engine.eda` — a deterministic,
-**analysis-only** layer. Three foundations: (1) EDA — `analyze_dataframe`
+**analysis-only** layer. Four foundations: (1) EDA — `analyze_dataframe`
 / `analyze_dataset_version` → a JSON-serialisable `EDAReport` (univariate
 numeric / categorical / datetime summaries, missingness, a small
-deterministic bivariate layer); (2) statistical hypothesis testing —
+deterministic bivariate layer); (2) parametric hypothesis testing —
 `analyze_statistics` and `welch_t_test` / `one_way_anova` /
 `chi_square_independence` → `StatisticalAnalysis`; (3) effect sizes —
 `analyze_effect_sizes` and `cramers_v` / `correlation_ratio` /
-`mutual_information` → `EffectSizeAnalysis`. SciPy-based, bounded
-deterministic caps; unavailable tests/measures report `None` + a reason,
-never a fake value; MI involving a numeric column is a documented
-binning-based estimate; `EDAReport.statistical_tests` and
-`EDAReport.effect_sizes` are backward-compatible defaulted fields.
-Read-only — no dataset, version record, or lineage is modified; no new
-version is registered. No rank correlation, no visualization.
+`mutual_information` → `EffectSizeAnalysis`; (4) non-parametric tests —
+`analyze_nonparametric` and `spearman_rank_correlation` /
+`kendall_rank_correlation` / `mann_whitney_u` / `kruskal_wallis` →
+`NonParametricAnalysis`. SciPy-based, bounded deterministic caps;
+unavailable tests/measures report `None` + a reason, never a fake value;
+MI involving a numeric column is a documented binning-based estimate;
+`EDAReport.statistical_tests`, `.effect_sizes` and `.nonparametric_tests`
+are backward-compatible defaulted fields. Read-only — no dataset, version
+record, or lineage is modified; no new version is registered. No
+visualization.
 [eda.md](eda.md).
 
 **Future-phase components:** everything else —
-rank correlation, figure generation, feature engineering,
+figure generation, feature engineering,
 `ml_engine`, `dl_engine`,
 `experimentation`, `explainability`, `ai_engine`, `database`, `backend`,
 `frontend`, MLOps.

@@ -16,6 +16,7 @@ from enum import Enum
 from pydantic import BaseModel, Field
 
 from .effect_models import EffectSizeAnalysis
+from .nonparametric_models import NonParametricAnalysis
 from .statistical_models import StatisticalAnalysis
 
 EDA_ENGINE_VERSION = "1"
@@ -201,5 +202,12 @@ class EDAReport(BaseModel):
             "Effect-size / association measures (Cramér's V, correlation ratio, mutual "
             "information). Additive and defaulted, so EDA reports serialised before this "
             "field still validate."
+        ),
+    )
+    nonparametric_tests: NonParametricAnalysis = Field(
+        default_factory=NonParametricAnalysis,
+        description=(
+            "Non-parametric tests (Spearman, Kendall, Mann-Whitney U, Kruskal-Wallis H). "
+            "Additive and defaulted, so EDA reports serialised before this field still validate."
         ),
     )
