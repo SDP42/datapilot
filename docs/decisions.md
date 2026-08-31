@@ -4,6 +4,85 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0059 — Multiple-testing correction: standalone NumPy layer over already-computed p-values
+- **Decision:** `data_engine/eda/multiple_testing_models.py` +
+  `multiple_testing.py` add `correct_multiple_testing(p_values, *,
+  method="holm", alpha=0.05, labels=None) ->
+  MultipleTestingCorrectionResult` with **Bonferroni**, **Holm** (FWER)
+  and **Benjamini-Hochberg** (FDR). It is **never** applied automatically
+  by any existing test; no existing statistical-test output changes.
+- **Reason:** Prompt 12 (Phase-4 completion) activity C. "The correction
+  layer must be independent and reusable"; "Never overwrite the original
+  p-value"; "Do not silently clip invalid p-values".
+- **How it works:** all three methods are implemented directly on NumPy
+  (SciPy has no Bonferroni/Holm helper, so all three are done here for
+  consistency and version-independence). Internal sorting is by index
+  (`np.argsort(kind="stable")`) and mapped back, so **output order = input
+  order** and duplicate p-values stay traceable; optional `labels` are
+  echoed in input order. Corrected p-values are clamped to `[0, 1]` and
+  rounded to 10 dp; `reject` iff corrected `<= alpha`. `0.0` / `1.0` are
+  valid. NaN / `±inf` / out-of-`[0,1]` → `status = unavailable` + a
+  precise reason (**not** clipped); empty input → unavailable. Unknown
+  `method` → `ValueError`; non-numeric p-value or `bool`/non-numeric
+  `alpha` → `TypeError`; `alpha` outside `(0, 1)` or `labels` length
+  mismatch → `ValueError`. No new dependency.
+
+## 0058 — Paired / one-sided non-parametric tests: array-based, SciPy-backed, separate model
+- **Decision:** `data_engine/eda/paired_nonparametric_models.py` +
+  `paired_nonparametric.py` add `wilcoxon_signed_rank(x, y, *,
+  alternative=...)`, `sign_test(x, y, *, alternative=...)`,
+  `friedman_test(*samples)` → a dedicated `PairedNonParametricResult`.
+  The independent-sample `analyze_nonparametric` /
+  `NonParametricTestResult` and every other existing test are **unchanged**.
+- **Reason:** Prompt 12 activity B. "Prefer a dedicated module and models
+  rather than modifying the existing non-parametric implementation";
+  "unequal-length rejection" / "fewer than three groups" in the test list
+  imply an **array-based** API (not DataFrame columns); "The pairing must
+  be positional / explicitly supplied".
+- **How it works:** inputs are array-likes (`np.asarray(..., float)`);
+  pairing is positional and never inferred; observations are **not**
+  sorted or imputed. Wilcoxon: `d = x - y`, zeros dropped
+  (`zero_method="wilcox"`), `scipy.stats.wilcoxon(alternative=...)`,
+  `method="auto"`. Sign test: `scipy.stats.binomtest(n_positive,
+  n_nonzero, 0.5, alternative)`, `statistic` = the positive count (a
+  count, not an effect size), zeros excluded. Friedman:
+  `scipy.stats.friedmanchisquare` (never ANOVA / Kruskal-Wallis),
+  listwise-complete blocks only, `np.errstate` around the call so an
+  identical-groups zero-denominator becomes an explicit `unavailable`.
+  Invalid API arguments (length mismatch, unknown `alternative`, < 3
+  Friedman groups) raise `ValueError`; data degeneracy (< 3 usable
+  observations, all-zero differences, non-finite SciPy result) →
+  `status = unavailable` + reason. Statistics rounded to 10 dp; p-values
+  cleaned but not rounded (matches the existing `statistics._completed`).
+
+## 0057 — Datetime MI: deterministic epoch-seconds conversion, reuse the KSG estimator
+- **Decision:** `estimate_mutual_information_datetime(df, datetime_column,
+  other_column, *, k=3)` is added to `knn_mi.py` (not a new module) and
+  **reuses** `_kraskov_ksg1` — no second KSG implementation. It supports
+  datetime ↔ numeric and datetime ↔ datetime; datetime ↔ categorical is
+  rejected with a documented reason. `KNNMutualInformationResult` gains
+  one additive defaulted field, `representation`.
+- **Reason:** Prompt 12 activity A. "If the existing KSG estimator can
+  safely be reused after deterministic datetime-to-numeric conversion,
+  reuse the estimator rather than duplicating KSG mathematics"; "Use
+  elapsed time in seconds from a deterministic reference origin"; "Do not
+  use the current time as the reference".
+- **How it works:** `_to_epoch_seconds` = `(pd.to_datetime(series,
+  utc=True) - Timestamp("1970-01-01T00:00:00Z")).dt.total_seconds()` —
+  naive timestamps read as UTC, aware converted to UTC, `NaT` → `nan`
+  (filtered), **no calendar features**. Because epoch seconds (~10⁹) would
+  dominate the Chebyshev joint distance, `_estimate` now takes
+  `standardize=True` from the datetime path only: each marginal is
+  divided by its mean/std before the joint-space distance (an affine
+  transform → population MI unchanged; recorded in `notes`). The
+  numeric-only `estimate_mutual_information_knn` keeps `standardize=False`
+  so its behaviour is unchanged (it now also sets `representation =
+  "raw_numeric_values"` — additive metadata only, the MI value and status
+  logic are identical). Same `estimator = "kraskov_knn"`, same unavailable
+  rules (absent / same / non-datetime / categorical / all-`NaT` / too few
+  / invalid `k` / constant / non-finite). Standalone — no `EDAReport`
+  field. No new dependency.
+
 ## 0056 — k-NN / Kraskov MI estimator: continuous KSG-1, standalone, additive to the binned MI
 - **Decision:** `data_engine/eda/knn_mi_models.py` + `knn_mi.py` add
   `estimate_mutual_information_knn(df, x_column, y_column, *, k=3) ->

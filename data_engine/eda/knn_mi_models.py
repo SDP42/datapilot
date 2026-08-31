@@ -34,6 +34,11 @@ KNN_MI_MIN_OBSERVATIONS = 5
 KNN_MI_ESTIMATOR_NAME = "kraskov_knn"  # KSG estimator 1
 KNN_MI_DISTANCE_METRIC = "chebyshev"  # L-infinity in the joint (X, Y) space
 
+# Column-representation identifiers used by ``mutual_information`` estimators
+# in this module.
+KNN_MI_REPRESENTATION_RAW = "raw_numeric_values"
+KNN_MI_REPRESENTATION_DATETIME = "elapsed_seconds_since_unix_epoch_utc"
+
 # Estimates in nats are rounded to this many places for cross-platform
 # deterministic representation (mirrors the rest of the EDA layer).
 KNN_MI_ROUND = 10
@@ -59,6 +64,15 @@ class KNNMutualInformationResult(BaseModel):
 
     x_column: str
     y_column: str
+    representation: str | None = Field(
+        default=None,
+        description=(
+            "How each column was turned into a real value before estimation — "
+            "'raw_numeric_values' for numeric columns, "
+            "'elapsed_seconds_since_unix_epoch_utc' for datetime columns. None on results "
+            "serialised before this field existed."
+        ),
+    )
 
     status: KNNMutualInformationStatus
     reason: str | None = Field(

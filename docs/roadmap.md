@@ -9,7 +9,7 @@ future phases are not anticipated in code.
 | 1 | Data Ingestion & Profiling | **In progress** — CSV ingestion + profiling done; Parquet/Excel deferred |
 | 2 | Data Quality & Cleaning | **Done** — quality analysis + cleaning planning + safe cleaning execution (deterministic; no AI approval/reasoning yet) |
 | 3 | Validation & Data Lineage | **In progress** — `DatasetVersion` + store + lineage validation + lineage graph + opt-in auto-registration + cross-version diffing + version-integrity / family-consistency / version↔lineage-binding checks done; still filesystem-only (no database, no GC) |
-| 4 | EDA & Statistical Analysis | **In progress** — deterministic analysis-only `data_engine.eda`: EDA/univariate/bivariate, parametric tests, effect sizes, non-parametric tests, distribution analysis, EDA↔quality cross-reference, visualization foundation (chart-spec selection + in-memory Matplotlib **and Plotly** rendering + explicit chart export), target-aware visualization recommendation, statistical-strength visualization ranking, k-NN / Kraskov mutual-information estimator. No dashboard/API; Phase 4 not complete |
+| 4 | EDA & Statistical Analysis | **Done** — deterministic analysis-only `data_engine.eda`: EDA/univariate/bivariate, parametric tests, effect sizes, non-parametric tests, distribution analysis, EDA↔quality cross-reference, visualization foundation (chart-spec selection + in-memory Matplotlib **and Plotly** rendering + explicit chart export), target-aware visualization recommendation, statistical-strength visualization ranking, k-NN / Kraskov mutual-information estimator, datetime mutual information, paired / one-sided non-parametric tests (Wilcoxon signed-rank / sign / Friedman), multiple-testing correction (Bonferroni / Holm / Benjamini-Hochberg). No dashboard/API |
 | 5 | Automated Problem Understanding | Not started |
 | 6 | Feature Engineering | Not started |
 | 7 | Classical ML | Not started |
@@ -103,7 +103,7 @@ future phases are not anticipated in code.
   database persistence, version deletion / GC, automatic schema-difference
   correction, a "latest version" policy.
 
-### Phase 4 — EDA & Statistical Analysis
+### Phase 4 — EDA & Statistical Analysis — **Done**
 - **Objective:** understand relationships in the data.
 - **Components:** univariate/bivariate analysis, correlation, statistical
   tests (SciPy), deterministic distribution analysis, an EDA↔quality
@@ -120,7 +120,9 @@ future phases are not anticipated in code.
   `None` + an explicit reason, never a fabricated `0` / `1` / `False`.
   Every section that `analyze_dataframe` populates is a backward-
   compatible **defaulted** field, so an `EDAReport` JSON serialised
-  before any given increment still validates. Ten foundations:
+  before any given increment still validates. Fourteen foundations
+  (standalone estimators / test functions are **not** wired into
+  `analyze_dataframe` and add no `EDAReport` field):
 
   1. **EDA / univariate / bivariate** — numeric fixed-quantile stats,
      categorical deterministic top-N, datetime range, missingness; a
@@ -206,6 +208,42 @@ future phases are not anticipated in code.
       for absent / same / non-numeric column, too few observations,
       invalid `k` (`bool` / non-`int` / `< 1` / `>= N`), or a constant
       column. No new dependency (NumPy / SciPy).
+  12. **Datetime mutual information** —
+      `estimate_mutual_information_datetime(df, datetime_column,
+      other_column, *, k=3)` → `KNNMutualInformationResult`. The same KSG
+      estimator 1, after a deterministic **datetime → elapsed seconds
+      since 1970-01-01T00:00:00Z (UTC)** conversion (naive read as UTC,
+      aware converted to UTC, `NaT` filtered, no calendar features), then
+      each column standardised so the epoch-second magnitude does not
+      dominate the joint distance. Supports datetime ↔ numeric and
+      datetime ↔ datetime; datetime ↔ categorical is rejected with a
+      documented reason. Reuses the estimator (`estimator =
+      "kraskov_knn"`, `representation =
+      "elapsed_seconds_since_unix_epoch_utc"`); standalone, no `EDAReport`
+      field, no new dependency.
+  13. **Paired / one-sided non-parametric tests** —
+      `wilcoxon_signed_rank(x, y, *, alternative=...)`,
+      `sign_test(x, y, *, alternative=...)`, `friedman_test(*samples)` →
+      `PairedNonParametricResult`. Positionally-paired array inputs
+      (pairing never inferred), `alternative` ∈ {two-sided, greater,
+      less} for Wilcoxon / sign, ≥ 3 related samples for Friedman
+      (`scipy.stats.wilcoxon` / `binomtest` / `friedmanchisquare`). Not
+      sorted, not imputed; zero differences dropped; listwise NaN / non-
+      finite drop. Invalid API arguments raise `ValueError`; data
+      degeneracy → `status = unavailable` + reason. The existing
+      independent-sample `analyze_nonparametric` is unchanged.
+  14. **Multiple-testing correction** —
+      `correct_multiple_testing(p_values, *, method="holm", alpha=0.05,
+      labels=None)` → `MultipleTestingCorrectionResult`. **Bonferroni**
+      and **Holm** (FWER) and **Benjamini-Hochberg** (FDR) over a family
+      of **already-computed** p-values — never recomputes a p-value,
+      never touches an existing test result, no automatic application.
+      Output preserves input order (internal index sort mapped back);
+      corrected p-values clamped to `[0, 1]`; `0.0` / `1.0` valid; NaN /
+      `±inf` / out-of-range **rejected** (not clipped) as
+      `status = unavailable`; invalid method / alpha / labels raise
+      `TypeError` / `ValueError`. Implemented on NumPy (SciPy has no
+      Bonferroni / Holm helper); no new dependency.
 
   **Completed Phase-4 items:** (1) EDA / univariate / bivariate,
   (2) parametric tests, (3) effect sizes, (4) non-parametric tests,
@@ -213,12 +251,11 @@ future phases are not anticipated in code.
   (7) visualization foundation, (8) target-aware visualization
   recommendation, (9) Plotly / chart export, (10) statistical-strength
   visualization ranking, (11) k-NN / Kraskov mutual-information
-  estimator.
+  estimator, (12) datetime mutual information, (13) paired / one-sided
+  non-parametric tests, (14) multiple-testing correction.
 
-  See [eda.md](eda.md). **Still remaining in Phase 4:** mutual
-  information for datetime columns; paired / one-sided non-parametric
-  tests (Wilcoxon signed-rank, sign, Friedman); multiple-testing
-  correction. Phase 4 is **not complete** and is **not** marked Done.
+  See [eda.md](eda.md). **Phase 4 is complete.** No Phase-4 items remain.
+  Later phases (5+) are **not started**.
 
 ### Phase 5 — Automated Problem Understanding
 - **Objective:** identify the ML task from data + objective.

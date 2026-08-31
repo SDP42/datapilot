@@ -83,8 +83,8 @@ structurally-invalid versions and **reports — never repairs**.
 [data-lineage.md](data-lineage.md). Additive — it does not change the
 earlier layers.
 
-**Phase 4 (in progress):** `data_engine.eda` — a deterministic,
-**analysis-only** layer. Ten foundations: (1) EDA — `analyze_dataframe`
+**Phase 4 (done):** `data_engine.eda` — a deterministic,
+**analysis-only** layer. Fourteen foundations: (1) EDA — `analyze_dataframe`
 / `analyze_dataset_version` → a JSON-serialisable `EDAReport` (univariate
 numeric / categorical / datetime summaries, missingness, a small
 deterministic bivariate layer); (2) parametric hypothesis testing —
@@ -146,7 +146,21 @@ Kraskov mutual-information estimator** —
 `scipy.spatial.cKDTree`, `math.fsum` → row-order independent). It
 complements — never replaces — the binning-based `mutual_information`
 (identifier `"kraskov_knn"`); it is standalone (explicit columns, no
-target inference) and adds **no** `EDAReport` field.
+target inference) and adds **no** `EDAReport` field; (11) **datetime
+mutual information** — `estimate_mutual_information_datetime`, the same
+estimator after a deterministic datetime → elapsed-seconds-since-Unix-
+epoch (UTC) conversion (datetime ↔ numeric / datetime ↔ datetime;
+categorical rejected); (12) **paired / one-sided non-parametric tests** —
+`wilcoxon_signed_rank` / `sign_test` / `friedman_test` →
+`PairedNonParametricResult`, related-samples complements to
+`analyze_nonparametric` (positionally paired, SciPy-backed, `ValueError`
+for invalid API args); (13) **multiple-testing correction** —
+`correct_multiple_testing` → `MultipleTestingCorrectionResult`, a
+standalone Bonferroni / Holm / Benjamini-Hochberg layer over
+already-computed p-values (input order preserved, invalid p-values
+rejected not clipped, never touches an existing test result). Standalone
+estimators / tests are not wired into `analyze_dataframe` and add no
+`EDAReport` field.
 `EDAReport.statistical_tests`, `.effect_sizes`, `.nonparametric_tests`,
 `.distribution`, `.quality_cross_reference`, `.visualizations`,
 `.visualization_recommendations` and `.visualization_statistical_strength`

@@ -4,7 +4,8 @@
 dataset (a DataFrame, or a registered `DatasetVersion`) into a structured,
 JSON-serialisable `EDAReport`.
 
-Phase 4 now contains ten foundations (all deterministic, read-only):
+Phase 4 is **complete**. It contains thirteen foundations (all
+deterministic, read-only):
 
 1. the **EDA foundation** — column classification, univariate analysis,
    missingness, and a small bivariate layer;
@@ -41,9 +42,24 @@ Phase 4 now contains ten foundations (all deterministic, read-only):
     **continuous** MI estimate for two numeric columns (KSG estimator 1,
     no binning). Complements — does not replace — the binning-based
     `mutual_information` in the effect-size foundation. Standalone,
-    explicit columns, no target inference.
+    explicit columns, no target inference;
+11. **datetime mutual information** —
+    `estimate_mutual_information_datetime(df, datetime_column,
+    other_column, *, k=3)`, the same KSG estimator after a deterministic
+    datetime → elapsed-seconds conversion (datetime ↔ numeric, datetime ↔
+    datetime);
+12. **paired / one-sided non-parametric tests** —
+    `wilcoxon_signed_rank(x, y, *, alternative=...)`,
+    `sign_test(x, y, *, alternative=...)`, `friedman_test(*samples)`, a
+    related-samples complement to the independent-sample non-parametric
+    foundation;
+13. **multiple-testing correction** —
+    `correct_multiple_testing(p_values, *, method="holm", alpha=0.05)`, a
+    standalone Bonferroni / Holm / Benjamini-Hochberg layer over a family
+    of already-computed p-values.
 
-Phase 4 remains **in progress**.
+Phase 4 is **complete** — every activity originally listed as remaining
+is now implemented. Later phases are not started.
 
 ```
 DataFrame  ──►  analyze_dataframe(df)          ──►  EDAReport
@@ -761,6 +777,140 @@ remain; `k` is a `bool` / non-`int` / `< 1` / `>= N`; a column is
 constant over the paired observations; or the estimate is non-finite.
 `k` is **never silently changed**. No randomness, no jitter, no seed.
 
+## Datetime mutual information (`estimate_mutual_information_datetime`)
+
+`estimate_mutual_information_datetime(df, datetime_column, other_column,
+*, k=3) -> KNNMutualInformationResult` lets a **datetime** column
+participate in MI analysis. It is a standalone function — not wired into
+`analyze_dataframe`, no new `EDAReport` field.
+
+### Deterministic representation
+
+Each datetime column is converted to **elapsed seconds since
+`1970-01-01T00:00:00Z`** (the Unix epoch, UTC — a fixed,
+dataset-independent reference, **never the current time**). Timezone-naive
+timestamps are read as UTC; timezone-aware timestamps are converted to
+UTC. `NaT` becomes a non-finite value and is filtered out. **No calendar
+features** (weekday / month / hour / season) are derived — the target is
+the underlying temporal quantity, not engineered time features.
+
+Because epoch seconds are ~10⁹ while a numeric partner may be ~10⁰, each
+column is then **standardised** (zero mean, unit standard deviation)
+before the joint-space distance, so the Chebyshev distance is not
+dominated by the datetime axis. Standardisation is an affine per-variable
+transform and does not change the population mutual information; it is
+recorded in `notes`. `representation` on the result is
+`"elapsed_seconds_since_unix_epoch_utc"`.
+
+### Estimator and supported relationships
+
+The converted values feed the **same KSG estimator 1** as
+`estimate_mutual_information_knn` (`estimator = "kraskov_knn"`, no code
+duplication). Supported: **datetime ↔ numeric** and **datetime ↔
+datetime**. **Datetime ↔ categorical is rejected** with a documented
+reason (use the binned `mutual_information` for categorical involvement) —
+no arbitrary temporal encoding is invented.
+
+### Unavailable behaviour
+
+`status = unavailable` + `reason` for: a missing column; the same column
+twice; a non-datetime `datetime_column`; a categorical / unsupported
+`other_column`; all-`NaT` datetime data; no paired usable observations;
+fewer than `max(5, k + 1)`; an invalid `k` (`bool` / non-`int` / `< 1` /
+`>= N`); a constant column; non-finite converted values; a non-finite
+result. A genuine `0.0` stays a `completed` result. `NaT` / `NaN` / `±inf`
+are filtered deterministically; `df` is never modified.
+
+## Paired / one-sided non-parametric tests
+
+Three **related-samples** tests, complementing the *independent*-sample
+`analyze_nonparametric` (which is unchanged). All take positionally
+**paired** array-likes (list / `numpy` array / `pandas` Series) — pairing
+is caller-supplied, never inferred. Observations are **not** sorted,
+reordered, or imputed. Statistics/p-values follow SciPy exactly. Invalid
+API arguments (length mismatch, unknown `alternative`, fewer than three
+Friedman groups) raise `ValueError`; data degeneracy returns
+`status = unavailable` + `reason` (never a fabricated `0` / `1` /
+`False`).
+
+### `wilcoxon_signed_rank(x, y, *, alternative="two-sided")`
+
+Wilcoxon signed-rank on `d = x - y`. **H0:** the paired differences are
+symmetric about zero. `alternative="greater"` → H1: `x` tends to exceed
+`y`; `"less"` → the reverse (exact `scipy.stats.wilcoxon` `alternative`
+semantics). Zero differences are dropped (`zero_method="wilcox"`), and
+SciPy chooses exact vs. normal approximation (`method="auto"`). Needs at
+least 3 non-zero differences.
+
+### `sign_test(x, y, *, alternative="two-sided")`
+
+Binomial sign test on the signs of the non-zero `d = x - y`. **H0:**
+`P(d > 0) = 0.5` among the non-zero differences.
+`alternative="greater"` → H1: `P(d > 0) > 0.5`. Zero differences are
+excluded from both counts; the test is
+`scipy.stats.binomtest(n_positive, n_nonzero, 0.5, alternative)`. The
+result reports `n_positive` / `n_negative` / `n_zero`; `statistic` is the
+positive count (a count, not a continuous effect size). Needs at least 3
+non-zero differences.
+
+### `friedman_test(*samples)`
+
+Friedman test for **three or more related** (repeated-measures) samples,
+in the caller's order. **H0:** the related groups have the same
+distribution / location. All samples must be the same length (one row =
+one block); a row with a missing / non-finite value in **any** sample is
+dropped listwise. Uses `scipy.stats.friedmanchisquare` — **not** ANOVA,
+**not** Kruskal-Wallis. Fewer than 3 groups or unequal lengths raise
+`ValueError`; fewer than 3 complete blocks, or identical groups (a
+degenerate zero denominator), → unavailable.
+
+Every result is a `PairedNonParametricResult` (JSON primitives only):
+`test_name`, `test_family = "paired_nonparametric"`, `alternative`,
+`statistic`, `p_value`, `n_observations`, `n_groups`, `n_positive` /
+`n_negative` / `n_zero`, `alpha`, `significant`, `status`, `reason`,
+`notes`.
+
+## Multiple-testing correction (`correct_multiple_testing`)
+
+`correct_multiple_testing(p_values, *, method="holm", alpha=0.05,
+labels=None) -> MultipleTestingCorrectionResult` takes a family of
+**already-computed** p-values and returns corrected p-values plus
+rejection decisions. It **never recomputes a p-value** and **never
+changes any existing statistical-test output** — no existing test result
+is touched, and there is no automatic correction anywhere.
+
+### Methods
+
+| `method` (aliases) | Adjusted p-value | Controls |
+| --- | --- | --- |
+| `bonferroni` | `min(1, m·p_i)` | family-wise error rate (FWER) |
+| `holm` (`holm-bonferroni`) | step-down: `max_{i≤j} min(1, (m−i)·p_(i))`, monotone | FWER, step-down |
+| `benjamini_hochberg` (`bh`, `fdr_bh`) | step-up: `min_{i≥j} min(1, (m/(i+1))·p_(i))` | false discovery rate (FDR), under its assumptions |
+
+All three are implemented directly on NumPy (SciPy has no Bonferroni /
+Holm helper, so all three are done here for consistency). No stronger
+claim than each method supports is made. `reject` iff the corrected
+p-value `≤ alpha`.
+
+### Contract and validation
+
+- **Output preserves input order.** Internal sorting is by index and
+  mapped back; `labels` (optional, same length) are echoed in input
+  order. Ties are handled with a stable sort, so duplicate p-values stay
+  traceable.
+- Corrected p-values are clamped to `[0, 1]` and rounded to 10 dp. `0.0`
+  and `1.0` are **valid** inputs.
+- **Invalid p-values are rejected, not clipped:** NaN, `±inf`, or a value
+  outside `[0, 1]` → `status = unavailable` + a precise `reason`. Empty
+  input → unavailable.
+- Invalid API arguments raise: an unknown `method` → `ValueError`; a
+  non-numeric p-value or a `bool` / non-numeric `alpha` → `TypeError`; an
+  `alpha` outside `(0, 1)` or a `labels` length mismatch → `ValueError`.
+- `MultipleTestingCorrectionResult` (JSON primitives only): `method`,
+  `controls`, `alpha`, `n_hypotheses`, `labels`, `p_values`,
+  `corrected_p_values`, `rejected`, `n_rejected`, `status`, `reason`,
+  `notes`.
+
 ## Missing / invalid data behaviour
 
 EDA is **observational**. If a statistic cannot be calculated it is
@@ -794,12 +944,12 @@ failure raises the existing `VersionIntegrityError`, so a **missing or
 tampered file is surfaced clearly** before any analysis. It then reads
 the CSV read-only and analyses it.
 
-## What remains for Phase 4
+## Phase 4 status
 
-- Mutual information for datetime columns.
-- Paired / one-sided non-parametric tests (Wilcoxon signed-rank, sign
-  test, Friedman).
-- Multiple-testing correction.
+**Phase 4 is complete.** Every activity that was listed as remaining —
+datetime mutual information, paired / one-sided non-parametric tests
+(Wilcoxon signed-rank, sign test, Friedman), and multiple-testing
+correction — is implemented. Nothing from Phase 5+ has been started.
 
 ## What is intentionally NOT implemented (Phase 5+ / out of scope)
 

@@ -57,13 +57,18 @@ from .effects import (
     cramers_v,
     mutual_information,
 )
-from .knn_mi import estimate_mutual_information_knn
+from .knn_mi import (
+    estimate_mutual_information_datetime,
+    estimate_mutual_information_knn,
+)
 from .knn_mi_models import (
     KNN_MI_DEFAULT_K,
     KNN_MI_DISTANCE_METRIC,
     KNN_MI_ENGINE_VERSION,
     KNN_MI_ESTIMATOR_NAME,
     KNN_MI_MIN_OBSERVATIONS,
+    KNN_MI_REPRESENTATION_DATETIME,
+    KNN_MI_REPRESENTATION_RAW,
     KNNMutualInformationResult,
     KNNMutualInformationStatus,
 )
@@ -87,6 +92,12 @@ from .models import (
     TopValue,
     UnivariateAnalysis,
 )
+from .multiple_testing import correct_multiple_testing
+from .multiple_testing_models import (
+    CorrectionMethod,
+    MultipleTestingCorrectionResult,
+    MultipleTestingStatus,
+)
 from .nonparametric import (
     analyze_nonparametric,
     kendall_rank_correlation,
@@ -103,6 +114,16 @@ from .nonparametric_models import (
     NonParametricTestKind,
     NonParametricTestResult,
     NonParametricTestStatus,
+)
+from .paired_nonparametric import (
+    friedman_test,
+    sign_test,
+    wilcoxon_signed_rank,
+)
+from .paired_nonparametric_models import (
+    PairedNonParametricResult,
+    PairedNonParametricStatus,
+    PairedNonParametricTestName,
 )
 from .plotly_visualization import (
     PlotlyVisualizationError,
@@ -173,6 +194,8 @@ __all__ = [
     "KNN_MI_ENGINE_VERSION",
     "KNN_MI_ESTIMATOR_NAME",
     "KNN_MI_MIN_OBSERVATIONS",
+    "KNN_MI_REPRESENTATION_DATETIME",
+    "KNN_MI_REPRESENTATION_RAW",
     "MAX_ANOVA_COMBINATIONS",
     "MAX_BAR_CHARTS",
     "MAX_BOX_PLOTS",
@@ -203,6 +226,7 @@ __all__ = [
     "CategoryNumericGroup",
     "ColumnMissingness",
     "ContingencyRow",
+    "CorrectionMethod",
     "DatetimeColumnAnalysis",
     "DistributionAnalysis",
     "DistributionQuantile",
@@ -221,6 +245,8 @@ __all__ = [
     "KNNMutualInformationResult",
     "KNNMutualInformationStatus",
     "MissingnessAnalysis",
+    "MultipleTestingCorrectionResult",
+    "MultipleTestingStatus",
     "NonParametricAnalysis",
     "NonParametricTestKind",
     "NonParametricTestResult",
@@ -229,6 +255,9 @@ __all__ = [
     "NumericDistribution",
     "NumericPairCorrelation",
     "PValueAvailability",
+    "PairedNonParametricResult",
+    "PairedNonParametricStatus",
+    "PairedNonParametricTestName",
     "PlotlyVisualizationError",
     "QuantileValue",
     "StatisticalAnalysis",
@@ -261,11 +290,14 @@ __all__ = [
     "analyze_visualizations",
     "chi_square_independence",
     "classify_columns",
+    "correct_multiple_testing",
     "correlation_ratio",
     "cramers_v",
     "cross_reference_eda_quality",
+    "estimate_mutual_information_datetime",
     "estimate_mutual_information_knn",
     "export_visualization",
+    "friedman_test",
     "kendall_rank_correlation",
     "kruskal_wallis",
     "mann_whitney_u",
@@ -275,6 +307,8 @@ __all__ = [
     "recommend_visualizations",
     "render_plotly_visualization",
     "render_visualization",
+    "sign_test",
     "spearman_rank_correlation",
     "welch_t_test",
+    "wilcoxon_signed_rank",
 ]
