@@ -4,6 +4,58 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0046 — Effect sizes: `EDAReport.effect_sizes` is an additive, defaulted field
+- **Decision:** `EDAReport` gains `effect_sizes: EffectSizeAnalysis =
+  Field(default_factory=EffectSizeAnalysis)`, populated by
+  `analyze_dataframe` via `analyze_effect_sizes(df)`. Exactly the same
+  shape as the `statistical_tests` field from the previous increment.
+- **Reason:** Phase-4 rule — an `EDAReport` JSON serialised before this
+  increment (no `effect_sizes` key) must still `model_validate` and
+  receive an empty analysis.
+- **How it works:** `default_factory` builds an empty `EffectSizeAnalysis`
+  when the key is absent; `test_old_eda_report_without_effect_sizes_still_validates`
+  proves it.
+
+## 0045 — Mutual information: discrete plug-in, numeric columns quantile-binned
+- **Decision:** `mutual_information` computes an exact discrete plug-in MI
+  in nats for categorical↔categorical, and a **binning-based estimate**
+  for any pairing involving a numeric column — the numeric column is
+  quantile-binned into at most `MI_NUMERIC_BINS` (10) equal-frequency
+  bins with `pd.qcut(duplicates="drop")` before the same discrete MI.
+  Datetime columns are unsupported and return `unavailable`.
+- **Reason:** the project has **no scikit-learn** (not a dependency), so a
+  k-NN / Kraskov estimator would either need a new dependency (forbidden)
+  or a large amount of new numerical code. Binned plug-in MI is fully
+  deterministic, uses only pandas/numpy/scipy, and is honestly labelled.
+- **How it works:** categorical values → sorted deterministic integer
+  codes; `_discrete_mutual_information` builds `pd.crosstab` and sums
+  `p_ij · ln(p_ij / (p_i·p_j))` over non-zero cells, clamped at 0. Every
+  result whose inputs were binned carries a `notes[]` line saying so and
+  that it is not an exact information-theoretic value.
+- **Not done:** a k-NN MI estimator, MI for datetime, log-base-2 output.
+
+## 0044 — Effect-size layer mirrors the statistical layer; SciPy only, bounded battery
+- **Decision:** `data_engine/eda/effect_models.py` + `effects.py`
+  implement exactly Cramér's V, the correlation ratio (η), and mutual
+  information, with `EffectSizeResult` / `EffectSizeAnalysis` shaped like
+  `StatisticalTestResult` / `StatisticalAnalysis`. `analyze_effect_sizes`
+  runs them over every categorical pair / categorical×numeric
+  combination / supported-column pair, capped by
+  `MAX_CRAMERS_V_PAIRS` / `MAX_CORRELATION_RATIO_COMBINATIONS` /
+  `MAX_MUTUAL_INFORMATION_PAIRS` (50 each), high-cardinality categoricals
+  excluded, ordered by sorted column name, truncations noted.
+- **Reason:** consistency with the immediately-preceding statistical
+  increment; SciPy is already a dependency (`scipy.stats.chi2_contingency`
+  for Cramér's V); the caps mirror the bivariate/statistical layers so a
+  wide dataframe cannot trigger unbounded work.
+- **How it works:** Cramér's V from the Pearson chi-square (no Yates
+  correction) of a row/column-sorted contingency table; η from
+  `SS_between / SS_total` over sorted category groups; both clamped to
+  `[0, 1]` for floating-point overshoot and rounded to 10 dp for
+  cross-platform determinism. An unavailable measure returns `None` +
+  a reason (decision 0043 applies unchanged); a genuinely computed `0.0`
+  (constant variable) stays a `completed` result.
+
 ## 0043 — Statistical layer: unavailable = `None` + reason, never a fake value
 - **Decision:** `StatisticalTestResult` sets `statistic` / `p_value` /
   `degrees_of_freedom` / `n_observations` / `significant` to `None` and

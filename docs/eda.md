@@ -4,12 +4,16 @@
 dataset (a DataFrame, or a registered `DatasetVersion`) into a structured,
 JSON-serialisable `EDAReport`.
 
-Phase 4 now contains two foundations:
+Phase 4 now contains three foundations (all deterministic, read-only):
 
-1. the **deterministic EDA foundation** — column classification, univariate
-   analysis, missingness, and a small bivariate layer;
+1. the **EDA foundation** — column classification, univariate analysis,
+   missingness, and a small bivariate layer;
 2. the **statistical hypothesis-testing foundation** — Welch's t-test,
-   one-way ANOVA, and the chi-square test of independence.
+   one-way ANOVA, and the chi-square test of independence;
+3. the **effect-size / association-measure foundation** — Cramér's V,
+   the correlation ratio (η), and mutual information.
+
+Phase 4 remains **in progress**.
 
 ```
 DataFrame  ──►  analyze_dataframe(df)          ──►  EDAReport
@@ -136,8 +140,71 @@ counts < 5 still completes but adds a note.
 ### Not implemented (later increments)
 
 Spearman / Kendall / Mann-Whitney / Kruskal-Wallis, regression or
-normality tests, effect sizes, Cramér's V, correlation ratio, mutual
-information, and multiple-testing correction.
+normality tests, and multiple-testing correction.
+
+## Effect sizes & association measures (`analyze_effect_sizes`)
+
+Where a hypothesis test says *whether* a relationship is unlikely to be
+chance, an effect size says *how strong* it is. `analyze_effect_sizes(df)
+-> EffectSizeAnalysis` runs a bounded, deterministic battery; it is also
+embedded in `analyze_dataframe` as `EDAReport.effect_sizes` (a defaulted,
+backward-compatible field — an `EDAReport` serialised before this
+increment still validates).
+
+### Measures implemented
+
+| Measure | Inputs | How it is computed | Range |
+| --- | --- | --- | --- |
+| **Cramér's V** (`cramers_v`) | two categorical columns | `V = sqrt(χ² / (n · min(r−1, c−1)))`, where χ² is the Pearson chi-square of a row/column-sorted contingency table **with no Yates correction**, `n` observations, `r`×`c` table shape | `[0, 1]` |
+| **Correlation ratio η** (`correlation_ratio`) | one categorical + one numeric column | `η = sqrt(SS_between / SS_total)` over the deterministic sorted category groups, using group means and the grand mean | `[0, 1]` |
+| **Mutual information** (`mutual_information`) | two categorical (**exact**); any pairing involving a numeric column (**binned estimate**) | discrete plug-in MI in **nats** (natural log). Categorical values → deterministic sorted codes; numeric columns → at most `MI_NUMERIC_BINS` (10) equal-frequency quantile bins (`pd.qcut`, deterministic) | `≥ 0` |
+
+**Mutual information is an estimator, not an exact quantity, whenever a
+numeric column is involved** — the value depends on the binning rule
+(`MI_NUMERIC_BINS`). This is stated in the result's `notes`. Datetime
+columns are unsupported for MI in this increment.
+
+### Result model
+
+`EffectSizeResult` — `effect_kind` (`EffectKind`), `measure_name`,
+`columns`, `status` (`EffectStatus`: `completed` / `unavailable`),
+`reason` (set only when unavailable), `effect_size` (`float | None`),
+`n_observations` (`int | None`), `n_groups` (`int | None`, correlation
+ratio only), `notes`. `EffectSizeAnalysis` groups results into
+`cramers_v` / `correlation_ratio` / `mutual_information` plus `notes`,
+mirroring `StatisticalAnalysis`.
+
+### Automatic selection and deterministic caps
+
+Cramér's V is run over every unordered categorical pair; correlation
+ratio over every `(categorical, numeric)` combination; mutual information
+over every unordered pair among the supported (numeric ∪ low-cardinality
+categorical) columns. Categorical columns with cardinality above
+`MAX_BIVARIATE_CARDINALITY` (50) are excluded. Each family has a
+documented module-constant cap — `MAX_CRAMERS_V_PAIRS`,
+`MAX_CORRELATION_RATIO_COMBINATIONS`, `MAX_MUTUAL_INFORMATION_PAIRS`
+(50 each). Pairs are ordered by sorted column name; hitting a cap keeps
+the first N and records a `notes[]` entry.
+
+### Unavailable / degenerate behaviour
+
+A measure that cannot be computed returns `status = unavailable` with a
+`reason` and `effect_size = None` (and `n_observations` / `n_groups`
+`None`) — never a fake `0.0` / `1.0` / `False`. Triggers: no valid paired
+observations; a degenerate contingency table (fewer than 2 categories on
+either side) for Cramér's V; fewer than 2 groups, or fewer than 2
+observations, or zero total numeric variance for the correlation ratio;
+a datetime column or a column with no usable values for mutual
+information. A genuinely computed `0.0` (a constant variable carries no
+information) is a real `completed` result.
+
+Effect sizes are rounded to 10 decimal places for cross-platform
+deterministic representation, matching the statistical layer.
+
+### Not implemented (later increments)
+
+Any other association measure (e.g. Theil's U, distance correlation), a
+k-NN / Kraskov MI estimator, and MI for datetime columns.
 
 ## Missing / invalid data behaviour
 
@@ -174,12 +241,11 @@ the CSV read-only and analyses it.
 
 ## What remains for Phase 4
 
-- Effect sizes / association measures (Cramér's V, correlation ratio,
-  mutual information).
 - Spearman / Kendall rank correlation (and other non-parametric tests).
 - Visualization — figure generation, automated chart selection.
 - Richer distribution analysis (histograms/bins, skew/kurtosis).
 - An EDA ↔ quality cross-reference.
+- A k-NN / Kraskov mutual-information estimator; MI for datetime columns.
 
 ## What is intentionally NOT implemented (Phase 5+ / out of scope)
 
@@ -188,7 +254,7 @@ the CSV read-only and analyses it.
   selection / feature engineering.
 - No ML / DL / experiment tracking / SHAP / LLM / API / frontend /
   database / train-test splitting.
-- Within statistics: no Spearman/Kendall/Mann-Whitney/Kruskal-Wallis,
-  regression/normality tests, effect sizes, or multiple-testing
-  correction (see the statistics section above).
+- Within statistics / effect sizes: no Spearman/Kendall/Mann-Whitney/
+  Kruskal-Wallis, no regression/normality tests, no multiple-testing
+  correction, and no association measures beyond the three listed above.
 - CSV only (matches the rest of the project so far).

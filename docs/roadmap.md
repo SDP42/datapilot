@@ -9,7 +9,7 @@ future phases are not anticipated in code.
 | 1 | Data Ingestion & Profiling | **In progress** — CSV ingestion + profiling done; Parquet/Excel deferred |
 | 2 | Data Quality & Cleaning | **Done** — quality analysis + cleaning planning + safe cleaning execution (deterministic; no AI approval/reasoning yet) |
 | 3 | Validation & Data Lineage | **In progress** — `DatasetVersion` + store + lineage validation + lineage graph + opt-in auto-registration + cross-version diffing + version-integrity / family-consistency / version↔lineage-binding checks done; still filesystem-only (no database, no GC) |
-| 4 | EDA & Statistical Analysis | **In progress** — deterministic analysis-only EDA foundation + statistical hypothesis-testing foundation (Welch t-test, one-way ANOVA, chi-square) in `data_engine.eda`; no effect sizes, rank correlation, or visualization yet |
+| 4 | EDA & Statistical Analysis | **In progress** — deterministic analysis-only EDA foundation + statistical hypothesis-testing foundation (Welch t-test, one-way ANOVA, chi-square) + effect-size / association measures (Cramér's V, correlation ratio, mutual information) in `data_engine.eda`; no rank correlation or visualization yet |
 | 5 | Automated Problem Understanding | Not started |
 | 6 | Feature Engineering | Not started |
 | 7 | Classical ML | Not started |
@@ -122,12 +122,18 @@ future phases are not anticipated in code.
   `welch_t_test` / `one_way_anova` / `chi_square_independence` →
   `StatisticalTestResult` / `StatisticalAnalysis` (SciPy, deterministic,
   bounded caps, `EDAReport.statistical_tests` defaulted for backward
-  compatibility). Unavailable tests report `None` + an explicit reason,
-  never a fake value. See [eda.md](eda.md). **Not yet:** effect sizes /
-  association measures (Cramér's V, correlation ratio, mutual
-  information), Spearman/Kendall, richer distribution analysis, an
-  EDA ↔ quality cross-reference, and any Matplotlib/Plotly figure
-  generation. Phase 4 is **not complete**.
+  compatibility). An **effect-size / association-measure foundation** is
+  also added — `analyze_effect_sizes` / `cramers_v` / `correlation_ratio`
+  / `mutual_information` → `EffectSizeResult` / `EffectSizeAnalysis`
+  (Cramér's V, correlation ratio η, discrete plug-in mutual information;
+  bounded deterministic caps; `EDAReport.effect_sizes` defaulted for
+  backward compatibility). Unavailable tests / measures report `None` +
+  an explicit reason, never a fake value; mutual information involving a
+  numeric column is a documented binning-based estimate. See
+  [eda.md](eda.md). **Not yet:** Spearman/Kendall rank correlation and
+  other non-parametric tests, richer distribution analysis, an EDA ↔
+  quality cross-reference, a k-NN MI estimator, and any Matplotlib/Plotly
+  figure generation. Phase 4 is **not complete**.
 
 ### Phase 5 — Automated Problem Understanding
 - **Objective:** identify the ML task from data + objective.

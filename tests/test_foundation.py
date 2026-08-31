@@ -41,6 +41,8 @@ ENGINE_PACKAGES = [
     "data_engine.eda.analyzer",
     "data_engine.eda.statistical_models",
     "data_engine.eda.statistics",
+    "data_engine.eda.effect_models",
+    "data_engine.eda.effects",
     "data_engine.feature_engineering",
     "database",
     "dl_engine",

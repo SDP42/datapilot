@@ -15,6 +15,7 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
+from .effect_models import EffectSizeAnalysis
 from .statistical_models import StatisticalAnalysis
 
 EDA_ENGINE_VERSION = "1"
@@ -192,5 +193,13 @@ class EDAReport(BaseModel):
         description=(
             "Statistical hypothesis tests. Additive and defaulted, so EDA reports "
             "serialised before this field still validate."
+        ),
+    )
+    effect_sizes: EffectSizeAnalysis = Field(
+        default_factory=EffectSizeAnalysis,
+        description=(
+            "Effect-size / association measures (Cramér's V, correlation ratio, mutual "
+            "information). Additive and defaulted, so EDA reports serialised before this "
+            "field still validate."
         ),
     )

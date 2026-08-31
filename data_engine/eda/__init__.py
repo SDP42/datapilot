@@ -22,6 +22,22 @@ from __future__ import annotations
 
 from .analyzer import analyze_dataframe, analyze_dataset_version
 from .bivariate import analyze_bivariate
+from .effect_models import (
+    MAX_CORRELATION_RATIO_COMBINATIONS,
+    MAX_CRAMERS_V_PAIRS,
+    MAX_MUTUAL_INFORMATION_PAIRS,
+    MI_NUMERIC_BINS,
+    EffectKind,
+    EffectSizeAnalysis,
+    EffectSizeResult,
+    EffectStatus,
+)
+from .effects import (
+    analyze_effect_sizes,
+    correlation_ratio,
+    cramers_v,
+    mutual_information,
+)
 from .models import (
     EDA_ENGINE_VERSION,
     FIXED_QUANTILES,
@@ -66,7 +82,11 @@ __all__ = [
     "FIXED_QUANTILES",
     "MAX_ANOVA_COMBINATIONS",
     "MAX_CHI_SQUARE_PAIRS",
+    "MAX_CORRELATION_RATIO_COMBINATIONS",
+    "MAX_CRAMERS_V_PAIRS",
+    "MAX_MUTUAL_INFORMATION_PAIRS",
     "MAX_TTEST_PAIRS",
+    "MI_NUMERIC_BINS",
     "BivariateSummary",
     "CategoricalColumnAnalysis",
     "CategoricalContingency",
@@ -77,6 +97,10 @@ __all__ = [
     "DatetimeColumnAnalysis",
     "EDAColumnKind",
     "EDAReport",
+    "EffectKind",
+    "EffectSizeAnalysis",
+    "EffectSizeResult",
+    "EffectStatus",
     "MissingnessAnalysis",
     "NumericColumnAnalysis",
     "NumericPairCorrelation",
@@ -90,10 +114,14 @@ __all__ = [
     "analyze_bivariate",
     "analyze_dataframe",
     "analyze_dataset_version",
+    "analyze_effect_sizes",
     "analyze_statistics",
     "analyze_univariate",
     "chi_square_independence",
     "classify_columns",
+    "correlation_ratio",
+    "cramers_v",
+    "mutual_information",
     "one_way_anova",
     "welch_t_test",
 ]
