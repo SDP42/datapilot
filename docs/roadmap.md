@@ -9,7 +9,7 @@ future phases are not anticipated in code.
 | 1 | Data Ingestion & Profiling | **In progress** — CSV ingestion + profiling done; Parquet/Excel deferred |
 | 2 | Data Quality & Cleaning | **Done** — quality analysis + cleaning planning + safe cleaning execution (deterministic; no AI approval/reasoning yet) |
 | 3 | Validation & Data Lineage | **In progress** — `DatasetVersion` + store + lineage validation + lineage graph + opt-in auto-registration + cross-version diffing + version-integrity / family-consistency / version↔lineage-binding checks done; still filesystem-only (no database, no GC) |
-| 4 | EDA & Statistical Analysis | **In progress** — deterministic analysis-only EDA foundation + parametric tests (Welch t-test, one-way ANOVA, chi-square) + effect sizes (Cramér's V, correlation ratio, mutual information) + non-parametric tests (Spearman, Kendall, Mann-Whitney U, Kruskal-Wallis H) in `data_engine.eda`; no visualization yet |
+| 4 | EDA & Statistical Analysis | **In progress** — deterministic analysis-only EDA foundation + parametric tests (Welch t-test, one-way ANOVA, chi-square) + effect sizes (Cramér's V, correlation ratio, mutual information) + non-parametric tests (Spearman, Kendall, Mann-Whitney U, Kruskal-Wallis H) + richer distribution analysis (variance/skew/excess-kurtosis, full quantiles, structured histogram) + EDA↔quality cross-reference in `data_engine.eda`; no visualization yet |
 | 5 | Automated Problem Understanding | Not started |
 | 6 | Feature Engineering | Not started |
 | 7 | Classical ML | Not started |
@@ -136,10 +136,23 @@ future phases are not anticipated in code.
   `NonParametricTestResult` / `NonParametricAnalysis` (SciPy,
   deterministic, bounded caps, fixed `alternative="two-sided"` for
   Mann-Whitney; `EDAReport.nonparametric_tests` defaulted for backward
-  compatibility). See [eda.md](eda.md). **Not yet:** richer distribution
-  analysis, an EDA ↔ quality cross-reference, a k-NN MI estimator, paired
-  / one-sided non-parametric tests, multiple-testing correction, and any
-  Matplotlib/Plotly figure generation. Phase 4 is **not complete**.
+  compatibility). A **distribution-analysis foundation** is also added —
+  `analyze_distribution` → `NumericDistribution` / `DistributionAnalysis`
+  (variance, adjusted Fisher–Pearson skewness, excess/Fisher kurtosis,
+  a 0.00–1.00 quantile set, and a structured render-free histogram with a
+  documented Sturges bin rule; constant columns keep location stats while
+  undefined shape measures are `None`; `EDAReport.distribution`
+  defaulted). Finally an **EDA ↔ data-quality cross-reference** —
+  `cross_reference_eda_quality(eda_result, quality_report)` →
+  `EDAQualityCrossReference`, an observational layer that correlates
+  existing EDA signals with existing `QualityReport` findings (no new
+  detection, no target inference, no LLM text, inputs never mutated); it
+  is independently callable and `EDAReport.quality_cross_reference` is a
+  defaulted field that `analyze_dataframe` leaves empty (its signature is
+  unchanged). See [eda.md](eda.md). **Not yet:** a k-NN MI estimator,
+  paired / one-sided non-parametric tests, multiple-testing correction,
+  and any Matplotlib/Plotly figure generation. Phase 4 is **not
+  complete**.
 
 ### Phase 5 — Automated Problem Understanding
 - **Objective:** identify the ML task from data + objective.

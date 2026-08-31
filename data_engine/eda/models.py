@@ -15,6 +15,8 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
+from .crossref_models import EDAQualityCrossReference
+from .distribution_models import DistributionAnalysis
 from .effect_models import EffectSizeAnalysis
 from .nonparametric_models import NonParametricAnalysis
 from .statistical_models import StatisticalAnalysis
@@ -209,5 +211,21 @@ class EDAReport(BaseModel):
         description=(
             "Non-parametric tests (Spearman, Kendall, Mann-Whitney U, Kruskal-Wallis H). "
             "Additive and defaulted, so EDA reports serialised before this field still validate."
+        ),
+    )
+    distribution: DistributionAnalysis = Field(
+        default_factory=DistributionAnalysis,
+        description=(
+            "Richer per-numeric-column distribution analysis (variance, skewness, excess "
+            "kurtosis, full quantile set, structured histogram). Additive and defaulted, so "
+            "EDA reports serialised before this field still validate."
+        ),
+    )
+    quality_cross_reference: EDAQualityCrossReference = Field(
+        default_factory=EDAQualityCrossReference,
+        description=(
+            "Observed correspondences between EDA signals and data-quality findings. "
+            "Empty unless populated via cross_reference_eda_quality(); analyze_dataframe "
+            "has no QualityReport input, so it leaves this empty. Additive and defaulted."
         ),
     )

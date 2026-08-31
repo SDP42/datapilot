@@ -19,6 +19,7 @@ import pandas as pd
 from data_engine.validation import DatasetVersion, verify_version_integrity
 
 from .bivariate import analyze_bivariate
+from .distribution import analyze_distribution
 from .effects import analyze_effect_sizes
 from .models import EDAReport
 from .nonparametric import analyze_nonparametric
@@ -49,6 +50,7 @@ def analyze_dataframe(
         statistical_tests=analyze_statistics(df),
         effect_sizes=analyze_effect_sizes(df),
         nonparametric_tests=analyze_nonparametric(df),
+        distribution=analyze_distribution(df),
     )
 
 

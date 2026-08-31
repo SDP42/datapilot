@@ -4,6 +4,64 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0050 — EDA ↔ quality cross-reference is independently callable, not wired into `analyze_dataframe`
+- **Decision:** `data_engine/eda/crossref_models.py` + `crossref.py`
+  provide `cross_reference_eda_quality(eda_result, quality_report) ->
+  EDAQualityCrossReference`. `EDAReport` gains a defaulted, backward-
+  compatible `quality_cross_reference` field that `analyze_dataframe`
+  leaves **empty**. `analyze_dataframe`'s signature is **unchanged** — it
+  never receives a `QualityReport`.
+- **Reason:** Phase-4 prompt — "If the current `analyze_dataframe` API
+  does not have a `QualityReport` input, keep the cross-reference
+  independently callable and integrate it into `EDAReport` in the least
+  invasive additive way possible. Do not change the existing
+  `analyze_dataframe` signature merely to force quality integration."
+- **How it works:** the function reads (never mutates) both inputs,
+  matches each existing `QualityFinding` to a corresponding EDA
+  observation by column (`missing_values`→missingness,
+  `high_skew`→distribution skewness, `potential_outliers`→distribution
+  spread, `potential_type_mismatch`→EDA dtype class,
+  `inconsistent_categories`→categorical summary,
+  `class_imbalance`→target summary **only when
+  `quality_report.target_column` is set**), and emits one templated
+  entry per match. `duplicate_rows` has no EDA counterpart → `notes`
+  only. Entries sorted by `(column, eda_signal, finding_id)`. No
+  detector, no invented finding, no LLM text, empty result when nothing
+  matches. Existing `QualityReport` / `QualityFinding` / `FindingType`
+  reused unchanged; quality detection untouched.
+
+## 0049 — Distribution analysis: sample moments, excess kurtosis, Sturges histogram
+- **Decision:** `data_engine/eda/distribution_models.py` +
+  `distribution.py` add `analyze_distribution(df) -> DistributionAnalysis`
+  over alphabetically-sorted numeric columns, embedded in
+  `analyze_dataframe` as the defaulted, backward-compatible
+  `EDAReport.distribution` field. Per column: `count`, `missing_count`,
+  `missing_percentage`, `unique_count`, `minimum`, `maximum`, `mean`,
+  `median`, `std`/`variance` (`ddof=1`), `skewness`, `kurtosis`,
+  quantiles at `(0.00, 0.25, 0.50, 0.75, 1.00)`, and a structured
+  histogram.
+- **Reason:** Phase-4 prompt (richer distribution analysis, "document the
+  skew/kurtosis conventions … whether kurtosis is excess/Fisher",
+  "choose and document a deterministic rule for the number of bins",
+  "a constant numeric column … handled explicitly").
+- **Conventions chosen:** skewness = adjusted Fisher–Pearson coefficient
+  (`scipy.stats.skew(x, bias=False)` = `pandas.Series.skew`); kurtosis =
+  **excess (Fisher)** kurtosis, bias-corrected
+  (`scipy.stats.kurtosis(x, fisher=True, bias=False)` =
+  `pandas.Series.kurt`; normal ⇒ 0). Quantiles via `numpy.quantile`
+  (linear). Histogram bin count = **Sturges' rule**
+  `k = ceil(log2(n)) + 1`, clamped to `[1, MAX_HISTOGRAM_BINS=50]`,
+  equal-width over `[min, max]` via `numpy.histogram`.
+- **Degenerate handling:** whole-column `status = unavailable` (+ reason)
+  only when there are **no valid** or **no finite** observations.
+  Otherwise `status = completed`; individual undefined measures are
+  `None` + a `notes[]` entry — never a fake `0`/`1`/`False`. A **constant
+  column** keeps `min`/`max`/`mean`/`median` (and `std`/`variance` = 0)
+  but reports `skewness`/`kurtosis` = `None` and the histogram
+  `unavailable` (no infinite edges). `±inf` values are excluded and
+  noted. Cap: `MAX_DISTRIBUTION_COLUMNS = 50`. Rounded to 10 dp, matching
+  the other EDA layers. No dependency added (SciPy already present).
+
 ## 0048 — Mann-Whitney: exactly two groups, two-sided; more than two → unavailable
 - **Decision:** `mann_whitney_u` requires the categorical column to have
   **exactly two** distinct values. Fewer → `unavailable` ("fewer than two

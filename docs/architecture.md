@@ -84,7 +84,7 @@ structurally-invalid versions and **reports — never repairs**.
 earlier layers.
 
 **Phase 4 (in progress):** `data_engine.eda` — a deterministic,
-**analysis-only** layer. Four foundations: (1) EDA — `analyze_dataframe`
+**analysis-only** layer. Six foundations: (1) EDA — `analyze_dataframe`
 / `analyze_dataset_version` → a JSON-serialisable `EDAReport` (univariate
 numeric / categorical / datetime summaries, missingness, a small
 deterministic bivariate layer); (2) parametric hypothesis testing —
@@ -94,10 +94,21 @@ deterministic bivariate layer); (2) parametric hypothesis testing —
 `mutual_information` → `EffectSizeAnalysis`; (4) non-parametric tests —
 `analyze_nonparametric` and `spearman_rank_correlation` /
 `kendall_rank_correlation` / `mann_whitney_u` / `kruskal_wallis` →
-`NonParametricAnalysis`. SciPy-based, bounded deterministic caps;
-unavailable tests/measures report `None` + a reason, never a fake value;
-MI involving a numeric column is a documented binning-based estimate;
-`EDAReport.statistical_tests`, `.effect_sizes` and `.nonparametric_tests`
+`NonParametricAnalysis`; (5) distribution analysis — `analyze_distribution`
+→ `DistributionAnalysis` (variance, adjusted Fisher–Pearson skewness,
+excess/Fisher kurtosis, a 0.00–1.00 quantile set, and a structured
+render-free histogram with a documented Sturges bin rule); (6) an
+EDA ↔ data-quality cross-reference — `cross_reference_eda_quality(eda,
+quality_report)` → `EDAQualityCrossReference`, an observational layer
+correlating existing EDA signals with existing `QualityReport` findings
+(no new detection, no target inference, no LLM text, neither input
+mutated), independently callable so `analyze_dataframe`'s signature is
+unchanged. SciPy-based, bounded deterministic caps; unavailable
+tests/measures report `None` + a reason, never a fake value; MI involving
+a numeric column is a documented binning-based estimate; a constant
+column keeps its location stats while only the undefined shape measures
+become `None`; `EDAReport.statistical_tests`, `.effect_sizes`,
+`.nonparametric_tests`, `.distribution` and `.quality_cross_reference`
 are backward-compatible defaulted fields. Read-only — no dataset, version
 record, or lineage is modified; no new version is registered. No
 visualization.

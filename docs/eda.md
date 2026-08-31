@@ -4,7 +4,7 @@
 dataset (a DataFrame, or a registered `DatasetVersion`) into a structured,
 JSON-serialisable `EDAReport`.
 
-Phase 4 now contains four foundations (all deterministic, read-only):
+Phase 4 now contains six foundations (all deterministic, read-only):
 
 1. the **EDA foundation** — column classification, univariate analysis,
    missingness, and a small bivariate layer;
@@ -14,7 +14,12 @@ Phase 4 now contains four foundations (all deterministic, read-only):
    the correlation ratio (η), and mutual information;
 4. the **non-parametric hypothesis-testing foundation** — Spearman and
    Kendall rank correlation, the Mann-Whitney U test, and the
-   Kruskal-Wallis H test.
+   Kruskal-Wallis H test;
+5. the **distribution-analysis foundation** — per-numeric-column
+   variance, skewness, excess kurtosis, a full 0.00–1.00 quantile set,
+   and a structured (render-free) histogram;
+6. the **EDA ↔ data-quality cross-reference** — an observational layer
+   that correlates EDA signals with existing `QualityReport` findings.
 
 Phase 4 remains **in progress**.
 
@@ -286,6 +291,121 @@ places for cross-platform determinism, matching the other layers.
 Sign test, Wilcoxon signed-rank (paired), Friedman test, one-sided
 alternatives, and any normality / regression test.
 
+## Distribution analysis (`analyze_distribution`)
+
+`analyze_distribution(df) -> DistributionAnalysis` describes the shape of
+every **numeric** column in more detail than the univariate summary. It
+is embedded in `analyze_dataframe` as `EDAReport.distribution` (a
+defaulted, backward-compatible field — an `EDAReport` serialised before
+this increment still validates). Columns are processed in **alphabetical
+order**, row order is irrelevant, and nothing is written.
+
+### Per-column result (`NumericDistribution`)
+
+`column`, `status` (`completed` / `unavailable`), `reason` (set only when
+the whole column is unavailable), `count` (non-null), `missing_count`,
+`missing_percentage`, `unique_count`, `minimum`, `maximum`, `mean`,
+`median`, `std`, `variance`, `skewness`, `kurtosis`, `quantiles`,
+`histogram`, and `notes` (per-statistic explanations).
+
+### Statistical conventions (documented once)
+
+| Statistic | Definition |
+| --- | --- |
+| `std` / `variance` | **sample** estimators, `ddof=1` (matches `pandas` and the univariate layer). `None` when < 2 finite observations. |
+| `skewness` | **adjusted Fisher–Pearson standardised moment coefficient** (`scipy.stats.skew(x, bias=False)`, identical to `pandas.Series.skew`). `0` = symmetric. `None` for a constant column or < 3 finite observations. |
+| `kurtosis` | **excess (Fisher) kurtosis**, bias-corrected (`scipy.stats.kurtosis(x, fisher=True, bias=False)`, identical to `pandas.Series.kurt`). A normal distribution has kurtosis **0**. `None` for a constant column or < 4 finite observations. |
+| `quantiles` | probabilities `(0.00, 0.25, 0.50, 0.75, 1.00)` via `numpy.quantile` (linear interpolation); `0.00` is the exact minimum, `1.00` the exact maximum. |
+
+### Histogram (structured, no rendering)
+
+`histogram` is a `Histogram`: `status`, `reason`, `bin_rule`, `n_bins`,
+`bin_edges` (length `n_bins + 1`), `bins` (`left_edge` / `right_edge` /
+`count`), `total_count`. Enough to reconstruct a chart later — the
+visualization layer is a **separate, later** increment.
+
+**Bin-count rule (`bin_rule = "sturges"`):** `k = ceil(log2(n)) + 1`
+(Sturges' rule, `n` = finite observation count), clamped to
+`[1, MAX_HISTOGRAM_BINS]` (50). Bins are equal-width over
+`[min, max]` of the finite values (`numpy.histogram(values, bins=k)`), so
+`sum(bin.count) == total_count == count`.
+
+**Constant column:** no non-zero range, so the histogram is reported
+`status = unavailable` (never infinite / degenerate edges) — while
+`minimum` / `maximum` / `mean` / `median` (and `std` / `variance`, which
+are genuinely `0`) stay valid. Only the undefined shape measures
+(`skewness`, `kurtosis`) become `None`.
+
+### Unavailable / degenerate behaviour
+
+Whole-column `status = unavailable` (+ `reason`, all measures `None`,
+empty histogram): a column with **no valid (non-null) observations**, or
+no **finite** observations. Otherwise `status = completed` and individual
+undefined measures are `None` with a `notes[]` explanation — never a fake
+`0` / `1` / `False`. Non-finite values (`±inf`) are excluded from every
+statistic and the exclusion is noted. The battery is capped at
+`MAX_DISTRIBUTION_COLUMNS` (50) numeric columns, with truncation noted.
+Values are rounded to 10 decimal places, matching the other EDA layers.
+
+### Not implemented (later increments)
+
+Any chart rendering or automated chart selection; density / KDE
+estimates; alternative bin rules; distribution analysis for datetime or
+categorical columns.
+
+## EDA ↔ data-quality cross-reference (`cross_reference_eda_quality`)
+
+`cross_reference_eda_quality(eda_result, quality_report) -> EDAQualityCrossReference`
+is a small **observational** layer. It walks the findings **already
+present** in a `QualityReport` and, for each finding whose subject column
+also has a matching observation in the `EDAReport`, emits one structured
+correspondence entry. It runs **no detector**, invents **no finding**,
+infers **no target**, generates **no LLM text**, and **mutates neither
+input**.
+
+### Independently callable — not wired into `analyze_dataframe`
+
+`analyze_dataframe` has **no `QualityReport` parameter**, and its
+signature is unchanged. `EDAReport.quality_cross_reference` is a
+defaulted, backward-compatible field that `analyze_dataframe` leaves
+**empty**. To populate it, call the function explicitly and merge:
+
+```python
+eda = analyze_dataframe(df)
+qr = data_engine.quality.analyze_dataframe(df, target_column="y")
+xref = cross_reference_eda_quality(eda, qr)
+eda = eda.model_copy(update={"quality_cross_reference": xref})
+```
+
+### Entry model (`EDAQualityCrossReferenceEntry`)
+
+`column` (`None` for a dataset-level finding), `eda_signal`
+(`EDASignalKind`), `quality_finding_id`, `quality_finding_type`
+(`FindingType`, reused unchanged), `quality_severity`, `relationship`
+(deterministic template text), `eda_evidence` (JSON-primitive values
+copied verbatim from the EDA report).
+
+### Correspondences produced
+
+| Quality finding | EDA signal | Drawn from |
+| --- | --- | --- |
+| `missing_values` | `missingness` | univariate missingness for that column |
+| `high_skew` | `skewness` | `distribution` skewness for that column |
+| `potential_outliers` | `dispersion` | `distribution` min / quartiles / max / std |
+| `potential_type_mismatch` | `column_type` | EDA's dtype classification (EDA never converts types) |
+| `inconsistent_categories` | `category_cardinality` | univariate categorical `unique_count` / top values |
+| `class_imbalance` | `class_balance` | **only** when `quality_report.target_column` is set — the target's categorical summary |
+| `duplicate_rows` | — | no EDA counterpart; recorded in `notes` only |
+
+Entries are sorted deterministically by
+`(column, eda_signal, quality_finding_id)`. If nothing lines up (or no
+`QualityReport` is supplied) the result is **empty**.
+
+### Not implemented (later increments)
+
+Any new quality detection; severity re-scoring; natural-language
+explanation; a reverse "quality ← EDA" flow that would create findings.
+
 ## Missing / invalid data behaviour
 
 EDA is **observational**. If a statistic cannot be calculated it is
@@ -322,8 +442,6 @@ the CSV read-only and analyses it.
 ## What remains for Phase 4
 
 - Visualization — figure generation, automated chart selection.
-- Richer distribution analysis (histograms/bins, skew/kurtosis).
-- An EDA ↔ quality cross-reference.
 - A k-NN / Kraskov mutual-information estimator; MI for datetime columns.
 - Paired / one-sided non-parametric tests (Wilcoxon signed-rank, sign
   test, Friedman) and multiple-testing correction.
