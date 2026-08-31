@@ -4,6 +4,51 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0043 — Statistical layer: unavailable = `None` + reason, never a fake value
+- **Decision:** `StatisticalTestResult` sets `statistic` / `p_value` /
+  `degrees_of_freedom` / `n_observations` / `significant` to `None` and
+  populates `reason` + `status = unavailable` whenever a test cannot be
+  computed. `significant` is never a defaulted `False`.
+- **Reason:** Phase-4 rule — "never invent unavailable statistical
+  results"; "do NOT use fake values such as 0, 1, or False".
+- **How it works:** each test function pre-checks its preconditions
+  (paired-obs count, per-group sizes, contingency-table shape, zero
+  variance) and returns via a shared `_unavailable(...)` helper before
+  calling SciPy; a post-check on `np.isfinite` catches anything else.
+
+## 0042 — `EDAReport.statistical_tests` is an additive, defaulted field
+- **Decision:** `EDAReport` gains `statistical_tests: StatisticalAnalysis
+  = Field(default_factory=StatisticalAnalysis)`, and `analyze_dataframe`
+  populates it via `analyze_statistics(df)`.
+- **Reason:** Phase-4 rule — "backward-compatible with existing serialized
+  reports". An `EDAReport` JSON produced before this increment (no
+  `statistical_tests` key) still `model_validate`s, defaulting to an
+  empty analysis.
+- **Alternatives considered:** a separate top-level function only, not on
+  the report (rejected — the prompt asks for integration and it does not
+  make the contract ambiguous); a required field (rejected — breaks old
+  serialised reports).
+
+## 0041 — Statistical tests use SciPy (already a dependency); bounded auto-selection
+- **Decision:** `data_engine/eda/statistics.py` implements exactly Welch's
+  t-test, one-way ANOVA, and chi-square independence via
+  `scipy.stats`. `analyze_statistics` runs them over every numeric pair /
+  categorical×numeric combination / categorical pair, capped by the
+  documented module constants `MAX_TTEST_PAIRS` / `MAX_ANOVA_COMBINATIONS`
+  / `MAX_CHI_SQUARE_PAIRS` (50 each), high-cardinality categoricals
+  excluded, ordered by sorted column name, every truncation noted.
+- **Reason:** SciPy is already in `pyproject.toml` (`scipy>=1.13`) — no
+  new dependency. The caps mirror the existing bivariate layer so a wide
+  dataframe cannot trigger unbounded work.
+- **How it works:** Welch via `ttest_ind(..., equal_var=False)` (reports
+  the Satterthwaite `.df`); ANOVA via `f_oneway(*groups)` over
+  sorted category groups with ≥ 2 observations; chi-square via
+  `chi2_contingency(table, correction=False)` on a row/column-sorted
+  crosstab (textbook statistic, no Yates correction).
+- **Not implemented:** Spearman/Kendall, non-parametric tests, effect
+  sizes, mutual information, multiple-testing correction — later
+  increments.
+
 ## 0040 — EDA `analyze_dataset_version` reuses `verify_version_integrity`, registers nothing
 - **Decision:** the version-aware EDA entrypoint calls the existing
   `verify_version_integrity` (raising `VersionIntegrityError` on failure),

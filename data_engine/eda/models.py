@@ -15,6 +15,8 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
+from .statistical_models import StatisticalAnalysis
+
 EDA_ENGINE_VERSION = "1"
 
 # A fixed quantile set — never caller-configurable, for deterministic output.
@@ -185,3 +187,10 @@ class EDAReport(BaseModel):
 
     univariate: UnivariateAnalysis
     bivariate: BivariateSummary
+    statistical_tests: StatisticalAnalysis = Field(
+        default_factory=StatisticalAnalysis,
+        description=(
+            "Statistical hypothesis tests. Additive and defaulted, so EDA reports "
+            "serialised before this field still validate."
+        ),
+    )

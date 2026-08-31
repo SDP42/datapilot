@@ -84,12 +84,17 @@ structurally-invalid versions and **reports — never repairs**.
 earlier layers.
 
 **Phase 4 (in progress):** `data_engine.eda` — a deterministic,
-**analysis-only** EDA foundation (`analyze_dataframe` /
-`analyze_dataset_version` → a JSON-serialisable `EDAReport`: univariate
-numeric / categorical / datetime summaries, missingness, and a small
-deterministic bivariate layer). Read-only — no dataset, version record,
-or lineage is modified; no new version is registered. No statistical
-testing, no visualization. [eda.md](eda.md).
+**analysis-only** layer. Two foundations: (1) EDA — `analyze_dataframe` /
+`analyze_dataset_version` → a JSON-serialisable `EDAReport` (univariate
+numeric / categorical / datetime summaries, missingness, a small
+deterministic bivariate layer); (2) statistical hypothesis testing —
+`analyze_statistics` and `welch_t_test` / `one_way_anova` /
+`chi_square_independence` → `StatisticalAnalysis` (SciPy, bounded
+deterministic caps; unavailable tests report `None` + a reason, never a
+fake value; `EDAReport.statistical_tests` is a backward-compatible
+defaulted field). Read-only — no dataset, version record, or lineage is
+modified; no new version is registered. No effect sizes, no rank
+correlation, no visualization. [eda.md](eda.md).
 
 **Future-phase components:** everything else —
 statistical hypothesis testing, figure generation, feature engineering,

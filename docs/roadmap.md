@@ -9,7 +9,7 @@ future phases are not anticipated in code.
 | 1 | Data Ingestion & Profiling | **In progress** — CSV ingestion + profiling done; Parquet/Excel deferred |
 | 2 | Data Quality & Cleaning | **Done** — quality analysis + cleaning planning + safe cleaning execution (deterministic; no AI approval/reasoning yet) |
 | 3 | Validation & Data Lineage | **In progress** — `DatasetVersion` + store + lineage validation + lineage graph + opt-in auto-registration + cross-version diffing + version-integrity / family-consistency / version↔lineage-binding checks done; still filesystem-only (no database, no GC) |
-| 4 | EDA & Statistical Analysis | **In progress** — deterministic, analysis-only univariate EDA + a small basic bivariate layer (`data_engine.eda`); no statistical testing or visualization yet |
+| 4 | EDA & Statistical Analysis | **In progress** — deterministic analysis-only EDA foundation + statistical hypothesis-testing foundation (Welch t-test, one-way ANOVA, chi-square) in `data_engine.eda`; no effect sizes, rank correlation, or visualization yet |
 | 5 | Automated Problem Understanding | Not started |
 | 6 | Feature Engineering | Not started |
 | 7 | Classical ML | Not started |
@@ -117,9 +117,17 @@ future phases are not anticipated in code.
   categorical↔numeric grouped stats, categorical↔categorical contingency
   counts). Read-only — no dataset / version record / lineage is modified,
   no new version is registered; the version-aware entrypoint reuses
-  `verify_version_integrity`. See [eda.md](eda.md). **Not yet:**
-  statistical hypothesis testing (SciPy/statsmodels), mutual information /
-  association measures, any Matplotlib/Plotly figure generation.
+  `verify_version_integrity`. A **statistical hypothesis-testing
+  foundation** is now added — `analyze_statistics` /
+  `welch_t_test` / `one_way_anova` / `chi_square_independence` →
+  `StatisticalTestResult` / `StatisticalAnalysis` (SciPy, deterministic,
+  bounded caps, `EDAReport.statistical_tests` defaulted for backward
+  compatibility). Unavailable tests report `None` + an explicit reason,
+  never a fake value. See [eda.md](eda.md). **Not yet:** effect sizes /
+  association measures (Cramér's V, correlation ratio, mutual
+  information), Spearman/Kendall, richer distribution analysis, an
+  EDA ↔ quality cross-reference, and any Matplotlib/Plotly figure
+  generation. Phase 4 is **not complete**.
 
 ### Phase 5 — Automated Problem Understanding
 - **Objective:** identify the ML task from data + objective.

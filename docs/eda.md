@@ -1,8 +1,15 @@
 # EDA — Exploratory Data Analysis (Phase 4, in progress)
 
-`data_engine/eda/` — a deterministic, **analysis-only** EDA foundation.
-It turns a dataset (a DataFrame, or a registered `DatasetVersion`) into a
-structured, JSON-serialisable `EDAReport`.
+`data_engine/eda/` — a deterministic, **analysis-only** layer. It turns a
+dataset (a DataFrame, or a registered `DatasetVersion`) into a structured,
+JSON-serialisable `EDAReport`.
+
+Phase 4 now contains two foundations:
+
+1. the **deterministic EDA foundation** — column classification, univariate
+   analysis, missingness, and a small bivariate layer;
+2. the **statistical hypothesis-testing foundation** — Welch's t-test,
+   one-way ANOVA, and the chi-square test of independence.
 
 ```
 DataFrame  ──►  analyze_dataframe(df)          ──►  EDAReport
@@ -72,6 +79,66 @@ Deterministic caps (with a `notes[]` entry when hit): ≤ 50 numeric pairs,
 categorical columns with cardinality ≤ 50, ≤ 50 grouped categories,
 ≤ 200 contingency rows.
 
+## Statistical hypothesis testing (`analyze_statistics`)
+
+`analyze_statistics(df, *, alpha=0.05) -> StatisticalAnalysis` runs a
+bounded, deterministic battery. It is also embedded in `analyze_dataframe`
+as `EDAReport.statistical_tests` (a defaulted, backward-compatible field —
+an `EDAReport` serialised before this increment still validates).
+
+### Tests implemented (SciPy — already a project dependency)
+
+| Test | Inputs | Reports |
+| --- | --- | --- |
+| **Welch's two-sample t-test** (`welch_t_test`) | two numeric columns, over the rows where **both** are observed | `statistic`, `p_value`, `degrees_of_freedom` (Welch–Satterthwaite), `n_observations`, `significant` |
+| **One-way ANOVA** (`one_way_anova`) | one categorical + one numeric column | `statistic` (F), `p_value`, `n_groups`, `n_observations`, `significant` |
+| **Chi-square test of independence** (`chi_square_independence`) | two categorical columns | `statistic`, `p_value`, `degrees_of_freedom`, `n_observations`, `significant` — no continuity correction (textbook statistic) |
+
+### Result model
+
+`StatisticalTestResult` — `test_kind` (`TestKind`), `test_name`,
+`columns`, `status` (`TestStatus`: `completed` / `unavailable`), `reason`
+(set only when unavailable), `statistic`, `p_value`,
+`degrees_of_freedom`, `n_observations`, `n_groups`, `alpha`, `significant`
+(`p_value < alpha`), `notes`. `StatisticalAnalysis` groups results into
+`t_tests` / `anova` / `chi_square` plus `notes`, mirroring
+`BivariateSummary`.
+
+### Automatic selection and deterministic caps
+
+`analyze_statistics` tests every unordered numeric pair (t-test), every
+`(categorical, numeric)` combination (ANOVA), and every unordered
+categorical pair (chi-square). Categorical columns with cardinality above
+`MAX_BIVARIATE_CARDINALITY` (50) are excluded. Each family has a
+documented module-constant cap:
+
+| Constant | Default |
+| --- | --- |
+| `MAX_TTEST_PAIRS` | 50 |
+| `MAX_ANOVA_COMBINATIONS` | 50 |
+| `MAX_CHI_SQUARE_PAIRS` | 50 |
+
+Pairs are ordered by sorted column name; when a cap is hit the first N
+are kept and a `notes[]` entry records the truncation.
+
+### Unavailable results
+
+A test that cannot be computed returns `status = unavailable` with a
+`reason` and **`None`** for `statistic` / `p_value` /
+`degrees_of_freedom` / `n_observations` / `significant` — never a fake
+`0` / `1` / `False`. Triggers: fewer than 2 valid paired observations
+(t-test); a column with zero variance; fewer than 2 ANOVA groups with ≥ 2
+observations; a numeric column with no variance across groups; a
+degenerate contingency table (< 2 rows or columns); no valid paired
+observations; a non-finite statistic. A chi-square with expected cell
+counts < 5 still completes but adds a note.
+
+### Not implemented (later increments)
+
+Spearman / Kendall / Mann-Whitney / Kruskal-Wallis, regression or
+normality tests, effect sizes, Cramér's V, correlation ratio, mutual
+information, and multiple-testing correction.
+
 ## Missing / invalid data behaviour
 
 EDA is **observational**. If a statistic cannot be calculated it is
@@ -105,14 +172,23 @@ failure raises the existing `VersionIntegrityError`, so a **missing or
 tampered file is surfaced clearly** before any analysis. It then reads
 the CSV read-only and analyses it.
 
-## What is intentionally NOT implemented yet
+## What remains for Phase 4
 
-- No statistical hypothesis testing (t-test, ANOVA, chi-square,
-  p-values), no SciPy/statsmodels.
-- No mutual information / advanced association measures / effect sizes.
+- Effect sizes / association measures (Cramér's V, correlation ratio,
+  mutual information).
+- Spearman / Kendall rank correlation (and other non-parametric tests).
+- Visualization — figure generation, automated chart selection.
+- Richer distribution analysis (histograms/bins, skew/kurtosis).
+- An EDA ↔ quality cross-reference.
+
+## What is intentionally NOT implemented (Phase 5+ / out of scope)
+
 - No visualization — no Matplotlib/Plotly, no chart selection.
 - No automated problem understanding, target inference, or feature
-  selection.
+  selection / feature engineering.
 - No ML / DL / experiment tracking / SHAP / LLM / API / frontend /
   database / train-test splitting.
+- Within statistics: no Spearman/Kendall/Mann-Whitney/Kruskal-Wallis,
+  regression/normality tests, effect sizes, or multiple-testing
+  correction (see the statistics section above).
 - CSV only (matches the rest of the project so far).

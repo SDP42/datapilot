@@ -42,11 +42,31 @@ from .models import (
     TopValue,
     UnivariateAnalysis,
 )
+from .statistical_models import (
+    DEFAULT_ALPHA,
+    MAX_ANOVA_COMBINATIONS,
+    MAX_CHI_SQUARE_PAIRS,
+    MAX_TTEST_PAIRS,
+    StatisticalAnalysis,
+    StatisticalTestResult,
+    TestKind,
+    TestStatus,
+)
+from .statistics import (
+    analyze_statistics,
+    chi_square_independence,
+    one_way_anova,
+    welch_t_test,
+)
 from .univariate import analyze_univariate, classify_columns
 
 __all__ = [
+    "DEFAULT_ALPHA",
     "EDA_ENGINE_VERSION",
     "FIXED_QUANTILES",
+    "MAX_ANOVA_COMBINATIONS",
+    "MAX_CHI_SQUARE_PAIRS",
+    "MAX_TTEST_PAIRS",
     "BivariateSummary",
     "CategoricalColumnAnalysis",
     "CategoricalContingency",
@@ -61,11 +81,19 @@ __all__ = [
     "NumericColumnAnalysis",
     "NumericPairCorrelation",
     "QuantileValue",
+    "StatisticalAnalysis",
+    "StatisticalTestResult",
+    "TestKind",
+    "TestStatus",
     "TopValue",
     "UnivariateAnalysis",
     "analyze_bivariate",
     "analyze_dataframe",
     "analyze_dataset_version",
+    "analyze_statistics",
     "analyze_univariate",
+    "chi_square_independence",
     "classify_columns",
+    "one_way_anova",
+    "welch_t_test",
 ]

@@ -113,7 +113,7 @@ continuous Testing/Benchmarking/Docs. See [docs/roadmap.md](docs/roadmap.md).
 | **Phase 2 — Cleaning planner** (`data_engine.cleaning`) | ✅ Implemented (proposals only) |
 | **Phase 2 — Cleaning executor** (`data_engine.cleaning`) | ✅ Implemented (deterministic; runs only explicitly approved operations on a derived copy) |
 | **Phase 3 — Validation & Data Lineage** (`data_engine.validation`) | ✅ In progress — `DatasetVersion`, version store, lineage validation, lineage graph, opt-in auto-registration, cross-version diff, version-integrity / family-consistency / lineage-binding checks (filesystem-only, no database; detects & reports, never repairs) |
-| **Phase 4 — EDA** (`data_engine.eda`) | ✅ In progress — deterministic, analysis-only univariate + basic bivariate EDA; no statistical testing or visualization |
+| **Phase 4 — EDA & Statistical Analysis** (`data_engine.eda`) | ✅ In progress — deterministic analysis-only EDA foundation + statistical hypothesis-testing foundation (Welch t-test, one-way ANOVA, chi-square); no effect sizes, rank correlation, or visualization |
 | AI-driven cleaning approval / reasoning | ⛔ Not started (Phase 11+) |
 | ML experimentation | ⛔ Not started |
 | Everything else | ⛔ Not started |

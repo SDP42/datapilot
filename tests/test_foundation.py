@@ -39,6 +39,8 @@ ENGINE_PACKAGES = [
     "data_engine.eda.univariate",
     "data_engine.eda.bivariate",
     "data_engine.eda.analyzer",
+    "data_engine.eda.statistical_models",
+    "data_engine.eda.statistics",
     "data_engine.feature_engineering",
     "database",
     "dl_engine",

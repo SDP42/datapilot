@@ -20,6 +20,7 @@ from data_engine.validation import DatasetVersion, verify_version_integrity
 
 from .bivariate import analyze_bivariate
 from .models import EDAReport
+from .statistics import analyze_statistics
 from .univariate import analyze_univariate, classify_columns
 
 
@@ -43,6 +44,7 @@ def analyze_dataframe(
         column_kinds=classify_columns(df),
         univariate=analyze_univariate(df),
         bivariate=analyze_bivariate(df),
+        statistical_tests=analyze_statistics(df),
     )
 
 
