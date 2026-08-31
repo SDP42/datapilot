@@ -110,12 +110,15 @@ continuous Testing/Benchmarking/Docs. See [docs/roadmap.md](docs/roadmap.md).
 | **Phase 1 — CSV ingestion** (`data_engine.ingestion`) | ✅ Implemented (CSV only) |
 | **Phase 1 — Dataset profiling** (`data_engine.profiling`) | ✅ Implemented |
 | **Phase 2 — Data-quality analysis** (`data_engine.quality`) | ✅ Implemented (detection only) |
-| **Phase 2 — Cleaning planner** (`data_engine.cleaning`) | ✅ Implemented (proposals only, no execution) |
-| Phase 2 — Cleaning executor | ⛔ Not started |
+| **Phase 2 — Cleaning planner** (`data_engine.cleaning`) | ✅ Implemented (proposals only) |
+| **Phase 2 — Cleaning executor** (`data_engine.cleaning`) | ✅ Implemented (deterministic; runs only explicitly approved operations on a derived copy) |
+| AI-driven cleaning approval / reasoning | ⛔ Not started (Phase 11+) |
+| ML experimentation | ⛔ Not started |
 | Everything else | ⛔ Not started |
 
 Detail: [docs/data-engine-contract.md](docs/data-engine-contract.md),
-[docs/data-quality.md](docs/data-quality.md), [docs/cleaning.md](docs/cleaning.md).
+[docs/data-quality.md](docs/data-quality.md), [docs/cleaning.md](docs/cleaning.md),
+[docs/cleaning-execution.md](docs/cleaning-execution.md).
 
 ## Development setup
 

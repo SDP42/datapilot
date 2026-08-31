@@ -7,7 +7,7 @@ future phases are not anticipated in code.
 | --- | --- | --- |
 | 0 | Architecture / Foundation | Done |
 | 1 | Data Ingestion & Profiling | **In progress** — CSV ingestion + profiling done; Parquet/Excel deferred |
-| 2 | Data Quality & Cleaning | **In progress** — quality analysis + cleaning *planning* done; cleaning *execution* not started |
+| 2 | Data Quality & Cleaning | **Done** — quality analysis + cleaning planning + safe cleaning execution (deterministic; no AI approval/reasoning yet) |
 | 3 | Validation & Data Lineage | Not started |
 | 4 | EDA & Statistical Analysis | Not started |
 | 5 | Automated Problem Understanding | Not started |
@@ -65,7 +65,13 @@ future phases are not anticipated in code.
   `plan_cleaning` (`QualityReport → CleaningPlan`) with deterministic
   per-finding rules and `recommended` / `review_required` /
   `not_safe_to_automate` safety statuses; see [cleaning.md](cleaning.md).
-  The cleaning **executor** (applying approved operations) is not started.
+  The cleaning **executor** is implemented — `execute_cleaning`
+  (`CleaningPlan` + explicit approval → `CleaningExecutionReport` + a
+  processed dataset version). Atomic per-operation execution on a derived
+  copy, operation-aware validation, train/test leakage protection,
+  lineage, and a before/after quality comparison; see
+  [cleaning-execution.md](cleaning-execution.md). It is deterministic —
+  **AI-driven approval / reasoning is a later phase (11+)**.
 
 ### Phase 3 — Validation & Data Lineage
 - **Objective:** guarantee transformations are safe and traceable.

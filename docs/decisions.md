@@ -4,6 +4,74 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0027 — Executor takes an explicit `approved_operation_ids` allow-list
+- **Decision:** an operation executes only if its id is in
+  `approved_operation_ids` (or it is `recommended` and the opt-in
+  `auto_execute_recommended=True`). Unapproved `review_required` →
+  `skipped`; `not_safe_to_automate` → rejected even if approved;
+  investigation / modeling-recommendation → always `skipped`.
+- **Reason:** prompt §5 — the approval boundary must be explicit; the
+  executor must never silently run every recommendation.
+- **Alternatives considered:** execute all `recommended` by default
+  (rejected — hides the boundary); a single "apply the whole plan" flag
+  (rejected — no per-operation control).
+
+## 0026 — `ExecutionContext` is the explicit train/test-leakage mechanism
+- **Decision:** leakage-aware operations (imputation, log transform) fit
+  parameters on `ExecutionContext(train_index=...)` only, or on all rows
+  only when the caller passes `allow_full_data_fit=True`. Neither set →
+  the operation `fails` with guidance; the executor never silently uses
+  the whole dataset.
+- **Reason:** prompt §7 / §17 / leakage tests — "Do not silently violate
+  this requirement."
+- **Alternatives considered:** default to full-data fit (rejected —
+  silent leakage); random internal train/test split (rejected — prompt
+  forbids randomness here; splitting belongs to the modelling layer).
+- **Consequence:** `fit_details` records `fit_on`, `fit_rows`, `fit_value`.
+
+## 0025 — Atomic per-operation commit (temp copy → validate → commit)
+- **Decision:** each operation runs on `working_df.copy()`; the result is
+  committed to `working_df` only after `validate_after` passes. Any
+  failure/abort leaves `working_df` untouched and the run continues.
+- **Reason:** prompt §17 — a failed `convert_text_to_numeric` must not
+  half-convert a column; prefer validate→execute→validate→commit over
+  mutate-and-rollback.
+- **Alternatives considered:** mutate in place and undo on failure
+  (rejected — fragile, hard to guarantee).
+
+## 0024 — New `ProcessedDataStore` + `ProcessedDatasetReference`; no reload mechanism
+- **Decision:** processed versions are written under `data/processed/` by
+  a store mirroring `RawDataStore` (read-only files, JSON sidecars,
+  deterministic `exec-<id>` dirs). Post-cleaning quality analysis runs on
+  the in-memory cleaned frame — no new dataset-loading path is invented.
+- **Reason:** prompt §21 wants a derived dataset/reference with stable
+  identity; prompt §4 says do not invent another loading mechanism.
+- **Alternatives considered:** reuse `DatasetReference` for processed data
+  (rejected — it is defined as an immutable *raw* pointer); a full
+  versioning system (out of scope — this is the minimal foundation).
+
+## 0023 — Executor takes an optional `DatasetProfile` + parameter overrides, plan stays immutable
+- **Decision:** `execute_cleaning(reference, plan, *, profile=None,
+  operation_parameter_overrides=None, ...)`. The approver supplies missing
+  parameters (e.g. a date `format`) via `operation_parameter_overrides`,
+  never by editing the `CleaningPlan`.
+- **Reason:** prompt forbids modifying the original `CleaningPlan`; a
+  `review_required` op often needs a human-supplied parameter.
+- **Alternatives considered:** mutate the plan's `parameters` (rejected —
+  violates immutability); require a fully-specified plan (rejected — the
+  planner deliberately leaves ambiguous params unset).
+
+## 0022 — Execution is a separate package stage with its own models
+- **Decision:** `execution_models.py` (`ExecutionStatus`,
+  `OperationExecution`, `CleaningExecutionReport`, `DatasetLineage`,
+  `QualityComparison`, ...) + `executor.py` + `executors/` (one module per
+  operation family, `EXECUTORS` registry) + `validation.py`, all under
+  `data_engine.cleaning`. Planning and execution never combine.
+- **Reason:** prompt §6 / §28 — mirror the quality-check / planner
+  architecture; keep DETECTION → PLANNING → EXECUTION explicit.
+- **Alternatives considered:** one big `if operation_type == ...` in
+  `execute_cleaning()` (rejected — the anti-pattern the prompt names).
+
 ## 0021 — Planner is deterministic and proposal-only; three safety statuses
 - **Decision:** `plan_cleaning` produces `CleaningOperation`s each tagged
   `recommended` / `review_required` / `not_safe_to_automate`, with a

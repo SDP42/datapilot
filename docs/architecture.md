@@ -60,14 +60,16 @@ and the shared data contracts in `datapilot/`. The interface between the
 two is specified in
 [data-engine-contract.md](data-engine-contract.md) — *implemented for CSV*.
 
-**Phase 2 (in progress):** `data_engine.quality` — a read-only quality
-*analysis* engine (`DatasetProfile` + data → `QualityReport`), specified
-in [data-quality.md](data-quality.md); and `data_engine.cleaning` — a
-deterministic, read-only cleaning *planner* (`QualityReport` →
-`CleaningPlan` of proposals), specified in [cleaning.md](cleaning.md).
-The cleaning *executor* is not started.
+**Phase 2 (done):** `data_engine.quality` — a read-only quality *analysis*
+engine (`DatasetProfile` + data → `QualityReport`),
+[data-quality.md](data-quality.md); `data_engine.cleaning` — a
+deterministic cleaning *planner* (`QualityReport` → `CleaningPlan` of
+proposals), [cleaning.md](cleaning.md); and a deterministic, safe cleaning
+*executor* (`CleaningPlan` + explicit approval → `CleaningExecutionReport`
++ a processed dataset version), [cleaning-execution.md](cleaning-execution.md).
+AI-driven cleaning approval / reasoning is a later phase.
 
-**Future-phase components:** everything else — cleaning execution,
+**Future-phase components:** everything else —
 validation & lineage, EDA, feature engineering, `ml_engine`, `dl_engine`,
 `experimentation`, `explainability`, `ai_engine`, `database`, `backend`,
 `frontend`, MLOps.
