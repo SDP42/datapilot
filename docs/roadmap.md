@@ -10,7 +10,7 @@ future phases are not anticipated in code.
 | 2 | Data Quality & Cleaning | **Done** — quality analysis + cleaning planning + safe cleaning execution (deterministic; no AI approval/reasoning yet) |
 | 3 | Validation & Data Lineage | **In progress** — `DatasetVersion` + store + lineage validation + lineage graph + opt-in auto-registration + cross-version diffing + version-integrity / family-consistency / version↔lineage-binding checks done; still filesystem-only (no database, no GC) |
 | 4 | EDA & Statistical Analysis | **Done** — deterministic analysis-only `data_engine.eda`: EDA/univariate/bivariate, parametric tests, effect sizes, non-parametric tests, distribution analysis, EDA↔quality cross-reference, visualization foundation (chart-spec selection + in-memory Matplotlib **and Plotly** rendering + explicit chart export), target-aware visualization recommendation, statistical-strength visualization ranking, k-NN / Kraskov mutual-information estimator, datetime mutual information, paired / one-sided non-parametric tests (Wilcoxon signed-rank / sign / Friedman), multiple-testing correction (Bonferroni / Holm / Benjamini-Hochberg). No dashboard/API |
-| 5 | Automated Problem Understanding | **In progress** — `data_engine.problem_understanding`: the `ProblemSpec` contract + `understand_problem` foundation (5.1 — done), **target identification** `identify_target` (5.2 — done), **task-type inference** `infer_task_type` (5.3 — done), **candidate metrics** `recommend_metrics` (5.4 — done). Feasibility assessment (5.5) not started |
+| 5 | Automated Problem Understanding | **Done** — `data_engine.problem_understanding`: the `ProblemSpec` contract + `understand_problem` foundation (5.1), **target identification** `identify_target` (5.2), **task-type inference** `infer_task_type` (5.3), **candidate metrics** `recommend_metrics` (5.4), **feasibility assessment** `assess_feasibility` (5.5). All deterministic, standalone, analysis-only; no ML/LLM |
 | 6 | Feature Engineering | Not started |
 | 7 | Classical ML | Not started |
 | 8 | Deep Learning | Not started |
@@ -262,7 +262,7 @@ future phases are not anticipated in code.
   See [eda.md](eda.md). **Phase 4 is complete.** No Phase-4 items remain.
   Later phases (5+) are **not started**.
 
-### Phase 5 — Automated Problem Understanding — **In progress**
+### Phase 5 — Automated Problem Understanding — **Done**
 - **Objective:** identify the ML task from data + objective.
 - **Components:** task-type inference (classification/regression/…), target
   identification, candidate evaluation metrics, feasibility checks.
@@ -358,6 +358,32 @@ future phases are not anticipated in code.
   field (echoed from `TargetIdentification`; legacy JSON validates);
   `CandidateMetrics` gains an additive defaulted `objective_used` field.
 
+  **5.5 — feasibility assessment.** `assess_feasibility(df, target:
+  TargetIdentification, task_type: TaskTypeInference, metrics:
+  CandidateMetrics, *, objective: str | None = None) ->
+  FeasibilityAssessment` — a **standalone**, deterministic **structural
+  feasibility screen** (caller merges into `ProblemSpec.feasibility`).
+  Consumes the 5.2 / 5.3 / 5.4 results — never re-runs or overrides them.
+  A non-`completed` upstream result, or no single target for a supervised
+  task → `status = unavailable`, `feasible = None`. Otherwise deterministic
+  rules produce **blocking issues** (`feasible = False`) vs **warnings**
+  (never flip `feasible`): dataset size (`< MIN_ROWS_HARD` = 2 blocks,
+  `< MIN_ROWS_WARNING` = 20 warns), target absent / all-missing / constant
+  (block), target missing fraction `> 0.20` (warn), regression `< 2`
+  finite observations (block), classification `< 2` observed classes
+  (block) / smallest class `< 0.05` share (warn), forecasting no datetime
+  column / `< 2` usable-or-distinct timestamps (block), supervised
+  feature availability (target-only frame / all non-target columns missing
+  → block), clustering `< 2` rows or no column with `>= 2` distinct
+  non-missing values (block). Non-finite numerics counted as unusable; the
+  target is never imputed. Fixed rule ordering; columns inspected
+  alphabetically → row- and column-order invariant. **No** model
+  training / prediction / CV / statistical testing / feature importance /
+  leakage detection (a `note` records leakage was not assessed) /
+  cleaning / target or task or metric re-selection. Uses the existing
+  `FeasibilityAssessment` model unchanged. `objective` recorded in notes
+  only.
+
   No `EDAReport` field, no cross-phase coupling beyond reusing the pure
   `infer_column_type` helper + the shared `ColumnType` enum, no new
   dependency; `pyproject.toml` was updated once (in 5.1) to declare the
@@ -365,11 +391,12 @@ future phases are not anticipated in code.
   [problem-understanding.md](problem-understanding.md).
 
   **Completed:** 5.1 foundation / `ProblemSpec`, 5.2 target
-  identification, 5.3 task-type inference, 5.4 candidate metrics.
-  **Not started:** 5.5 feasibility assessment / completion. Phase 5 is
-  **not complete**.
+  identification, 5.3 task-type inference, 5.4 candidate metrics, 5.5
+  feasibility assessment. **Phase 5 is complete.** `understand_problem()`
+  still composes nothing automatically — a caller merges the four
+  standalone results into `ProblemSpec` and decides the overall status.
 
-### Phase 6 — Feature Engineering
+### Phase 6 — Feature Engineering — **Not started**
 - **Objective:** build and select informative features deterministically.
 - **Components:** transformers, encoders, interaction/aggregation features,
   selection methods; all recorded in lineage.

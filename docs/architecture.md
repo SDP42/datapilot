@@ -168,11 +168,11 @@ are backward-compatible defaulted fields. Read-only — no dataset, version
 record, or lineage is modified; no new version is registered.
 [eda.md](eda.md).
 
-**Phase 5 (in progress):** `data_engine.problem_understanding` — a
-deterministic, **analysis-only** layer that will turn a dataset + an
+**Phase 5 (done):** `data_engine.problem_understanding` — a
+deterministic, **analysis-only** layer that turns a dataset + an
 **explicit** objective into a structured `ProblemSpec` (task type,
-target, candidate metrics, feasibility); 5.1–5.4 are implemented, 5.5
-(feasibility) is not. **5.1 — contract + foundation:**
+target, candidate metrics, feasibility); 5.1–5.5 are all implemented as
+standalone functions the caller composes. **5.1 — contract + foundation:**
 `understand_problem(request: ProblemUnderstandingRequest) -> ProblemSpec`
 validates dataset identity + an explicit objective (never inferred from
 data) and returns a spec whose overall status and all four sections are
@@ -215,6 +215,20 @@ primary metric; unsupported task or non-completed inference →
 `unavailable` with `primary_metric = None` and no fabricated metric.
 `TaskTypeInference` gained a minimal additive `target_column` field
 (echoed from 5.2) so the `mape` rule needs no target re-selection.
+**5.5 — feasibility assessment:** `assess_feasibility(df, target,
+task_type, metrics, *, objective=None) -> FeasibilityAssessment`, also
+**standalone** (caller merges into `ProblemSpec.feasibility`). A
+deterministic **structural feasibility screen** that consumes the 5.2 /
+5.3 / 5.4 results and never re-runs them. A non-`completed` upstream
+result (or no single target for a supervised task) → `unavailable` /
+`feasible = None`. Otherwise fixed rules over row counts, target
+availability / variation, class balance, finite-value counts, timestamp
+availability, and non-target feature presence produce **blocking issues**
+(`feasible = False`) vs **warnings** (never flip `feasible`). No model
+training / prediction / CV / statistical testing / feature importance /
+leakage detection / cleaning; the existing `FeasibilityAssessment` model
+is reused unchanged. A `feasible` result is explicitly *not* a
+performance guarantee.
 Separate from ingestion / profiling / quality / cleaning / validation /
 lineage / EDA — the Phase-5 functions reuse only the pure
 `infer_column_type` helper and the shared `ColumnType` enum, modify

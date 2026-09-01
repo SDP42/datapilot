@@ -5,14 +5,15 @@ layer that turns a dataset plus an **explicit** objective into a
 structured `ProblemSpec`: what ML task the data describes, what the
 target is, which metrics make sense, and whether the problem is feasible.
 
-> **Status.** Implemented: Phase 5.1 (the `ProblemSpec` contract +
+> **Status.** Phase 5 is **complete**: 5.1 (the `ProblemSpec` contract +
 > `understand_problem` foundation), 5.2 (**target identification** —
 > `identify_target`), 5.3 (**task-type inference** — `infer_task_type`),
-> and 5.4 (**candidate metrics** — `recommend_metrics`). Each is a
+> 5.4 (**candidate metrics** — `recommend_metrics`), and 5.5
+> (**feasibility assessment** — `assess_feasibility`). Each is a
 > **standalone** deterministic function whose result the caller merges
-> into `ProblemSpec`; `understand_problem` itself still infers nothing.
-> Feasibility assessment (5.5) is still to come — Phase 5 is
-> **In progress**.
+> into `ProblemSpec`; `understand_problem` itself still infers nothing and
+> the overall `ProblemSpec.status` is left at `not_yet_inferred` until a
+> caller composes the sections.
 
 ## Entrypoint
 
@@ -412,6 +413,104 @@ echoed from the `TargetIdentification` by `infer_task_type`. The
 task-decision logic is unchanged; legacy JSON (no `target_column`)
 validates (default `None`).
 
+## Feasibility assessment (5.5) — `assess_feasibility`
+
+```python
+from data_engine.problem_understanding import (
+    identify_target,
+    infer_task_type,
+    recommend_metrics,
+    assess_feasibility,
+)
+
+feasibility = assess_feasibility(df, target, task, metrics, objective="predict price")
+merged = spec.model_copy(update={"feasibility": feasibility})
+```
+
+`assess_feasibility(df, target: TargetIdentification, task_type: TaskTypeInference, metrics: CandidateMetrics, *, objective: str | None = None) -> FeasibilityAssessment`
+
+A deterministic **structural feasibility screen**: it consumes the Phase
+5.2 / 5.3 / 5.4 results and never re-runs or overrides them. A `feasible`
+result is **not** a guarantee of model performance — the function does no
+model training, prediction, cross-validation, statistical testing,
+feature selection, cleaning, imputation, or leakage detection.
+
+### Upstream handling
+
+If `target`, `task_type`, or `metrics` is not `completed` (unavailable or
+not-yet-inferred), the result is `status = unavailable`, `feasible = None`
+with the upstream reason. If no single target column was identified for a
+**supervised** task, likewise `unavailable`. Clustering is assessed
+targetlessly. A missing upstream decision is never recovered or inferred.
+
+### Deterministic rules
+
+| Check | Condition | Result |
+| --- | --- | --- |
+| Dataset size | `< MIN_ROWS_HARD` (2) rows | blocking |
+| | `2`–`19` rows (`< MIN_ROWS_WARNING`) | warning |
+| Target (supervised) | column absent from `df` | blocking |
+| | entirely missing / 0 usable observations | blocking |
+| | constant (1 distinct value) | blocking |
+| | missing fraction `> TARGET_MISSING_WARNING` (0.20) | warning |
+| Regression | `< 2` finite numeric observations | blocking |
+| | single distinct finite value | blocking |
+| Classification | `< 2` observed classes | blocking |
+| | smallest class share `< SEVERE_CLASS_IMBALANCE` (0.05) | warning |
+| Forecasting | no datetime column in `df` | blocking |
+| | `< 2` usable timestamps / all identical | blocking |
+| Features (supervised) | `df` has only the target column | blocking |
+| | every non-target column entirely missing | blocking |
+| Clustering | no column with `>= 2` distinct non-missing values | blocking |
+| | `< 2` rows | blocking |
+
+Non-finite numeric values (`±inf`, `NaN`) are counted as unusable. The
+target is never imputed or cleaned. Forecasting inspects datetime values
+only for structural feasibility — no frequency inference, resampling,
+sorting, lag features, splits, stationarity tests, or forecasting.
+
+### Blocking issues vs warnings
+
+A **blocking issue** makes the problem structurally unsuitable to proceed
+(`feasible = False`). A **warning** flags a concern that does not by
+itself make the problem impossible (small data, target missingness,
+severe class imbalance) — warnings **never** flip `feasible` to `False`.
+Both lists have a fixed, documented rule order (size → target → task
+specific → features → clustering); columns are inspected in alphabetical
+name order, so the result is invariant to DataFrame row and column order.
+
+### Final decision
+
+- `>= 1` blocking issue → `status = completed`, `feasible = False`,
+  concise `reason`, ordered `blocking_issues` + `warnings`.
+- no blocking issue → `status = completed`, `feasible = True`,
+  `reason = None`, `blocking_issues = []`, `warnings` as found.
+- upstream unavailable → `status = unavailable`, `feasible = None`.
+
+### Non-goals (explicit)
+
+No leakage detection (a `note` records that leakage has not been
+assessed), no statistical significance / predictive-power testing, no
+feature importance, no model-based feasibility, no automatic cleaning,
+target selection, task re-inference, or metric re-selection.
+
+### Validation & safety
+
+`df` not a DataFrame, or `target` / `task_type` / `metrics` not their
+respective models → `TypeError`. `df` and all three upstream results are
+never mutated; no file, figure, dataset / version / lineage / database
+access, no external or LLM call, no randomness, timestamps, or UUIDs.
+`objective` is recorded in the notes only and never overrides an upstream
+decision; blank / whitespace is treated as no objective.
+
+### Integration
+
+`understand_problem()` is unchanged and does **not** wire feasibility in.
+After `spec.model_copy(update={"feasibility": ...})` the `target`,
+`task_type`, and `metrics` sections are unchanged, `feasibility` is
+populated, and the overall `ProblemSpec.status` stays `not_yet_inferred`
+in this increment.
+
 ## No timestamp
 
 Unlike `DatasetProfile` / `QualityReport` / `EDAReport`, `ProblemSpec`
@@ -425,9 +524,11 @@ value is recorded.
   lineage / EDA internals. `identify_target` reuses one pure profiling
   helper (`infer_column_type`) and the shared `datapilot.contracts.ColumnType`
   enum; it modifies nothing and adds no `EDAReport` field.
-- **Target identification (5.2)**, **task-type inference (5.3)** and
-  **candidate metrics (5.4)** only. No feasibility scoring, no
-  target-leakage assessment, no train/test split, no feature engineering
-  / selection / preprocessing, no model selection or training, no
-  clustering / forecasting / classification *models*, no metric
-  *computation* — those are later Phase-5 increments or later phases.
+- **Target identification (5.2)**, **task-type inference (5.3)**,
+  **candidate metrics (5.4)** and **feasibility assessment (5.5)** — the
+  full Phase-5 pipeline. Still **out of scope**: target-leakage
+  detection, statistical significance / predictive-power testing, feature
+  importance, model-based feasibility, train/test split, feature
+  engineering / selection / preprocessing, model selection or training,
+  clustering / forecasting / classification *models*, metric
+  *computation*, and automatic cleaning — those belong to later phases.

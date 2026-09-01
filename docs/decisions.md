@@ -4,6 +4,53 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0064 — Phase 5.5: `assess_feasibility` is a standalone deterministic structural feasibility screen
+- **Decision:** `data_engine/problem_understanding/feasibility_assessment.py`
+  adds `assess_feasibility(df, target: TargetIdentification, task_type:
+  TaskTypeInference, metrics: CandidateMetrics, *, objective: str | None =
+  None) -> FeasibilityAssessment`, a **standalone** function
+  (`understand_problem` unchanged; caller merges into
+  `ProblemSpec.feasibility` via `model_copy`, matching 5.2–5.4). It
+  **consumes** the 5.2 / 5.3 / 5.4 results and never re-runs, recovers, or
+  overrides them. The existing Phase-5.1 `FeasibilityAssessment` model is
+  reused **unmodified** — no new field was needed.
+- **Reason:** Prompt "Phase 5.5 — Automated Feasibility Assessment":
+  "deterministic, rule-based feasibility assessment"; "a structural
+  feasibility screen"; "Do NOT implement ML leakage detection in Phase
+  5.5"; "Do not perform train/test splitting, cross-validation,
+  stratification, resampling, SMOTE, class weighting, or model training";
+  "Do not return `False` merely because the system lacks enough
+  information"; "Prefer using the existing contract without
+  modification".
+- **Rules (documented):** a non-`completed` upstream result, or no single
+  target column for a supervised task → `status = unavailable`,
+  `feasible = None` (never a fabricated `False`). Otherwise deterministic
+  thresholds `MIN_ROWS_HARD = 2` / `MIN_ROWS_WARNING = 20` /
+  `TARGET_MISSING_WARNING = 0.20` / `SEVERE_CLASS_IMBALANCE = 0.05`
+  produce **blocking issues** (`feasible = False`) vs **warnings** (never
+  flip `feasible`): dataset size; target absent / all-missing / constant /
+  substantially missing; regression `< 2` finite observations; single
+  observed class / severe imbalance; forecasting no datetime column or
+  `< 2` usable-or-distinct timestamps; supervised feature availability
+  (target-only frame / all non-target columns missing); clustering `< 2`
+  rows or no column with `>= 2` distinct non-missing values. Non-finite
+  numerics count as unusable; the target is never imputed. Fixed rule
+  ordering (size → target → task specific → features → clustering);
+  columns inspected in alphabetical name order → the result is invariant
+  to DataFrame row and column order. `objective` is recorded in `notes`
+  only. A conservative `note` records that feature-target leakage has not
+  been assessed — no leakage detector is added.
+- **Errors / safety:** non-DataFrame `df`, or non-model `target` /
+  `task_type` / `metrics` → `TypeError`. Deterministic; `df` and all
+  three upstream results never mutated; no file / figure / dataset /
+  version / lineage / database / external / LLM call; no randomness,
+  timestamps, or UUIDs. Reuses only `infer_column_type` + `ColumnType`.
+  No new dependency; `pyproject.toml` not changed.
+- **Phase 5 status:** with 5.5 done and every Phase-5.1–5.5 test and
+  quality gate passing, **Phase 5 is complete**. `understand_problem()`
+  still composes nothing automatically and the overall `ProblemSpec.status`
+  remains `not_yet_inferred` until a caller merges the sections.
+
 ## 0063 — Phase 5.4: `recommend_metrics` is standalone, rule-based, with a fixed per-task metric vocabulary
 - **Decision:** `data_engine/problem_understanding/metrics_recommendation.py`
   adds `recommend_metrics(df, task_type: TaskTypeInference, *, objective:

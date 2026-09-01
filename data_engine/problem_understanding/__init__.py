@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from datapilot.contracts import ColumnType
 
+from .feasibility_assessment import assess_feasibility
 from .metrics_recommendation import recommend_metrics
 from .models import (
     PROBLEM_UNDERSTANDING_ENGINE_VERSION,
@@ -64,6 +65,7 @@ __all__ = [
     "TargetIdentification",
     "TaskType",
     "TaskTypeInference",
+    "assess_feasibility",
     "identify_target",
     "infer_task_type",
     "recommend_metrics",
