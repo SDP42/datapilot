@@ -4,6 +4,55 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0061 — Phase 5.2: `identify_target` is standalone + structural + objective-aware, never guesses
+- **Decision:** `data_engine/problem_understanding/target_identification.py`
+  adds `identify_target(df, *, objective: str | None = None) ->
+  TargetIdentification`, a **standalone** function — `understand_problem`
+  is **not** changed (its signature stays `(request)`, and a Phase-5.1
+  test pins that). The caller merges the result via
+  `spec.model_copy(update={"target": identify_target(df, objective=...)})`,
+  matching the EDA-layer precedent (`recommend_visualizations` /
+  `rank_visualizations_by_statistical_strength`). `TargetIdentification`
+  gains additive defaulted fields `candidates: list[TargetCandidate]` and
+  `objective_used: bool`; `TargetCandidate` + `ObjectiveMatchKind` are
+  new. `docs/roadmap.md`: Phase 5 stays **In progress** ("target
+  identification implemented").
+- **Reason:** Prompt "Phase 5.2 — Automated Target Identification" — "the
+  sole purpose … is to determine which dataset column(s) are plausible
+  prediction targets"; "Do NOT silently change the semantics of
+  `understand_problem()`"; "create a focused target-identification
+  function"; "no LLM / embeddings / external API"; "no correlation /
+  mutual information / feature importance / models"; "It is acceptable
+  for the system to say 'I cannot confidently identify a target'".
+- **Algorithm (deterministic, documented):** each non-constant,
+  non-all-missing column is a candidate. Score = a **sum of documented
+  components** (structural: not-identifier `+15` / identifier `−40`;
+  missingness bands `+12`…`−25`; type/cardinality shape
+  boolean `+18`, categorical `2–20` classes `+18`, numeric discrete `+14`
+  / continuous `+12`, datetime `+4`; objective match exact `+60` /
+  normalized `+45` / token `+18`). Sort by `(−score, column_name)` —
+  tie-break **column name ascending**; `TARGET_SELECTION_MARGIN = 20.0`
+  public constant. Objective matching is transparent: exact phrase /
+  separator-insensitive substring or all-token / significant-token
+  (equality **or** a `≥ 4`-char shared prefix, e.g. `churn` ↔ `churned`)
+  — no stemmer, no edit distance. Identifier detection: id-word name
+  (whole or last token) **or** `≥ 99%` uniqueness on a categorical /
+  **integer** column (a high-uniqueness **float** is *not* flagged — a
+  continuous target can be unique). A single `target_column` is set only
+  when: the objective matches exactly one column (exact/normalized); or
+  exactly one **non-identifier** column matched at any level and is the
+  top candidate; or one candidate exists; or the top leads the second by
+  `≥ margin` with a positive score. Otherwise `target_column = None` +
+  ranked `candidates` + a `reason`.
+- **Errors / statuses:** non-DataFrame → `TypeError`; no columns / no
+  rows / all-degenerate → `status = unavailable` + reason;
+  `status = completed` whenever identification ran (whether or not a
+  single target was pinned). `score` is a ranking score, **never** a
+  probability. `df` never mutated (work on derived locals); reuses the
+  pure `data_engine.profiling.type_inference.infer_column_type` and the
+  shared `datapilot.contracts.ColumnType` (the one deliberate cross-module
+  reuse). No new dependency.
+
 ## 0060 — Phase 5.1: `ProblemSpec` contract + `understand_problem` foundation, infers nothing
 - **Decision:** new package `data_engine/problem_understanding/`
   (`models.py`, `understanding.py`, `__init__.py`) with

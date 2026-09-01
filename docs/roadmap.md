@@ -10,7 +10,7 @@ future phases are not anticipated in code.
 | 2 | Data Quality & Cleaning | **Done** — quality analysis + cleaning planning + safe cleaning execution (deterministic; no AI approval/reasoning yet) |
 | 3 | Validation & Data Lineage | **In progress** — `DatasetVersion` + store + lineage validation + lineage graph + opt-in auto-registration + cross-version diffing + version-integrity / family-consistency / version↔lineage-binding checks done; still filesystem-only (no database, no GC) |
 | 4 | EDA & Statistical Analysis | **Done** — deterministic analysis-only `data_engine.eda`: EDA/univariate/bivariate, parametric tests, effect sizes, non-parametric tests, distribution analysis, EDA↔quality cross-reference, visualization foundation (chart-spec selection + in-memory Matplotlib **and Plotly** rendering + explicit chart export), target-aware visualization recommendation, statistical-strength visualization ranking, k-NN / Kraskov mutual-information estimator, datetime mutual information, paired / one-sided non-parametric tests (Wilcoxon signed-rank / sign / Friedman), multiple-testing correction (Bonferroni / Holm / Benjamini-Hochberg). No dashboard/API |
-| 5 | Automated Problem Understanding | **In progress** — Phase 5.1: the deterministic `ProblemSpec` contract + `understand_problem` foundation in `data_engine.problem_understanding` (identity + explicit objective in, all sections `not_yet_inferred`). Target identification, task-type inference, candidate metrics, and feasibility checks are later increments |
+| 5 | Automated Problem Understanding | **In progress** — the deterministic `ProblemSpec` contract + `understand_problem` foundation (5.1) and **target identification** — `identify_target(df, *, objective=None)` — (5.2), in `data_engine.problem_understanding`. Task-type inference, candidate metrics, and feasibility checks are still to come |
 | 6 | Feature Engineering | Not started |
 | 7 | Classical ML | Not started |
 | 8 | Deep Learning | Not started |
@@ -267,25 +267,51 @@ future phases are not anticipated in code.
 - **Components:** task-type inference (classification/regression/…), target
   identification, candidate evaluation metrics, feasibility checks.
 - **Output:** a `ProblemSpec`.
-- **Status:** **Phase 5.1 — contract + foundation only.**
-  `data_engine.problem_understanding` — a deterministic, analysis-only
-  layer. `understand_problem(request: ProblemUnderstandingRequest) ->
+- **Status:** `data_engine.problem_understanding` — a deterministic,
+  analysis-only layer.
+
+  **5.1 — contract + foundation.**
+  `understand_problem(request: ProblemUnderstandingRequest) ->
   ProblemSpec`: the request carries **dataset identity** (`dataset_id` /
   `dataset_version_id`, the convention shared by `DatasetProfile` /
   `QualityReport` / `EDAReport`) and an **explicit** user `objective`
   (never inferred from data). The returned `ProblemSpec` echoes those
-  fields and sets its overall `status` and all four sections — `target`,
-  `task_type`, `metrics`, `feasibility` — to `not_yet_inferred`; nothing
-  is fabricated (`None` / `[]`, never a fake `"classification"` / `0` /
-  `False`). Three-state status enum (`not_yet_inferred` / `completed` /
-  `unavailable`); `TaskType` enum defined so the contract is stable but
-  not populated. No `generated_at` (repeated calls are byte-identical).
-  No `EDAReport` field, no cross-phase coupling, no new dependency; adds
-  the `data_engine.problem_understanding` package. See
-  [problem-understanding.md](problem-understanding.md). **Not yet:**
-  target identification, task-type inference, candidate metrics,
-  feasibility checks — the four later Phase-5 increments. Phase 5 is
-  **not complete**.
+  fields and sets its overall `status` and all four sections to
+  `not_yet_inferred`; nothing is fabricated (`None` / `[]`, never a fake
+  `"classification"` / `0` / `False`). Three-state status enum
+  (`not_yet_inferred` / `completed` / `unavailable`); `TaskType` enum
+  defined so the contract is stable. No `generated_at` (repeated calls
+  are byte-identical).
+
+  **5.2 — target identification.** `identify_target(df, *,
+  objective: str | None = None) -> TargetIdentification` — a
+  **standalone** function (`understand_problem`'s signature is
+  unchanged); the caller merges its result into `ProblemSpec.target`. It
+  deterministically ranks plausible target columns from **structural
+  evidence** (dtype via the shared `infer_column_type`, missingness,
+  cardinality, identifier-like name/behaviour) and **transparent
+  objective name-matching** (exact phrase / separator-insensitive /
+  significant-token, incl. a `≥ 4`-char shared-prefix rule for
+  `churn`↔`churned`). **No** correlation / MI / feature importance /
+  model / LLM / embeddings. Constant and all-missing columns are
+  excluded; all four column types (incl. boolean, datetime) are eligible;
+  identifier-like columns are penalised (`−40`) but not excluded. The
+  `score` is a documented ranking sum (**not a probability**); ties break
+  on column name; `TARGET_SELECTION_MARGIN = 20.0`. A single
+  `target_column` is set only on decisive evidence — otherwise ranked
+  `candidates` + an explicit `reason` (**never a guess**).
+  `status = unavailable` for a non-DataFrame (`TypeError`), no columns,
+  no rows, or all-degenerate columns. `TargetIdentification` gains
+  additive defaulted `candidates` / `objective_used` fields (5.1 JSON
+  still validates).
+
+  No `EDAReport` field, no cross-phase coupling beyond reusing one pure
+  profiling helper + the shared `ColumnType` enum, no new dependency;
+  `pyproject.toml` gains only the `data_engine.problem_understanding`
+  package declaration. See
+  [problem-understanding.md](problem-understanding.md). **Still to
+  come:** task-type inference, candidate metrics, feasibility checks.
+  Phase 5 is **not complete**.
 
 ### Phase 6 — Feature Engineering
 - **Objective:** build and select informative features deterministically.

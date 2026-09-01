@@ -65,6 +65,7 @@ ENGINE_PACKAGES = [
     "data_engine.problem_understanding",
     "data_engine.problem_understanding.models",
     "data_engine.problem_understanding.understanding",
+    "data_engine.problem_understanding.target_identification",
     "data_engine.feature_engineering",
     "database",
     "dl_engine",

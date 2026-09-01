@@ -24,28 +24,43 @@ inferred from the data.
 
 from __future__ import annotations
 
+from datapilot.contracts import ColumnType
+
 from .models import (
     PROBLEM_UNDERSTANDING_ENGINE_VERSION,
     CandidateMetrics,
     FeasibilityAssessment,
+    ObjectiveMatchKind,
     ProblemSpec,
     ProblemUnderstandingRequest,
     ProblemUnderstandingStatus,
+    TargetCandidate,
     TargetIdentification,
     TaskType,
     TaskTypeInference,
 )
+from .target_identification import (
+    HIGH_UNIQUE_ID_THRESHOLD,
+    TARGET_SELECTION_MARGIN,
+    identify_target,
+)
 from .understanding import understand_problem
 
 __all__ = [
+    "HIGH_UNIQUE_ID_THRESHOLD",
     "PROBLEM_UNDERSTANDING_ENGINE_VERSION",
+    "TARGET_SELECTION_MARGIN",
     "CandidateMetrics",
+    "ColumnType",
     "FeasibilityAssessment",
+    "ObjectiveMatchKind",
     "ProblemSpec",
     "ProblemUnderstandingRequest",
     "ProblemUnderstandingStatus",
+    "TargetCandidate",
     "TargetIdentification",
     "TaskType",
     "TaskTypeInference",
+    "identify_target",
     "understand_problem",
 ]

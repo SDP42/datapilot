@@ -23,6 +23,8 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
+from datapilot.contracts import ColumnType
+
 PROBLEM_UNDERSTANDING_ENGINE_VERSION = "1"
 
 
@@ -49,18 +51,75 @@ class TaskType(str, Enum):
     OTHER = "other"
 
 
+class ObjectiveMatchKind(str, Enum):
+    """How strongly a column name matched the (verbatim) user objective."""
+
+    EXACT = "exact"  # the full normalised column name appears as a phrase in the objective
+    NORMALIZED = "normalized"  # separator-insensitive substring / all-token match
+    TOKEN = "token"  # a significant column-name token appears as an objective token
+    NONE = "none"  # no deterministic match, or no objective supplied
+
+
+class TargetCandidate(BaseModel):
+    """One ranked candidate target column, with the evidence for its rank.
+
+    ``score`` is a **deterministic ranking score** — a sum of documented
+    structural / objective components. It is **not** a probability and
+    **not** a confidence percentage.
+    """
+
+    column: str
+    rank: int = Field(description="1-based rank within the candidate list; unique and sequential.")
+    score: float = Field(description="Deterministic ranking score (not a probability).")
+
+    column_type: ColumnType
+    n_observations: int = Field(description="Non-null values.")
+    n_missing: int
+    missing_fraction: float
+    n_unique: int = Field(description="Distinct non-null values.")
+    unique_fraction: float = Field(
+        description="n_unique / n_observations; 0.0 when no observations."
+    )
+
+    identifier_like: bool = Field(
+        description="Column name / behaviour looks like a row identifier (penalised as a target)."
+    )
+    objective_match: ObjectiveMatchKind = ObjectiveMatchKind.NONE
+    reasons: list[str] = Field(
+        default_factory=list, description="Human-readable evidence for the score, in a fixed order."
+    )
+
+
 class TargetIdentification(BaseModel):
-    """Which column(s) the model should predict. Populated in a later increment."""
+    """Which column(s) the model should predict.
+
+    Populated by :func:`data_engine.problem_understanding.identify_target`
+    (Phase 5.2). ``candidates`` / ``objective_used`` are additive and
+    defaulted, so a ``TargetIdentification`` serialised by Phase 5.1 still
+    validates.
+    """
 
     status: ProblemUnderstandingStatus = ProblemUnderstandingStatus.NOT_YET_INFERRED
     reason: str | None = Field(
-        default=None, description="Why the value is unavailable; None otherwise."
+        default=None,
+        description=(
+            "Why no single target was pinned (ambiguity / no objective), or why the result "
+            "is unavailable. None when a single target_column was identified."
+        ),
     )
     target_column: str | None = Field(
-        default=None, description="The identified target column; None until inferred."
+        default=None,
+        description="The single identified target; None when the evidence is ambiguous.",
     )
     candidate_columns: list[str] = Field(
-        default_factory=list, description="Columns considered as possible targets, ranked later."
+        default_factory=list,
+        description="Candidate target column names, best-first (mirrors `candidates`).",
+    )
+    candidates: list[TargetCandidate] = Field(
+        default_factory=list, description="Ranked candidates with per-candidate evidence."
+    )
+    objective_used: bool = Field(
+        default=False, description="True iff a non-blank objective string was supplied."
     )
     notes: list[str] = Field(default_factory=list)
 

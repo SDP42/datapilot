@@ -171,16 +171,27 @@ record, or lineage is modified; no new version is registered.
 **Phase 5 (in progress):** `data_engine.problem_understanding` — a
 deterministic, **analysis-only** layer that will turn a dataset + an
 **explicit** objective into a structured `ProblemSpec` (task type,
-target, candidate metrics, feasibility). **Phase 5.1 establishes the
-contract + foundation only:** `understand_problem(request:
-ProblemUnderstandingRequest) -> ProblemSpec` validates dataset identity +
-an explicit objective (never inferred from data) and returns a spec whose
-overall status and all four sections are `not_yet_inferred` — nothing is
-fabricated. Three-state status enum
+target, candidate metrics, feasibility). **5.1 — contract + foundation:**
+`understand_problem(request: ProblemUnderstandingRequest) -> ProblemSpec`
+validates dataset identity + an explicit objective (never inferred from
+data) and returns a spec whose overall status and all four sections are
+`not_yet_inferred` — nothing fabricated; three-state status enum
 (`not_yet_inferred` / `completed` / `unavailable`); no `generated_at`, so
-repeated calls are byte-identical. Separate from ingestion / profiling /
-quality / cleaning / validation / lineage / EDA — it may *consume* their
-outputs in a later increment but modifies none of them and adds no
+repeated calls are byte-identical. **5.2 — target identification:**
+`identify_target(df, *, objective=None) -> TargetIdentification`, a
+**standalone** function (the caller merges its result into
+`ProblemSpec.target`; `understand_problem`'s signature is unchanged). It
+ranks plausible target columns from **structural evidence** (dtype /
+missingness / cardinality / identifier-like name & behaviour) and
+**transparent objective name-matching** — no correlation, MI, feature
+importance, model, LLM, or embeddings. Constant / all-missing columns
+excluded; all four column types eligible; identifier columns penalised
+not excluded; the ranking `score` is a documented sum (not a
+probability); ties break on column name. A single `target_column` is set
+only on decisive evidence, else ranked `candidates` + an explicit
+`reason`. Separate from ingestion / profiling / quality / cleaning /
+validation / lineage / EDA — it reuses only the pure `infer_column_type`
+helper and the shared `ColumnType` enum, modifies nothing, and adds no
 `EDAReport` field. [problem-understanding.md](problem-understanding.md).
 
 **Future-phase components:** everything else —
