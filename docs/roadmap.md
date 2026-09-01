@@ -12,7 +12,7 @@ future phases are not anticipated in code.
 | 4 | EDA & Statistical Analysis | **Done** — deterministic analysis-only `data_engine.eda`: EDA/univariate/bivariate, parametric tests, effect sizes, non-parametric tests, distribution analysis, EDA↔quality cross-reference, visualization foundation (chart-spec selection + in-memory Matplotlib **and Plotly** rendering + explicit chart export), target-aware visualization recommendation, statistical-strength visualization ranking, k-NN / Kraskov mutual-information estimator, datetime mutual information, paired / one-sided non-parametric tests (Wilcoxon signed-rank / sign / Friedman), multiple-testing correction (Bonferroni / Holm / Benjamini-Hochberg). No dashboard/API |
 | 5 | Automated Problem Understanding | **Done** — `data_engine.problem_understanding`: the `ProblemSpec` contract + `understand_problem` foundation (5.1), **target identification** `identify_target` (5.2), **task-type inference** `infer_task_type` (5.3), **candidate metrics** `recommend_metrics` (5.4), **feasibility assessment** `assess_feasibility` (5.5). All deterministic, standalone, analysis-only; no ML/LLM |
 | 6 | Feature Engineering | **Done** — `data_engine.feature_engineering`, all deterministic, standalone, analysis-only: `FeatureEngineeringSpec` contract + foundation (6.1); **structural feature inventory** `inventory_features` (6.2); **transformation recommendations** `recommend_transformations` (6.3); **feature-selection recommendations** `recommend_feature_selection` (6.4); **preprocessing requirements** `recommend_preprocessing` (6.5); **feature-engineering assessment** `assess_feature_engineering` — structural consistency & readiness check over 6.2–6.5, `feasible` True/False from blocking structural inconsistencies (6.6). Nothing is executed; no ML/LLM |
-| 7 | Model Development / Modeling | **In progress** — `data_engine.modeling`: the `ModelingSpec` contract + `understand_modeling` foundation (7.1 — done); **model readiness** `assess_model_readiness` + **data-split planning** `recommend_data_split` (7.2 — done); **model candidate generation** `generate_model_candidates` (7.3 — done) — a deterministic rule-based recommendation of candidate `ModelFamily` values (linear / tree_based / ensemble / probabilistic / distance_based / neural) from the Phase-5 task type + Phase-7.2 readiness / split + Phase-6 structural feature representation. **Recommends families only — trains, fits, evaluates, benchmarks, compares, tunes, and selects nothing.** 7.4+ (training / evaluation / selection) not started |
+| 7 | Model Development / Modeling | **In progress** — `data_engine.modeling`: the `ModelingSpec` contract + `understand_modeling` foundation (7.1 — done); **model readiness** `assess_model_readiness` + **data-split planning** `recommend_data_split` (7.2 — done); **model candidate generation** `generate_model_candidates` (7.3 — done); **training & evaluation** `train_and_evaluate_models` (7.4 — done) — the first component that fits estimators: executes the plan's physical train/val/test split (fixed seed), runs the Phase-6.5 preprocessing fitted only on the training partition, fits one conservative scikit-learn baseline per Phase-7.3 family, reports per-candidate metrics. **Selects, ranks, and recommends nothing; tunes no hyperparameters; persists no artifact.** scikit-learn added as a dependency (first modeling phase). 7.5 (model selection) not started |
 | 8 | Deep Learning | Not started |
 | 9 | Experiment Tracking | Not started |
 | 10 | Explainable AI | Not started |
@@ -689,9 +689,62 @@ future phases are not anticipated in code.
   list[ModelCandidate]` + `objective_used` (Phase-7.1 JSON validates);
   new `ModelCandidate` model. No new dependency.
 
+  **7.4 — training & evaluation.** `train_and_evaluate_models(df, problem:
+  ProblemSpec, feature_engineering: FeatureEngineeringSpec, readiness:
+  ModelReadiness, split: DataSplitPlan, candidates: ModelCandidates, *,
+  objective=None) -> TrainingOutcome` — a **standalone** function (caller
+  merges into `ModelingSpec.training`). The **first** DataPilot component
+  allowed to fit estimators and compute metrics. Fixed upstream
+  precedence for `status = unavailable`: task type not completed / absent
+  / unsupported → readiness not completed → `readiness.ready is False` →
+  split not completed → candidates not completed → Phase-6.6 assessment
+  not completed → scikit-learn not importable. Executes the plan's
+  **physical** split exactly (`random`/`stratified_holdout` shuffled &
+  seeded with `MODEL_TRAINING_RANDOM_SEED = 42`, stratified via sklearn
+  with a random-holdout fallback for tiny classes; `time_ordered_holdout`
+  earliest→train / latest→test, no shuffle; validation only when the plan
+  has a validation fraction). Runs **only** the Phase-6.5 preprocessing
+  (median/most-frequent `SimpleImputer`, `StandardScaler`,
+  `OneHotEncoder(handle_unknown="ignore")`) assembled into a `sklearn`
+  `Pipeline` fitted **only on the training partition** (leakage-safe
+  within the pipeline). Fits one conservative baseline per Phase-7.3
+  family (`LinearRegression` / `LogisticRegression` / `DecisionTree*` /
+  `RandomForest*` / `GaussianNB` / `GaussianMixture` / `KNeighbors*` /
+  `KMeans` / `MLP*` — no XGBoost / LightGBM / torch / Optuna / MLflow).
+  Computes test-partition metrics (`rmse` / `mae` / `r2`; `accuracy` /
+  `precision` / `recall` / `f1` / binary `roc_auc`; `silhouette_score` /
+  `calinski_harabasz_score` / `davies_bouldin_score`), each rounded to 6
+  dp, no metric fabricated. Forecasting is trained as **baseline
+  regression on the currently-eligible features** — no lag / rolling
+  features, forecasting transforms, or forecasting models; a datetime
+  column alone never implies forecasting. Per-candidate failures become a
+  `failed` / `unavailable` `TrainingRun` with a normalised reason (no
+  stack trace / path / address / timestamp) and the batch continues;
+  overall `status = completed` as long as ≥ 1 candidate succeeds, or with
+  0 successes + populated `failed_runs` + explicit reason (success never
+  fabricated). **Selects / ranks / recommends no model; tunes no
+  hyperparameters (every non-default value is a named constant); runs no
+  CV; does no feature selection / importance / SHAP / leakage detection /
+  target encoding / SMOTE / PCA; persists no artifact.** For
+  `random`/`stratified_holdout` the working frame is canonicalised (stable
+  sort by every column) so the split and all metrics are row- and
+  column-order invariant; for `time_ordered_holdout` row order is
+  preserved. Byte-identical repeated calls (single fixed seed,
+  single-threaded estimators, fixed ordering); no timestamp / UUID / run
+  id / filesystem / environment randomness. `df` and all five upstream
+  models never mutated (training runs on copies); the returned contract
+  holds only JSON primitives — no fitted estimator / pipeline / array /
+  prediction / row index. `TrainingOutcome` gains additive defaulted
+  `runs: list[TrainingRun]` / `successful_runs` / `failed_runs` /
+  `objective_used` (Phase-7.1 JSON validates); new `TrainingRun` model +
+  `TrainingRunStatus` enum. **`scikit-learn>=1.4` added to
+  `pyproject.toml` dependencies** — the modeling phase is the first that
+  fits estimators, as the roadmap's dependency comment always anticipated.
+  `understand_modeling` and the overall `ModelingSpec.status` unchanged.
+
   **Completed:** 7.1 foundation / `ModelingSpec`, 7.2 model readiness &
-  data-split planning, 7.3 model candidate generation. **Not started:**
-  7.4 training & evaluation, 7.5 model selection. Phase 7 is **not
+  data-split planning, 7.3 model candidate generation, 7.4 training &
+  evaluation. **Not started:** 7.5 model selection. Phase 7 is **not
   complete**.
 
 ### Phase 8 — Deep Learning

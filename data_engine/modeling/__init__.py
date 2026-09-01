@@ -42,6 +42,8 @@ from .models import (
     ModelReadiness,
     ModelSelection,
     TrainingOutcome,
+    TrainingRun,
+    TrainingRunStatus,
 )
 from .readiness import (
     MODEL_READINESS_MIN_ROWS,
@@ -59,6 +61,15 @@ from .split_planning import (
     SMALL_DATA_TRAIN_FRACTION,
     recommend_data_split,
 )
+from .training import (
+    MODEL_TRAINING_FOREST_N_ESTIMATORS,
+    MODEL_TRAINING_KNN_N_NEIGHBORS,
+    MODEL_TRAINING_METRIC_ROUND,
+    MODEL_TRAINING_N_CLUSTERS,
+    MODEL_TRAINING_RANDOM_SEED,
+    MODEL_TRAINING_TREE_MAX_DEPTH,
+    train_and_evaluate_models,
+)
 from .understanding import understand_modeling
 
 __all__ = [
@@ -73,6 +84,12 @@ __all__ = [
     "MODEL_SPLIT_MIN_CLASS_COUNT_FOR_STRATIFY",
     "MODEL_SPLIT_MIN_ROWS",
     "MODEL_SPLIT_MIN_ROWS_FOR_VALIDATION",
+    "MODEL_TRAINING_FOREST_N_ESTIMATORS",
+    "MODEL_TRAINING_KNN_N_NEIGHBORS",
+    "MODEL_TRAINING_METRIC_ROUND",
+    "MODEL_TRAINING_N_CLUSTERS",
+    "MODEL_TRAINING_RANDOM_SEED",
+    "MODEL_TRAINING_TREE_MAX_DEPTH",
     "SMALL_DATA_TEST_FRACTION",
     "SMALL_DATA_TRAIN_FRACTION",
     "DataSplitPlan",
@@ -87,8 +104,11 @@ __all__ = [
     "ModelingSpec",
     "ModelingStatus",
     "TrainingOutcome",
+    "TrainingRun",
+    "TrainingRunStatus",
     "assess_model_readiness",
     "generate_model_candidates",
     "recommend_data_split",
+    "train_and_evaluate_models",
     "understand_modeling",
 ]

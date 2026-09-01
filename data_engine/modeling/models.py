@@ -201,15 +201,69 @@ class ModelCandidates(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
-class TrainingOutcome(BaseModel):
-    """Future model-training execution.
+class TrainingRunStatus(str, Enum):
+    """Outcome of training / evaluating one candidate model family."""
 
-    Populated by a later Phase-7 increment. Phase 7.1 trains nothing.
+    COMPLETED = "completed"  # the estimator was fitted and metrics computed
+    UNAVAILABLE = "unavailable"  # no baseline estimator / preprocessing could be constructed
+    FAILED = "failed"  # fitting or evaluation raised an error
+
+
+class TrainingRun(BaseModel):
+    """The training / evaluation result for one candidate model family.
+
+    Produced by :func:`data_engine.modeling.train_and_evaluate_models`
+    (Phase 7.4). It stores **only JSON primitives** — never a fitted
+    estimator, pipeline, array, DataFrame, prediction, row index, model
+    binary, or artifact path.
+    """
+
+    family: ModelFamily
+    estimator_name: str = Field(description="The concrete baseline estimator that was used.")
+    status: TrainingRunStatus
+    train_rows: int = 0
+    validation_rows: int = 0
+    test_rows: int = 0
+    metrics: dict[str, float] = Field(
+        default_factory=dict,
+        description="Task-appropriate evaluation metrics on the test partition, fixed order.",
+    )
+    reason: str | None = Field(
+        default=None, description="Why the run is unavailable / failed; None when completed."
+    )
+    notes: list[str] = Field(default_factory=list)
+
+
+class TrainingOutcome(BaseModel):
+    """Baseline model training & evaluation results.
+
+    Populated by :func:`data_engine.modeling.train_and_evaluate_models`
+    (Phase 7.4). ``runs`` / ``successful_runs`` / ``failed_runs`` /
+    ``objective_used`` are additive and defaulted, so a ``TrainingOutcome``
+    serialised by Phase 7.1 still validates. Phase 7.4 does **not** select,
+    rank, or recommend a model.
     """
 
     status: ModelingStatus = ModelingStatus.NOT_YET_INFERRED
     reason: str | None = Field(
-        default=None, description="Why training is unavailable; None once run."
+        default=None,
+        description="Why training is unavailable, or why a completed run trained nothing "
+        "successfully; None otherwise.",
+    )
+    runs: list[TrainingRun] = Field(
+        default_factory=list,
+        description="Per-candidate results, in the Phase-7.3 candidate order.",
+    )
+    successful_runs: list[str] = Field(
+        default_factory=list,
+        description="Model-family identifiers that trained & evaluated successfully.",
+    )
+    failed_runs: list[str] = Field(
+        default_factory=list,
+        description="Model-family identifiers that were unavailable or failed.",
+    )
+    objective_used: bool = Field(
+        default=False, description="True iff a non-blank objective string was supplied."
     )
     notes: list[str] = Field(default_factory=list)
 

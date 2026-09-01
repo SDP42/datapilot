@@ -4,6 +4,97 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0074 — Phase 7.4: `train_and_evaluate_models` fits deterministic baseline estimators; scikit-learn added
+- **Decision:** `data_engine/modeling/training.py` adds
+  `train_and_evaluate_models(df: pd.DataFrame, problem: ProblemSpec,
+  feature_engineering: FeatureEngineeringSpec, readiness: ModelReadiness,
+  split: DataSplitPlan, candidates: ModelCandidates, *, objective: str |
+  None = None) -> TrainingOutcome`, a **standalone** function
+  (`understand_modeling` unchanged; caller merges into
+  `ModelingSpec.training`). It is the **first** DataPilot component
+  permitted to fit estimators and compute evaluation metrics. **`scikit-learn>=1.4`
+  is added to `pyproject.toml` `[project.dependencies]`** — the roadmap's
+  dependency comment has always said engine stacks are added "in the phase
+  that first needs them", and Phase 7 is that phase. Only dependency-light
+  scikit-learn baselines are used; no XGBoost / LightGBM / CatBoost /
+  TensorFlow / PyTorch / Optuna / MLflow is introduced.
+- **Reason:** Prompt "Phase 7.4 — Automated Model Training & Evaluation":
+  "the first phase allowed to actually train models and calculate
+  evaluation metrics … must NOT implement Phase 7.5 model selection";
+  detailed requirements for physical split execution, leakage-safe
+  preprocessing fitted on the training partition only, deterministic seed,
+  per-candidate failure handling, and partial-success behaviour.
+- **Estimator mapping (fixed, documented):** `linear` → `LinearRegression`
+  / `LogisticRegression(max_iter=1000)`; `tree_based` → `DecisionTree*(
+  max_depth=8)`; `ensemble` → `RandomForest*(n_estimators=100,
+  max_depth=8, n_jobs=1)`; `probabilistic` → `GaussianNB` (classification)
+  / `GaussianMixture(n_components=3)` (clustering); `distance_based` →
+  `KNeighbors*(n_neighbors=5)` / `KMeans(n_clusters=3, n_init=10)`;
+  `neural` → `MLP*(max_iter=200)`. Every randomised estimator is seeded
+  with `MODEL_TRAINING_RANDOM_SEED = 42`. `time_series_forecasting` is
+  trained as baseline regression on the currently-eligible features — no
+  lag / rolling features, forecasting transforms, or forecasting models.
+  A `(family, task)` cell with no mapping → that run is `unavailable`.
+- **Preprocessing execution:** exactly the Phase-6.5 requirements —
+  `SimpleImputer` (median / most-frequent), `StandardScaler`,
+  `OneHotEncoder(handle_unknown="ignore")` — assembled into a `sklearn`
+  `ColumnTransformer` / `Pipeline` fitted **only on the training
+  partition**. No invented preprocessing: a categorical feature with no
+  Phase-6.5 encoding requirement → that candidate is `unavailable`, not a
+  guessed encoder. No target encoding / SMOTE / oversampling /
+  undersampling / PCA / feature selection / feature generation. The
+  target is excluded from the features and never encoded.
+- **Split execution:** follows the `DataSplitPlan` exactly.
+  `random`/`stratified_holdout` → a seeded shuffled holdout
+  (`sklearn.train_test_split` for the stratified case, with a random
+  fallback + note when a class is too small); `time_ordered_holdout` →
+  earliest rows train / latest rows test, no shuffle; the plan's
+  fractions honoured, no validation set fabricated when the plan omits
+  it; `round(n * fraction)` rounding. For supervised tasks, rows with a
+  missing target are dropped first (noted). For `random`/`stratified`
+  the working frame is canonicalised (stable sort by every column) so the
+  split and every metric are invariant to input row and column order;
+  `time_ordered` preserves the input row order (the time axis).
+- **Metrics (test partition, 6 dp, fixed order):** regression → `rmse`,
+  `mae`, `r2` (when the test target has non-zero variance); classification
+  → `accuracy`, macro `precision` / `recall` / `f1`, and binary `roc_auc`
+  when probabilities are available; clustering → `silhouette_score`,
+  `calinski_harabasz_score`, `davies_bouldin_score` (when `≥ 2` clusters).
+  No metric is fabricated.
+- **Failure / partial success:** a candidate raising an error → `failed`
+  `TrainingRun` with `<ExceptionType>: <message>` (memory addresses
+  stripped; no stack trace / path / timestamp); the batch continues.
+  `status = completed` while `≥ 1` candidate succeeds (`reason` lists the
+  failures), or with 0 successes + populated `failed_runs` + explicit
+  `reason` — success is never fabricated. Candidates run in Phase-7.3
+  order; duplicate family names are de-duplicated.
+- **Contract change:** `TrainingOutcome` gains additive defaulted `runs:
+  list[TrainingRun]`, `successful_runs: list[str]`, `failed_runs:
+  list[str]`, `objective_used: bool`; new `TrainingRun` model
+  (`family` / `estimator_name` / `status` / `train_rows` /
+  `validation_rows` / `test_rows` / `metrics: dict[str, float]` / `reason`
+  / `notes`) and `TrainingRunStatus` enum (`completed` / `unavailable` /
+  `failed`). Existing `status` / `reason` / `notes` unchanged; Phase-7.1
+  JSON still validates. The contract holds **only JSON primitives** — no
+  fitted estimator, pipeline, array, DataFrame, prediction, or row index.
+- **Errors / safety / boundary:** any of the six required arguments of
+  the wrong type → `TypeError`. `status = unavailable` on a fixed upstream
+  precedence (task → readiness → `ready is False` → split → candidates →
+  Phase-6.6 assessment → scikit-learn missing). Deterministic (single
+  fixed seed, `n_jobs=1`, fixed ordering); byte-identical repeated calls;
+  no timestamp / UUID / run id / filesystem order / environment
+  randomness. `df` and all five upstream models are never mutated
+  (training runs on copies); **no model artifact is persisted** (no
+  `.pkl` / `.joblib` / `.onnx` / directory / cache / report / plot). No
+  model selection / ranking / recommendation, hyperparameter tuning,
+  cross-validation, model-based feature selection, feature importance,
+  SHAP, standalone leakage detection, or statistical significance testing.
+  `objective` is recorded in a note only. `understand_modeling` and the
+  overall `ModelingSpec.status` unchanged.
+- **Phase state:** Phase 7 **In progress** — 7.1 **Done**, 7.2 **Done**,
+  7.3 **Done**, 7.4 **Done**, 7.5 **Not started**. Phase 7 is **not**
+  complete.
+
 ## 0073 — Phase 7.3: `generate_model_candidates` is a standalone deterministic rule-based family recommender
 - **Decision:** `data_engine/modeling/candidate_generation.py` adds
   `generate_model_candidates(df: pd.DataFrame, problem: ProblemSpec,

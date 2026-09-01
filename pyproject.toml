@@ -13,9 +13,10 @@ authors = [{ name = "Swayam Panchal", email = "panchalswayam35@gmail.com" }]
 keywords = ["data-science", "automl", "mlops", "llm", "autonomous-agent"]
 
 # Phase 0 keeps runtime dependencies deliberately minimal.
-# Engine-specific stacks (scikit-learn, xgboost, lightgbm, torch, shap,
-# mlflow, fastapi, sqlalchemy, duckdb ...) are added in the phase that
-# first needs them — see docs/roadmap.md.
+# Engine-specific stacks are added in the phase that first needs them —
+# see docs/roadmap.md. scikit-learn was added in Phase 7.4 (the first
+# phase that fits estimators). xgboost / lightgbm / torch / shap / mlflow
+# / fastapi / sqlalchemy / duckdb ... remain deliberately unadded.
 dependencies = [
     "pandas>=2.2",
     "numpy>=1.26",
@@ -27,6 +28,11 @@ dependencies = [
     # deterministic VisualizationSpec (no dashboard / API layer).
     "matplotlib>=3.8",
     "plotly>=5.0",
+    # Phase 7.4 model training & evaluation — the modeling phase is the
+    # first that fits estimators and computes evaluation metrics. Only
+    # scikit-learn's dependency-light baseline estimators are used; no
+    # XGBoost / LightGBM / Optuna / MLflow / deep-learning stack is added.
+    "scikit-learn>=1.4",
 ]
 
 [project.optional-dependencies]

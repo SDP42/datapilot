@@ -376,7 +376,30 @@ unavailable` on a fixed upstream precedence (task type → readiness →
 a structural `reason` and fixed-vocabulary `evidence` — no performance
 claims. Fixed family ordering; no duplicates. `ModelCandidates` gained
 additive defaulted `candidates_detail` + `objective_used`; new
-`ModelCandidate` model. [modeling.md](modeling.md).
+`ModelCandidate` model. **7.4 — training & evaluation:**
+`train_and_evaluate_models(df, problem, feature_engineering, readiness,
+split, candidates, *, objective=None) -> TrainingOutcome`, a
+**standalone** function (caller merges into `ModelingSpec.training`) —
+the **first** DataPilot component that fits estimators. It executes the
+`DataSplitPlan`'s physical train/val/test split (fixed
+`MODEL_TRAINING_RANDOM_SEED = 42`), runs **only** the Phase-6.5
+preprocessing in a `sklearn` `Pipeline` fitted **only on the training
+partition**, fits one conservative dependency-light scikit-learn baseline
+per Phase-7.3 family, and reports per-candidate test-partition metrics.
+It **selects / ranks / recommends no model**, tunes no hyperparameters
+(every non-default is a named constant), runs no CV, does no feature
+selection / importance / SHAP / leakage detection / target encoding /
+SMOTE / PCA, and persists no artifact. Per-candidate failures are
+recorded (normalised reason) and the batch continues; `status =
+completed` even with 0 successes. `random`/`stratified_holdout`
+canonicalises row order → row/column-order invariant;
+`time_ordered_holdout` preserves row order. `df` and all upstream models
+are never mutated; the returned contract holds only JSON primitives.
+`TrainingOutcome` gained additive defaulted `runs` / `successful_runs` /
+`failed_runs` / `objective_used`; new `TrainingRun` model +
+`TrainingRunStatus` enum. **`scikit-learn>=1.4` was added to the runtime
+dependencies** — Phase 7 is the modeling phase that first needs an
+estimator library. [modeling.md](modeling.md).
 
 **Future-phase components:** everything else —
 figure generation, executing the Phase-6 recommendations, the Phase-7
