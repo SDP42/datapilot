@@ -44,10 +44,12 @@ from .target_identification import (
     TARGET_SELECTION_MARGIN,
     identify_target,
 )
+from .task_type_inference import NUMERIC_CLASS_MAX, infer_task_type
 from .understanding import understand_problem
 
 __all__ = [
     "HIGH_UNIQUE_ID_THRESHOLD",
+    "NUMERIC_CLASS_MAX",
     "PROBLEM_UNDERSTANDING_ENGINE_VERSION",
     "TARGET_SELECTION_MARGIN",
     "CandidateMetrics",
@@ -62,5 +64,6 @@ __all__ = [
     "TaskType",
     "TaskTypeInference",
     "identify_target",
+    "infer_task_type",
     "understand_problem",
 ]

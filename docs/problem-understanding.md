@@ -5,13 +5,13 @@ layer that turns a dataset plus an **explicit** objective into a
 structured `ProblemSpec`: what ML task the data describes, what the
 target is, which metrics make sense, and whether the problem is feasible.
 
-> **Status.** Phase 5.1 (the `ProblemSpec` contract + `understand_problem`
-> foundation) and Phase 5.2 (**target identification** — `identify_target`)
-> are implemented. `understand_problem` itself still infers nothing;
-> target identification is a **separate function** whose result the caller
-> merges into `ProblemSpec.target`. Task-type inference, candidate
-> metrics, and feasibility checks are still to come — Phase 5 is **In
-> progress**.
+> **Status.** Implemented: Phase 5.1 (the `ProblemSpec` contract +
+> `understand_problem` foundation), 5.2 (**target identification** —
+> `identify_target`), and 5.3 (**task-type inference** —
+> `infer_task_type`). Each is a **standalone** deterministic function
+> whose result the caller merges into `ProblemSpec`; `understand_problem`
+> itself still infers nothing. Candidate metrics (5.4) and feasibility
+> assessment (5.5) are still to come — Phase 5 is **In progress**.
 
 ## Entrypoint
 
@@ -85,8 +85,9 @@ nullable payload `None` / `[]` — **never** a fabricated
 
 `TaskType` (`regression`, `binary_classification`,
 `multiclass_classification`, `multilabel_classification`, `clustering`,
-`time_series_forecasting`, `other`) is defined now so the contract is
-stable across the later increments; **it is not populated by Phase 5.**
+`time_series_forecasting`, `other`) is the stable contract. Phase 5.3
+populates all of these **except** `multilabel_classification` and `other`
+(see task-type inference below).
 
 ## Target identification (Phase 5.2)
 
@@ -224,6 +225,110 @@ timestamp, UUID, filesystem discovery, or environment dependence. `df` is
 never mutated (all work is on derived local values); no file or figure is
 created.
 
+## Task-type inference (Phase 5.3)
+
+`infer_task_type(df, target: TargetIdentification, *, objective: str | None
+= None) -> TaskTypeInference` deterministically decides which `TaskType`
+best describes the problem. It is **standalone** — the caller merges the
+result into `ProblemSpec.task_type`:
+
+```python
+target = identify_target(df, objective=request.objective)
+task = infer_task_type(df, target, objective=request.objective)
+spec = spec.model_copy(update={"target": target, "task_type": task})
+```
+
+`metrics` / `feasibility` stay `not_yet_inferred`.
+
+### `target` is authoritative — no re-selection
+
+`infer_task_type` **never** performs target selection. It uses
+`target.target_column` when a single target was pinned. If
+`target.status` is `unavailable`, that is propagated. If
+`target.target_column is None`, the result is `unavailable`
+(`"cannot infer task type because no single target column was
+identified"`) — it **never** falls back to `target.candidate_columns[0]`
+— **except** when the objective indicates clustering (see below).
+
+### Structural rules (target dtype — via the shared `infer_column_type`)
+
+| Target `ColumnType` | Inference |
+| --- | --- |
+| `BOOLEAN` | `binary_classification` |
+| `CATEGORICAL`, exactly 2 distinct non-null values | `binary_classification` |
+| `CATEGORICAL`, ≥ 3 distinct | `multiclass_classification` |
+| `NUMERIC` | `regression` — **unless** a classification objective is present *and* the target has exactly 2 distinct values (→ `binary_classification`) *or* is integer-typed with `3–NUMERIC_CLASS_MAX` (10) distinct values (→ `multiclass_classification`). A discrete numeric measurement (`age = [18, 19, 20]`) with no class objective stays `regression`. |
+| `DATETIME` | **not** automatically forecasting — `unavailable` (`"a datetime target alone is not sufficient evidence for time_series_forecasting"`), unless the objective also carries a forecasting signal (→ `time_series_forecasting`). |
+| `UNKNOWN` | `unavailable` |
+
+`multilabel_classification` is **never inferred** in Phase 5.3:
+DataPilot's tabular data model has no per-row multi-label structural
+signal. If the objective mentions multi-label, a `notes` entry records
+it and the single-label structural task is used.
+
+### Objective vocabulary (fixed, documented — no NLP / stemming / embeddings)
+
+The objective is normalised (lower-case, `\s _ - /` collapsed) and
+matched against small fixed word / phrase sets to produce a subset of the
+signals `{regression, classification, multiclass, multilabel, clustering,
+forecasting}`:
+
+- **regression** — `regression, estimate, price(s), amount(s), revenue,
+  sales, cost(s), value(s), continuous, magnitude, duration, score(s),
+  rating(s), quantity`; phrases `how much`, `how many`.
+- **classification** — `classify, classification, categorise/categorize,
+  label(s), category/categories, churn(ed), fraud(ulent), spam, whether,
+  binary, class(es)`; phrases `yes or no`, `true or false`.
+- **multiclass** — phrases `multiclass`, `multi class`, `several classes`,
+  `one of several` (also sets `classification`).
+- **multilabel** — phrases `multilabel`, `multi label`, `multiple
+  labels`, `several labels`.
+- **clustering** — `cluster(s/ing), segment(s)/segmentation,
+  unsupervised`; phrases `group customers/users`, `discover groups`,
+  `into groups`.
+- **forecasting** — `forecast(ing/ed)`, the word `future`; phrases `next
+  month/week/day/year/quarter`, `time series`, `future value(s)`, `over
+  time`, `in the future`, `future sales/demand`.
+
+A bare `predict` is **not** a signal — it distinguishes nothing.
+
+### Conflict resolution (documented precedence)
+
+1. **No target + clustering objective** → `clustering` (clustering is
+   inherently targetless). No target + non-clustering objective (or none)
+   → `unavailable`.
+2. **Structural evidence is primary.** A classification objective on a
+   *continuous* numeric target does **not** flip it to classification —
+   the structurally supported `regression` is returned with a conflict
+   `note`. A regression objective on a categorical / boolean target keeps
+   the structural classification with a conflict `note`.
+3. **Forecasting is a refinement, not an override of dtype.** A `regression`
+   result becomes `time_series_forecasting` **only** when the objective
+   carries a forecasting signal **and** the DataFrame contains at least
+   one datetime column. A forecasting objective with **no** datetime
+   column stays `regression` (with a `note`). A datetime column with a
+   non-forecasting objective is never forecasting.
+
+### `TaskTypeInference` fields
+
+`status` (`completed` / `unavailable`), `reason` (set only when
+unavailable), `task_type: TaskType | None`, `objective_used: bool`
+(additive & defaulted — legacy JSON validates), `notes` (fixed order —
+`notes[0]` is the primary explanation, followed by the detected objective
+signals and any conflict / refinement notes). It never fabricates a task
+type: insufficient or contradictory evidence → `status = unavailable`,
+`task_type = None`, explicit `reason`.
+
+### Validation & determinism
+
+`df` not a DataFrame, or `target` not a `TargetIdentification` →
+`TypeError`. Missing / all-missing / constant target column →
+`unavailable` + reason. All evidence is row-order- and
+column-order-invariant (`nunique`, `isna`, dtype, datetime-column
+membership); repeated calls are byte-identical. `df` and `target` are
+never mutated; no file, figure, dataset / version / lineage access, or
+external call.
+
 ## No timestamp
 
 Unlike `DatasetProfile` / `QualityReport` / `EDAReport`, `ProblemSpec`
@@ -237,8 +342,9 @@ value is recorded.
   lineage / EDA internals. `identify_target` reuses one pure profiling
   helper (`infer_column_type`) and the shared `datapilot.contracts.ColumnType`
   enum; it modifies nothing and adds no `EDAReport` field.
-- **Target identification only** so far. No task inference (classification
-  / regression / clustering / time-series), no metric recommendation, no
-  feasibility scoring, no target-leakage assessment, no train/test split,
-  no model selection or training — those are later Phase-5 increments or
-  later phases.
+- **Target identification (5.2)** and **task-type inference (5.3)** only.
+  No metric recommendation / primary-metric selection, no feasibility
+  scoring, no target-leakage assessment, no train/test split, no feature
+  engineering / selection / preprocessing, no model selection or
+  training, no clustering / forecasting / classification *models* — those
+  are later Phase-5 increments or later phases.

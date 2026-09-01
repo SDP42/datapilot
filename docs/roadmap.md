@@ -10,7 +10,7 @@ future phases are not anticipated in code.
 | 2 | Data Quality & Cleaning | **Done** — quality analysis + cleaning planning + safe cleaning execution (deterministic; no AI approval/reasoning yet) |
 | 3 | Validation & Data Lineage | **In progress** — `DatasetVersion` + store + lineage validation + lineage graph + opt-in auto-registration + cross-version diffing + version-integrity / family-consistency / version↔lineage-binding checks done; still filesystem-only (no database, no GC) |
 | 4 | EDA & Statistical Analysis | **Done** — deterministic analysis-only `data_engine.eda`: EDA/univariate/bivariate, parametric tests, effect sizes, non-parametric tests, distribution analysis, EDA↔quality cross-reference, visualization foundation (chart-spec selection + in-memory Matplotlib **and Plotly** rendering + explicit chart export), target-aware visualization recommendation, statistical-strength visualization ranking, k-NN / Kraskov mutual-information estimator, datetime mutual information, paired / one-sided non-parametric tests (Wilcoxon signed-rank / sign / Friedman), multiple-testing correction (Bonferroni / Holm / Benjamini-Hochberg). No dashboard/API |
-| 5 | Automated Problem Understanding | **In progress** — the deterministic `ProblemSpec` contract + `understand_problem` foundation (5.1) and **target identification** — `identify_target(df, *, objective=None)` — (5.2), in `data_engine.problem_understanding`. Task-type inference, candidate metrics, and feasibility checks are still to come |
+| 5 | Automated Problem Understanding | **In progress** — `data_engine.problem_understanding`: the `ProblemSpec` contract + `understand_problem` foundation (5.1 — done), **target identification** `identify_target` (5.2 — done), **task-type inference** `infer_task_type` (5.3 — done). Candidate metrics (5.4) and feasibility assessment (5.5) not started |
 | 6 | Feature Engineering | Not started |
 | 7 | Classical ML | Not started |
 | 8 | Deep Learning | Not started |
@@ -305,13 +305,42 @@ future phases are not anticipated in code.
   additive defaulted `candidates` / `objective_used` fields (5.1 JSON
   still validates).
 
-  No `EDAReport` field, no cross-phase coupling beyond reusing one pure
-  profiling helper + the shared `ColumnType` enum, no new dependency;
-  `pyproject.toml` gains only the `data_engine.problem_understanding`
-  package declaration. See
-  [problem-understanding.md](problem-understanding.md). **Still to
-  come:** task-type inference, candidate metrics, feasibility checks.
-  Phase 5 is **not complete**.
+  **5.3 — task-type inference.** `infer_task_type(df, target:
+  TargetIdentification, *, objective: str | None = None) ->
+  TaskTypeInference` — a **standalone** function (caller merges into
+  `ProblemSpec.task_type`). `target` is authoritative — it **never**
+  re-selects a target. Structural rules on the target dtype (via the
+  shared `infer_column_type`): boolean → `binary_classification`;
+  categorical 2 classes → `binary_classification`, ≥ 3 →
+  `multiclass_classification`; numeric → `regression` (promoted to
+  binary/multiclass only with a classification objective **and** 2 /
+  small-integer distinct values); datetime → **not** auto-forecasting
+  (`unavailable` unless a forecasting objective is present). A small
+  **fixed objective vocabulary** yields signals
+  {regression, classification, multiclass, multilabel, clustering,
+  forecasting} (no NLP / stemming / embeddings; bare `predict` is not a
+  signal). Precedence: **no target + clustering objective → `clustering`**
+  (else no target → `unavailable`); **structural evidence is primary**
+  (a classify objective on a continuous numeric target stays `regression`
+  + a conflict note); **forecasting is a refinement** — `regression`
+  becomes `time_series_forecasting` only with a forecasting objective
+  **and** a datetime column present. `multilabel_classification` and
+  `other` are never emitted (no per-row multi-label structural signal in
+  the tabular model). `unavailable` + `reason` for a non-model input
+  (`TypeError`), no pinned target, or a missing / all-missing / constant
+  target. `TaskTypeInference` gains an additive defaulted `objective_used`
+  field (legacy JSON validates).
+
+  No `EDAReport` field, no cross-phase coupling beyond reusing the pure
+  `infer_column_type` helper + the shared `ColumnType` enum, no new
+  dependency; `pyproject.toml` was updated once (in 5.1) to declare the
+  `data_engine.problem_understanding` package. See
+  [problem-understanding.md](problem-understanding.md).
+
+  **Completed:** 5.1 foundation / `ProblemSpec`, 5.2 target
+  identification, 5.3 task-type inference. **Not started:** 5.4 candidate
+  metrics, 5.5 feasibility assessment / completion. Phase 5 is **not
+  complete**.
 
 ### Phase 6 — Feature Engineering
 - **Objective:** build and select informative features deterministically.

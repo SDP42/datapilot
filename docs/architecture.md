@@ -189,10 +189,23 @@ excluded; all four column types eligible; identifier columns penalised
 not excluded; the ranking `score` is a documented sum (not a
 probability); ties break on column name. A single `target_column` is set
 only on decisive evidence, else ranked `candidates` + an explicit
-`reason`. Separate from ingestion / profiling / quality / cleaning /
-validation / lineage / EDA — it reuses only the pure `infer_column_type`
-helper and the shared `ColumnType` enum, modifies nothing, and adds no
-`EDAReport` field. [problem-understanding.md](problem-understanding.md).
+`reason`. **5.3 — task-type inference:** `infer_task_type(df, target,
+*, objective=None) -> TaskTypeInference`, also **standalone**. `target`
+(the 5.2 result) is authoritative — it never re-selects a target.
+Structural rules on the target dtype (boolean / categorical-2 → binary,
+categorical-3+ → multiclass, numeric → regression, datetime → not
+auto-forecasting) combined with a **small fixed objective vocabulary**
+(signals: regression / classification / multiclass / multilabel /
+clustering / forecasting; no NLP). Precedence: no target + clustering
+objective → `clustering`; structural evidence is primary; forecasting is
+a refinement of `regression` requiring both a forecasting objective and a
+datetime column. `multilabel_classification` / `other` are never emitted;
+insufficient / contradictory evidence → `unavailable` + a reason.
+Separate from ingestion / profiling / quality / cleaning / validation /
+lineage / EDA — the Phase-5 functions reuse only the pure
+`infer_column_type` helper and the shared `ColumnType` enum, modify
+nothing, and add no `EDAReport` field.
+[problem-understanding.md](problem-understanding.md).
 
 **Future-phase components:** everything else —
 figure generation, feature engineering,

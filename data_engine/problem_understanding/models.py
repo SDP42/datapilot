@@ -125,14 +125,28 @@ class TargetIdentification(BaseModel):
 
 
 class TaskTypeInference(BaseModel):
-    """The inferred ML task type. Populated in a later increment."""
+    """The inferred ML task type.
+
+    Populated by :func:`data_engine.problem_understanding.infer_task_type`
+    (Phase 5.3). ``objective_used`` is additive and defaulted, so a
+    ``TaskTypeInference`` serialised by Phase 5.1 / 5.2 still validates.
+    """
 
     status: ProblemUnderstandingStatus = ProblemUnderstandingStatus.NOT_YET_INFERRED
-    reason: str | None = None
-    task_type: TaskType | None = Field(
-        default=None, description="The inferred task type; None until inferred."
+    reason: str | None = Field(
+        default=None,
+        description="Why the task type is unavailable; None when a task type was inferred.",
     )
-    notes: list[str] = Field(default_factory=list)
+    task_type: TaskType | None = Field(
+        default=None, description="The inferred task type; None until inferred / when unavailable."
+    )
+    objective_used: bool = Field(
+        default=False, description="True iff a non-blank objective string was supplied."
+    )
+    notes: list[str] = Field(
+        default_factory=list,
+        description="Evidence and conflict notes, in a fixed order (first = primary reason).",
+    )
 
 
 class CandidateMetrics(BaseModel):

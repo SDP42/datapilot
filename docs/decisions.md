@@ -4,6 +4,49 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0062 — Phase 5.3: `infer_task_type` is standalone, structural-first, and never re-selects a target
+- **Decision:** `data_engine/problem_understanding/task_type_inference.py`
+  adds `infer_task_type(df, target: TargetIdentification, *, objective:
+  str | None = None) -> TaskTypeInference`, a **standalone** function
+  (`understand_problem` unchanged; caller merges into
+  `ProblemSpec.task_type` via `model_copy`, matching 5.2). It **consumes**
+  the 5.2 `TargetIdentification` and **never** re-selects a target — if
+  `target.target_column is None` (and the objective isn't clustering) the
+  result is `unavailable`, never `candidate_columns[0]`.
+  `TaskTypeInference` gains one additive defaulted field `objective_used:
+  bool` (mirrors 5.2; legacy JSON validates); no other contract change —
+  evidence/conflict detail goes in `notes`.
+- **Reason:** Prompt "Phase 5.3 — Automated Task-Type Inference": "Infer
+  the ML problem/task type deterministically from the dataset, objective,
+  and the identified target — without … metric recommendation or
+  feasibility assessment"; "task inference must not become a second
+  target-selection algorithm"; "Never fabricate a task type"; "no NLP
+  packages / stemming / embeddings".
+- **Rules (documented):** structural evidence on the target dtype (via the
+  shared `infer_column_type`) is **primary** — boolean →
+  `binary_classification`; categorical 2 → binary, ≥ 3 → `multiclass`;
+  numeric → `regression`, promoted to binary/multiclass **only** with a
+  classification objective *and* 2 / small-integer (`3–NUMERIC_CLASS_MAX
+  = 10`) distinct values; a discrete numeric column (`age`) with no class
+  objective stays `regression`. Datetime target → **not** auto-forecasting
+  (`unavailable`, unless a forecasting objective is present).
+  `multilabel_classification` and `other` are **never** emitted — the
+  tabular data model has no per-row multi-label structural signal.
+  Objective matching is a small **fixed word/phrase vocabulary** →
+  signals {regression, classification, multiclass, multilabel,
+  clustering, forecasting}; a bare `predict` is not a signal. Precedence:
+  (1) no target + clustering objective → `clustering` (else no target →
+  `unavailable`); (2) objective never flips a structurally-supported task,
+  it adds a conflict `note`; (3) **forecasting is a refinement of
+  `regression`** — applied only when a forecasting objective **and** a
+  datetime column are both present.
+- **Errors / safety:** non-DataFrame or non-`TargetIdentification` →
+  `TypeError`; missing / all-missing / constant target column, or an
+  upstream `unavailable` target → `unavailable` + reason. Deterministic
+  (all evidence is row- and column-order-invariant); `df` and `target`
+  never mutated; no file / figure / lineage / external call. Reuses only
+  `infer_column_type` + `ColumnType`. No new dependency.
+
 ## 0061 — Phase 5.2: `identify_target` is standalone + structural + objective-aware, never guesses
 - **Decision:** `data_engine/problem_understanding/target_identification.py`
   adds `identify_target(df, *, objective: str | None = None) ->
