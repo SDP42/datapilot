@@ -64,6 +64,7 @@ packages = [
     "data_engine.eda",
     "data_engine.problem_understanding",
     "data_engine.feature_engineering",
+    "data_engine.modeling",
     "database",
     "dl_engine",
     "experimentation",

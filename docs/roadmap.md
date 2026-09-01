@@ -12,7 +12,7 @@ future phases are not anticipated in code.
 | 4 | EDA & Statistical Analysis | **Done** — deterministic analysis-only `data_engine.eda`: EDA/univariate/bivariate, parametric tests, effect sizes, non-parametric tests, distribution analysis, EDA↔quality cross-reference, visualization foundation (chart-spec selection + in-memory Matplotlib **and Plotly** rendering + explicit chart export), target-aware visualization recommendation, statistical-strength visualization ranking, k-NN / Kraskov mutual-information estimator, datetime mutual information, paired / one-sided non-parametric tests (Wilcoxon signed-rank / sign / Friedman), multiple-testing correction (Bonferroni / Holm / Benjamini-Hochberg). No dashboard/API |
 | 5 | Automated Problem Understanding | **Done** — `data_engine.problem_understanding`: the `ProblemSpec` contract + `understand_problem` foundation (5.1), **target identification** `identify_target` (5.2), **task-type inference** `infer_task_type` (5.3), **candidate metrics** `recommend_metrics` (5.4), **feasibility assessment** `assess_feasibility` (5.5). All deterministic, standalone, analysis-only; no ML/LLM |
 | 6 | Feature Engineering | **Done** — `data_engine.feature_engineering`, all deterministic, standalone, analysis-only: `FeatureEngineeringSpec` contract + foundation (6.1); **structural feature inventory** `inventory_features` (6.2); **transformation recommendations** `recommend_transformations` (6.3); **feature-selection recommendations** `recommend_feature_selection` (6.4); **preprocessing requirements** `recommend_preprocessing` (6.5); **feature-engineering assessment** `assess_feature_engineering` — structural consistency & readiness check over 6.2–6.5, `feasible` True/False from blocking structural inconsistencies (6.6). Nothing is executed; no ML/LLM |
-| 7 | Classical ML | **Not started** |
+| 7 | Model Development / Modeling | **In progress** — `data_engine.modeling`: the `ModelingSpec` contract + `understand_modeling` foundation (7.1 — done); validates an explicit `ModelingRequest`, echoes dataset identity + verbatim objective, returns an all-`not_yet_inferred` spec. **Infers nothing, trains nothing, inspects no DataFrame.** 7.2+ (readiness / split / candidates / training / evaluation / selection) not started |
 | 8 | Deep Learning | Not started |
 | 9 | Experiment Tracking | Not started |
 | 10 | Explainable AI | Not started |
@@ -593,12 +593,43 @@ future phases are not anticipated in code.
   recommendations is a later phase; `understand_feature_engineering()`
   still composes nothing automatically.
 
-### Phase 7 — Classical ML — **Not started**
-- **Objective:** train and evaluate classical models.
-- **Components:** `ml_engine` model registry, training, prediction,
-  cross-validation, evaluation with task-appropriate metrics
-  (scikit-learn, XGBoost, LightGBM).
-- **Output:** trained models + evaluation reports.
+### Phase 7 — Model Development / Modeling — **In progress**
+- **Objective:** deterministically turn an understood problem + engineered
+  features into a modeling plan and, in later increments, trained &
+  evaluated models.
+- **Components:** `data_engine.modeling` — model readiness, data-split
+  planning, candidate model families, training, evaluation, model
+  selection; `ml_engine` model registry (scikit-learn, XGBoost, LightGBM)
+  for the execution stages.
+- **Output:** a `ModelingSpec` and, later, trained models + evaluation
+  reports.
+- **Status:** `data_engine.modeling` — a deterministic, analysis-only
+  layer.
+
+  **7.1 — contract + foundation.** `understand_modeling(request:
+  ModelingRequest) -> ModelingSpec` validates dataset identity + an
+  explicit objective (never inferred from data; blank objective strings
+  preserved verbatim) and returns a spec whose overall status and all six
+  sections (`readiness` / `split` / `candidates` / `training` /
+  `evaluation` / `selection`) are `not_yet_inferred` — nothing fabricated
+  (no model / split ratio / metric / CV result / hyperparameter / feature
+  importance / fitted estimator / run id). Three-state `ModelingStatus`
+  enum (`not_yet_inferred` / `completed` / `unavailable`); stable
+  declarative `ModelFamily` enum (linear / tree_based / distance_based /
+  probabilistic / ensemble / neural) — **nothing trained or selected**.
+  No `generated_at`, so repeated calls are byte-identical. Non-model input
+  (a `dict`, `None`, or a **DataFrame**) → `TypeError`; blank `dataset_id`
+  → `ValueError`. **No DataFrame parameter** — the foundation never
+  inspects data. Standalone: reads no data, no file, no version / lineage,
+  no external / LLM call, no cross-phase coupling; depends only on the
+  stdlib + Pydantic. `pyproject.toml` gains one line declaring the
+  `data_engine.modeling` package (consistency with every other
+  `data_engine.*` subpackage); no new dependency. See
+  [modeling.md](modeling.md).
+
+  **Completed:** 7.1 foundation / `ModelingSpec`. **Not started:** 7.2
+  model readiness, 7.3 data-split planning, 7.4 candidate model families,
+  7.5+ training / evaluation / selection. Phase 7 is **not complete**.
 
 ### Phase 8 — Deep Learning
 - **Objective:** add DL where justified.

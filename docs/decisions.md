@@ -4,6 +4,62 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0071 — Phase 7.1: `ModelingSpec` contract + inference-free modeling foundation
+- **Decision:** a new first-class `data_engine/modeling/` package
+  (`models.py`, `understanding.py`, `__init__.py`) mirrors the Phase-5 /
+  Phase-6 architecture. `understand_modeling(request: ModelingRequest) ->
+  ModelingSpec` **infers nothing** — it validates the explicit request,
+  echoes the dataset identity + the verbatim objective, and returns a spec
+  whose overall `status` and all six nested sections (`readiness`,
+  `split`, `candidates`, `training`, `evaluation`, `selection`) are
+  `not_yet_inferred`.
+- **Reason:** Prompt "Phase 7.1 — Model-Readiness Foundation & Training
+  Contract": "establish the contract and foundation for model
+  readiness/training, without actually training models yet"; "Phase 7.1
+  must NOT inspect a DataFrame … must have no DataFrame parameter";
+  "contain no fabricated model, split, metric, readiness, or performance
+  information"; "Implement ONLY Phase 7.1".
+- **Contract:** `MODEL_ENGINE_VERSION = "1"`; three-state `ModelingStatus`
+  (`not_yet_inferred` / `completed` / `unavailable`); stable declarative
+  `ModelFamily` enum (`linear` / `tree_based` / `distance_based` /
+  `probabilistic` / `ensemble` / `neural`) — defined for a stable
+  contract, **nothing trained, recommended, or named**; `ModelingRequest`
+  (`dataset_id` required, `dataset_version_id` / `objective` optional,
+  objective preserved verbatim including blank strings, `objective_provided`
+  = non-blank after `.strip()`); `ModelingSpec` with the six nested
+  sections (`ModelReadiness`, `DataSplitPlan`, `ModelCandidates`,
+  `TrainingOutcome`, `EvaluationResults`, `ModelSelection`), each using
+  the established `status` / `reason` / `notes` pattern (`ModelCandidates`
+  adds a defaulted empty `candidates: list[str]`). All Pydantic v2,
+  JSON-primitive only, no `generated_at` / UUID / timestamp / run id —
+  repeated calls are byte-identical. `ModelingSpec` opts out of Pydantic's
+  protected `model_` namespace so `model_engine_version` is a plain data
+  field (consistency with the other engine-version fields).
+- **Section naming:** the prompt's suggested sections (readiness / split /
+  candidates / training / evaluation / selection) were kept; the nested
+  Pydantic models are named descriptively (`ModelReadiness`,
+  `DataSplitPlan`, …) to match the Phase-6 style. No conflicting parallel
+  abstraction was introduced.
+- **Validation / safety:** non-`ModelingRequest` input (a `dict`, `None`,
+  a DataFrame, …) → `TypeError`; blank / whitespace `dataset_id` →
+  `ValueError`. Pure deterministic function of the request: no clock,
+  timestamp, UUID, randomness, environment, filesystem, external call,
+  LLM, DataFrame access, model training, prediction, preprocessing,
+  feature engineering, split, CV, tuning, or metric calculation; the
+  request is never mutated. Nested payloads are `None` / `[]` — nothing
+  fabricated. `reason` states the increment is contract / foundation only.
+- **Backward compatibility:** additive only. `pyproject.toml` gains one
+  line — `"data_engine.modeling"` in the setuptools packages list, for
+  consistency with every other `data_engine.*` subpackage (the same
+  configuration step taken in decisions 0060 / 0065); **no dependency
+  change**. Phase 1–6 code, `understand_problem()`,
+  `understand_feature_engineering()`, and every existing API and signature
+  are untouched; the foundation import-smoke test adds the three new
+  modules.
+- **Phase state:** Phase 6 **Done**, Phase 7 **In progress**, Phase 7.1
+  **Done**, Phase 7.2+ **Not started**. Phase 7 is **not** marked
+  complete.
+
 ## 0070 — Phase 6.6: `assess_feature_engineering` is a standalone deterministic structural consistency & readiness check
 - **Decision:** `data_engine/feature_engineering/assessment.py` adds
   `assess_feature_engineering(df: pd.DataFrame, inventory: FeatureInventory,

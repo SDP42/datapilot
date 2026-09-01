@@ -332,8 +332,25 @@ additive defaulted `checks` + `objective_used`; new
 `FeatureEngineeringCheck` model. **Phase 6 is complete.**
 [feature-engineering.md](feature-engineering.md).
 
+**Phase 7 (in progress):** `data_engine.modeling` — a deterministic,
+**analysis-only** layer that will turn an understood problem + engineered
+features into a structured `ModelingSpec` (model readiness, data-split
+plan, candidate model families, training, evaluation, model selection).
+**7.1 — contract + foundation:** `understand_modeling(request:
+ModelingRequest) -> ModelingSpec` validates dataset identity + an explicit
+objective (never inferred from data; blank objective strings preserved
+verbatim) and returns a spec whose overall status and all six sections
+are `not_yet_inferred` — nothing fabricated; three-state `ModelingStatus`
+enum; a stable declarative `ModelFamily` enum is defined but **no model
+is trained, recommended, or named**; no `generated_at`, so repeated calls
+are byte-identical. Non-model input (a `dict`, `None`, or a **DataFrame**)
+→ `TypeError`; blank `dataset_id` → `ValueError`. **No DataFrame
+parameter** — the foundation never inspects data. Depends on nothing
+beyond the stdlib + Pydantic. [modeling.md](modeling.md).
+
 **Future-phase components:** everything else —
-figure generation, executing the Phase-6 recommendations,
+figure generation, executing the Phase-6 recommendations, the Phase-7
+execution stages (training / evaluation / selection),
 `ml_engine`, `dl_engine`,
 `experimentation`, `explainability`, `ai_engine`, `database`, `backend`,
 `frontend`, MLOps.
