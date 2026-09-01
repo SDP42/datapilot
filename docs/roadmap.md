@@ -12,7 +12,7 @@ future phases are not anticipated in code.
 | 4 | EDA & Statistical Analysis | **Done** — deterministic analysis-only `data_engine.eda`: EDA/univariate/bivariate, parametric tests, effect sizes, non-parametric tests, distribution analysis, EDA↔quality cross-reference, visualization foundation (chart-spec selection + in-memory Matplotlib **and Plotly** rendering + explicit chart export), target-aware visualization recommendation, statistical-strength visualization ranking, k-NN / Kraskov mutual-information estimator, datetime mutual information, paired / one-sided non-parametric tests (Wilcoxon signed-rank / sign / Friedman), multiple-testing correction (Bonferroni / Holm / Benjamini-Hochberg). No dashboard/API |
 | 5 | Automated Problem Understanding | **Done** — `data_engine.problem_understanding`: the `ProblemSpec` contract + `understand_problem` foundation (5.1), **target identification** `identify_target` (5.2), **task-type inference** `infer_task_type` (5.3), **candidate metrics** `recommend_metrics` (5.4), **feasibility assessment** `assess_feasibility` (5.5). All deterministic, standalone, analysis-only; no ML/LLM |
 | 6 | Feature Engineering | **Done** — `data_engine.feature_engineering`, all deterministic, standalone, analysis-only: `FeatureEngineeringSpec` contract + foundation (6.1); **structural feature inventory** `inventory_features` (6.2); **transformation recommendations** `recommend_transformations` (6.3); **feature-selection recommendations** `recommend_feature_selection` (6.4); **preprocessing requirements** `recommend_preprocessing` (6.5); **feature-engineering assessment** `assess_feature_engineering` — structural consistency & readiness check over 6.2–6.5, `feasible` True/False from blocking structural inconsistencies (6.6). Nothing is executed; no ML/LLM |
-| 7 | Model Development / Modeling | **In progress** — `data_engine.modeling`: the `ModelingSpec` contract + `understand_modeling` foundation (7.1 — done); validates an explicit `ModelingRequest`, echoes dataset identity + verbatim objective, returns an all-`not_yet_inferred` spec. **Infers nothing, trains nothing, inspects no DataFrame.** 7.2+ (readiness / split / candidates / training / evaluation / selection) not started |
+| 7 | Model Development / Modeling | **In progress** — `data_engine.modeling`: the `ModelingSpec` contract + `understand_modeling` foundation (7.1 — done); **model readiness** `assess_model_readiness` + **data-split planning** `recommend_data_split` (7.2 — done) — a deterministic structural readiness check over the Phase-5 `ProblemSpec` + Phase-6 `FeatureEngineeringSpec` + DataFrame shape, and a transparent train/val/test split-strategy recommendation (stratified for classification, chronological for forecasting, never a physical split). **Trains nothing, evaluates nothing.** 7.3+ (candidates / training / evaluation / selection) not started |
 | 8 | Deep Learning | Not started |
 | 9 | Experiment Tracking | Not started |
 | 10 | Explainable AI | Not started |
@@ -627,9 +627,38 @@ future phases are not anticipated in code.
   `data_engine.*` subpackage); no new dependency. See
   [modeling.md](modeling.md).
 
-  **Completed:** 7.1 foundation / `ModelingSpec`. **Not started:** 7.2
-  model readiness, 7.3 data-split planning, 7.4 candidate model families,
-  7.5+ training / evaluation / selection. Phase 7 is **not complete**.
+  **7.2 — model readiness & data-split planning.**
+  `assess_model_readiness(df, problem: ProblemSpec, feature_engineering:
+  FeatureEngineeringSpec, *, objective=None) -> ModelReadiness` and
+  `recommend_data_split(df, problem, feature_engineering, *,
+  objective=None) -> DataSplitPlan` — **standalone**, deterministic
+  planning functions (caller merges into `ModelingSpec.readiness` /
+  `.split`). Readiness is a **structural** check — `ready = True` means
+  the Phase-5 / Phase-6 outputs plus the DataFrame shape are sufficient to
+  proceed, **not** that the model will perform well. Unavailable when the
+  Phase-5 task type / target or the Phase-6 inventory / 6.6 assessment is
+  not completed (or the task type is unsupported). Blocking issues: `<
+  MODEL_READINESS_MIN_ROWS = 20` rows, no target for a supervised task,
+  target absent / all-missing / constant, no eligible features, Phase-5
+  feasibility infeasible, Phase-6.6 assessment infeasible. Warnings never
+  flip `ready`. Split planning recommends fractions (`0.7 / 0.15 / 0.15`,
+  or `0.8 / – / 0.2` below `MODEL_SPLIT_MIN_ROWS_FOR_VALIDATION = 200`
+  rows) and a strategy: `stratified_holdout` for classification with `≥ 2`
+  members per class (else `random_holdout`), `random_holdout` (never
+  stratified) for regression, `time_ordered_holdout` with
+  `preserve_temporal_order` / no shuffle for forecasting, `random_holdout`
+  for clustering. **No physical split, no shuffle, no ordering, no lag
+  features, no forecasting** — a datetime column alone never implies
+  forecasting. Row- and column-order invariant; byte-identical repeated
+  calls; `df` and all upstream models never mutated; no file / figure /
+  estimator / prediction / network / LLM. `ModelReadiness` and
+  `DataSplitPlan` gain additive defaulted structured fields (Phase-7.1
+  JSON validates); new `DataSplitStrategy` enum. No new dependency.
+
+  **Completed:** 7.1 foundation / `ModelingSpec`, 7.2 model readiness &
+  data-split planning. **Not started:** 7.3 candidate model families, 7.4
+  training & evaluation, 7.5 model selection. Phase 7 is **not
+  complete**.
 
 ### Phase 8 — Deep Learning
 - **Objective:** add DL where justified.

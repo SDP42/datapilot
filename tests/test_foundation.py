@@ -80,6 +80,8 @@ ENGINE_PACKAGES = [
     "data_engine.modeling",
     "data_engine.modeling.models",
     "data_engine.modeling.understanding",
+    "data_engine.modeling.readiness",
+    "data_engine.modeling.split_planning",
     "database",
     "dl_engine",
     "experimentation",

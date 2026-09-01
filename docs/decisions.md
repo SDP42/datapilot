@@ -4,6 +4,80 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0072 — Phase 7.2: `assess_model_readiness` + `recommend_data_split` are standalone deterministic planning functions
+- **Decision:** `data_engine/modeling/readiness.py` adds
+  `assess_model_readiness(df: pd.DataFrame, problem: ProblemSpec,
+  feature_engineering: FeatureEngineeringSpec, *, objective: str | None =
+  None) -> ModelReadiness`, and `data_engine/modeling/split_planning.py`
+  adds `recommend_data_split(df, problem, feature_engineering, *,
+  objective=None) -> DataSplitPlan`. Both are **standalone** (the caller
+  merges into `ModelingSpec.readiness` / `.split` via `model_copy`);
+  `understand_modeling` is unchanged. They consume the **Phase-5
+  `ProblemSpec`** and **Phase-6 `FeatureEngineeringSpec`** contracts
+  (their real names — no parallel abstraction was invented) plus the
+  DataFrame's structural shape.
+- **Reason:** Prompt "Phase 7.2 — Automated Model Readiness & Data Split
+  Planning": "still a planning / recommendation layer … must NOT train
+  models or perform model evaluation"; "Ready must mean structurally
+  ready to proceed to modeling, not 'likely to perform well.'"; "Do not
+  actually perform the split"; "the plan must preserve temporal order …
+  Do not recommend random shuffling" for `time_series_forecasting`;
+  "Do not infer a forecasting task from a datetime column alone".
+- **Readiness rules (documented):** `status = unavailable`, `ready =
+  None` when the Phase-5 task-type inference is not completed / has no
+  task type / is unsupported (`multilabel_classification`, `other`), the
+  Phase-6 feature inventory is not completed, the Phase-6.6 assessment is
+  not completed, or (supervised) target identification is not completed.
+  Otherwise `status = completed` and `ready = (no blocking issue)`.
+  Blocking: `< MODEL_READINESS_MIN_ROWS = 20` rows; no target for a
+  supervised task; target absent from `df` / entirely missing / constant;
+  no structurally eligible features (Phase-6.4 `selected ∪ review`, else
+  the inventory candidates); Phase-5 feasibility `feasible is False`;
+  Phase-6.6 assessment `feasible is False`. Warnings (never flip
+  `ready`): `< MODEL_READINESS_ROWS_WARNING = 100` rows; target
+  missingness; upstream passed-with-warnings; Phase-6.5 preprocessing
+  requirements present. Populates `target_available` / `target_usable` /
+  `eligible_feature_count` / `feature_engineering_assessment_usable` /
+  `preprocessing_requirements_present` / `sufficient_observations` /
+  `n_observations` / ordered `blocking_issues` / `warnings` / `notes`.
+- **Split rules (documented):** `status = unavailable` when the task type
+  is not completed / absent / unsupported, or (supervised) the target
+  identification is not completed. Fractions: `≥
+  MODEL_SPLIT_MIN_ROWS_FOR_VALIDATION = 200` rows → `0.7 / 0.15 / 0.15`;
+  fewer → `0.8 / None / 0.2` (train/test only) + a note; `<
+  MODEL_SPLIT_MIN_ROWS = 20` → an "unreliable" note. Strategy:
+  `time_series_forecasting` → `time_ordered_holdout`
+  (`preserve_temporal_order = True`, `shuffle = False`, `stratify =
+  False`, chronological, no lag features / forecasting);
+  `regression` → `random_holdout` (`shuffle = True`, never stratified);
+  `binary` / `multiclass` classification → `stratified_holdout`
+  (`stratify = True`) when the target is present and every observed class
+  has `≥ MODEL_SPLIT_MIN_CLASS_COUNT_FOR_STRATIFY = 2` members, else
+  `random_holdout`; `clustering` → `random_holdout` for stability checks.
+- **Contract change:** `ModelReadiness` gains additive defaulted `ready:
+  bool | None`, `target_available`, `target_usable`,
+  `eligible_feature_count`, `feature_engineering_assessment_usable`,
+  `preprocessing_requirements_present`, `sufficient_observations`,
+  `n_observations`, `blocking_issues`, `warnings`. `DataSplitPlan` gains
+  additive defaulted `strategy: DataSplitStrategy | None`,
+  `train_fraction` / `validation_fraction` / `test_fraction: float |
+  None`, `stratify`, `preserve_temporal_order`, `shuffle`. New
+  `DataSplitStrategy` enum (`random_holdout` / `stratified_holdout` /
+  `time_ordered_holdout` / `not_applicable`). Existing `status` / `reason`
+  / `notes` unchanged; Phase-7.1 JSON still validates.
+- **Errors / safety:** non-DataFrame `df`, non-`ProblemSpec` `problem`,
+  or non-`FeatureEngineeringSpec` `feature_engineering` → `TypeError`.
+  Deterministic — both functions read `len(df)`, the set of column names,
+  and target class *counts* only, so they are row- and column-order
+  invariant; byte-identical repeated calls; no timestamp / UUID /
+  randomness / filesystem / network. `df` and every upstream model are
+  never mutated; **no physical split, shuffle, ordering, estimator,
+  prediction, metric, preprocessing, or dataset creation**. `objective`
+  is recorded in a note only. No new dependency; `pyproject.toml`
+  unchanged.
+- **Phase state:** Phase 7 **In progress** — 7.1 **Done**, 7.2 **Done**,
+  7.3 / 7.4 / 7.5 **Not started**. Phase 7 is **not** complete.
+
 ## 0071 — Phase 7.1: `ModelingSpec` contract + inference-free modeling foundation
 - **Decision:** a new first-class `data_engine/modeling/` package
   (`models.py`, `understanding.py`, `__init__.py`) mirrors the Phase-5 /

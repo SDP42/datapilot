@@ -61,7 +61,8 @@ def test_model_family_enum_values():
 
 
 def test_public_exports():
-    assert set(modeling.__all__) == {
+    # Phase 7.1 foundation names remain exported (later increments add more).
+    assert {
         "MODEL_ENGINE_VERSION",
         "DataSplitPlan",
         "EvaluationResults",
@@ -74,7 +75,7 @@ def test_public_exports():
         "ModelingStatus",
         "TrainingOutcome",
         "understand_modeling",
-    }
+    } <= set(modeling.__all__)
 
 
 # --- request validation -----------------------------------------------

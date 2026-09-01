@@ -49,30 +49,107 @@ class ModelFamily(str, Enum):
     NEURAL = "neural"
 
 
-class ModelReadiness(BaseModel):
-    """Whether the data / pipeline is structurally ready for modeling.
+class DataSplitStrategy(str, Enum):
+    """How a later stage should split the data.
 
-    Populated by a later Phase-7 increment. Phase 7.1 leaves it at
-    ``not_yet_inferred``.
+    A **recommendation** only — Phase 7.2 performs no split.
+    """
+
+    RANDOM_HOLDOUT = "random_holdout"
+    STRATIFIED_HOLDOUT = "stratified_holdout"
+    TIME_ORDERED_HOLDOUT = "time_ordered_holdout"
+    NOT_APPLICABLE = "not_applicable"
+
+
+class ModelReadiness(BaseModel):
+    """Whether the data / pipeline is **structurally** ready for modeling.
+
+    Populated by
+    :func:`data_engine.modeling.assess_model_readiness` (Phase 7.2). All
+    fields beyond ``status`` / ``reason`` / ``notes`` are additive and
+    defaulted, so a ``ModelReadiness`` serialised by Phase 7.1 still
+    validates. ``ready`` means *"the available structural information is
+    sufficient to proceed to the next model-development stage"* — never
+    *"the dataset will produce a good model"*.
     """
 
     status: ModelingStatus = ModelingStatus.NOT_YET_INFERRED
     reason: str | None = Field(
-        default=None, description="Why readiness is unavailable; None once assessed."
+        default=None,
+        description="Why readiness is unavailable, or why it is not ready; None when ready.",
     )
+    ready: bool | None = Field(
+        default=None,
+        description="Structural readiness verdict; None until assessed (never a fabricated False).",
+    )
+    target_available: bool = Field(
+        default=False, description="True iff a target column is identified (supervised tasks)."
+    )
+    target_usable: bool = Field(
+        default=False,
+        description="True iff the target column exists in the DataFrame and is non-constant / "
+        "not entirely missing.",
+    )
+    eligible_feature_count: int = Field(
+        default=0, description="Number of structurally eligible candidate feature columns."
+    )
+    feature_engineering_assessment_usable: bool = Field(
+        default=False,
+        description="True iff the Phase 6.6 assessment is completed with a boolean verdict.",
+    )
+    preprocessing_requirements_present: bool = Field(
+        default=False,
+        description="True iff Phase 6.5 identified at least one preprocessing requirement.",
+    )
+    sufficient_observations: bool = Field(
+        default=False,
+        description="True iff the row count meets the structural minimum for modeling.",
+    )
+    n_observations: int = Field(default=0, description="Row count of the supplied DataFrame.")
+    blocking_issues: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
 
 
 class DataSplitPlan(BaseModel):
-    """Future train / validation / test split decisions.
+    """A recommended train / validation / test split.
 
-    Populated by a later Phase-7 increment. Phase 7.1 chooses no strategy
-    and performs no split.
+    Populated by :func:`data_engine.modeling.recommend_data_split`
+    (Phase 7.2). All fields beyond ``status`` / ``reason`` / ``notes`` are
+    additive and defaulted, so a ``DataSplitPlan`` serialised by Phase 7.1
+    still validates. Phase 7.2 **recommends** a strategy and fractions
+    only — it never shuffles, stratifies, orders, or copies the
+    DataFrame.
     """
 
     status: ModelingStatus = ModelingStatus.NOT_YET_INFERRED
     reason: str | None = Field(
         default=None, description="Why the split plan is unavailable; None once produced."
+    )
+    strategy: DataSplitStrategy | None = Field(
+        default=None, description="Recommended split strategy; None until produced."
+    )
+    train_fraction: float | None = Field(
+        default=None, description="Recommended train fraction; None until produced."
+    )
+    validation_fraction: float | None = Field(
+        default=None,
+        description="Recommended validation fraction; None when no separate validation split "
+        "is recommended.",
+    )
+    test_fraction: float | None = Field(
+        default=None, description="Recommended test fraction; None until produced."
+    )
+    stratify: bool = Field(
+        default=False,
+        description="True iff stratifying on the target is recommended (classification only).",
+    )
+    preserve_temporal_order: bool = Field(
+        default=False,
+        description="True iff the split must preserve row order (time-series forecasting).",
+    )
+    shuffle: bool = Field(
+        default=False, description="True iff shuffling rows before splitting is recommended."
     )
     notes: list[str] = Field(default_factory=list)
 

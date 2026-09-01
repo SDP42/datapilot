@@ -346,7 +346,22 @@ is trained, recommended, or named**; no `generated_at`, so repeated calls
 are byte-identical. Non-model input (a `dict`, `None`, or a **DataFrame**)
 → `TypeError`; blank `dataset_id` → `ValueError`. **No DataFrame
 parameter** — the foundation never inspects data. Depends on nothing
-beyond the stdlib + Pydantic. [modeling.md](modeling.md).
+beyond the stdlib + Pydantic. **7.2 — model readiness & data-split
+planning:** `assess_model_readiness(df, problem, feature_engineering, *,
+objective=None) -> ModelReadiness` and `recommend_data_split(df, problem,
+feature_engineering, *, objective=None) -> DataSplitPlan`, **standalone**
+deterministic planning functions (caller merges into
+`ModelingSpec.readiness` / `.split`). Readiness is a **structural** check
+over the Phase-5 `ProblemSpec` + Phase-6 `FeatureEngineeringSpec` +
+DataFrame shape — `ready = True` means "sufficient to proceed", never
+"will perform well". Split planning recommends fractions + a strategy
+(stratified for classification, unstratified for regression,
+time-ordered for forecasting) — **no physical split, shuffle, ordering,
+lag features, or forecasting**, and a datetime column alone never implies
+forecasting. Row/column-order invariant; `df` and upstream models never
+mutated; no estimator / prediction / metric / file. `ModelReadiness` and
+`DataSplitPlan` gained additive defaulted structured fields; new
+`DataSplitStrategy` enum. [modeling.md](modeling.md).
 
 **Future-phase components:** everything else —
 figure generation, executing the Phase-6 recommendations, the Phase-7
