@@ -11,7 +11,7 @@ future phases are not anticipated in code.
 | 3 | Validation & Data Lineage | **In progress** — `DatasetVersion` + store + lineage validation + lineage graph + opt-in auto-registration + cross-version diffing + version-integrity / family-consistency / version↔lineage-binding checks done; still filesystem-only (no database, no GC) |
 | 4 | EDA & Statistical Analysis | **Done** — deterministic analysis-only `data_engine.eda`: EDA/univariate/bivariate, parametric tests, effect sizes, non-parametric tests, distribution analysis, EDA↔quality cross-reference, visualization foundation (chart-spec selection + in-memory Matplotlib **and Plotly** rendering + explicit chart export), target-aware visualization recommendation, statistical-strength visualization ranking, k-NN / Kraskov mutual-information estimator, datetime mutual information, paired / one-sided non-parametric tests (Wilcoxon signed-rank / sign / Friedman), multiple-testing correction (Bonferroni / Holm / Benjamini-Hochberg). No dashboard/API |
 | 5 | Automated Problem Understanding | **Done** — `data_engine.problem_understanding`: the `ProblemSpec` contract + `understand_problem` foundation (5.1), **target identification** `identify_target` (5.2), **task-type inference** `infer_task_type` (5.3), **candidate metrics** `recommend_metrics` (5.4), **feasibility assessment** `assess_feasibility` (5.5). All deterministic, standalone, analysis-only; no ML/LLM |
-| 6 | Feature Engineering | **In progress** — `data_engine.feature_engineering`: `FeatureEngineeringSpec` contract + `understand_feature_engineering` foundation (6.1 — done); **structural feature inventory** `inventory_features` (6.2 — done); **transformation recommendations** `recommend_transformations` — deterministic rule-based recommendations (log / log1p / sqrt / reciprocal / abs, datetime derivations, scaling-as-a-category), recommends only, no execution, no predictive-benefit claim (6.3 — done). 6.4 selection / 6.5 preprocessing / 6.6 assessment not started |
+| 6 | Feature Engineering | **In progress** — `data_engine.feature_engineering`: `FeatureEngineeringSpec` contract + foundation (6.1 — done); **structural feature inventory** `inventory_features` (6.2 — done); **transformation recommendations** `recommend_transformations` (6.3 — done); **feature-selection recommendations** `recommend_feature_selection` — deterministic retain / drop / review from fixed structural + redundancy rules (constant / all-missing / identifier / high-missingness / low-variance / exact-duplicate / high-`\|r\|` / high-cardinality); no target scoring, no model importance, no execution (6.4 — done). 6.5 preprocessing / 6.6 assessment not started |
 | 7 | Classical ML | Not started |
 | 8 | Deep Learning | Not started |
 | 9 | Experiment Tracking | Not started |
@@ -491,10 +491,47 @@ future phases are not anticipated in code.
   mutated; no file / figure / lineage / version / model / LLM / network.
   No new dependency.
 
+  **6.4 — feature-selection recommendations.** `recommend_feature_selection(df:
+  pd.DataFrame, inventory: FeatureInventory, task_type: TaskTypeInference,
+  *, objective: str | None = None) -> FeatureSelectionRecommendations` — a
+  **standalone**, deterministic, rule-based engine (caller merges into
+  `FeatureEngineeringSpec.selection`). Reads candidate columns from the
+  6.2 inventory and the task type from the Phase-5.3 `TaskTypeInference`
+  (never re-inferred). Per candidate, first matching rule wins:
+  **drop** for entirely-missing / constant / identifier-like (inventory
+  evidence reused) / exact duplicate (NaN-aware, alphabetically-first
+  retained); **review** for `missing_fraction ≥
+  FEATURE_SELECTION_HIGH_MISSING_THRESHOLD = 0.80`, numeric `n_unique ≤
+  FEATURE_SELECTION_LOW_VARIANCE_MAX_UNIQUE = 2`, categorical `n_unique ≥
+  FEATURE_SELECTION_HIGH_CARDINALITY = 50`, or structural redundancy
+  (`|Pearson r| ≥ FEATURE_SELECTION_HIGH_CORRELATION = 0.95` on `≥
+  FEATURE_SELECTION_MIN_CORR_OBS = 3` finite overlapping observations,
+  among still-undecided numeric candidates only); **retain** otherwise.
+  Review is never auto-dropped. **No** target correlation / mutual
+  information / ANOVA / chi-square / model importance / permutation
+  importance / SHAP / leakage / predictive ranking; no imputation, no
+  transformation, no DataFrame modification. Objective refines notes only
+  via a small fixed vocabulary (no NLP / stemmer / fuzzy / embeddings /
+  LLM) and never overrides a structural rule. Unsupported task
+  (`multilabel_classification`, `other`) or non-completed inventory /
+  task inference → `status = unavailable`; completed inventory with no
+  candidates → `status = completed` + explicit reason. non-DataFrame /
+  non-`FeatureInventory` / non-`TaskTypeInference` → `TypeError`.
+  `recommendations` ordered by (category, column); `selected_features` /
+  `dropped_features` / `review_features` alphabetical → row- and
+  column-order invariant, byte-identical repeated calls.
+  `FeatureSelectionRecommendations` gains additive defaulted
+  `review_features` + `recommendations: list[FeatureSelectionRecommendation]`
+  + `objective_used` (6.1 JSON validates); new `FeatureSelectionAction`
+  enum (`retain` / `drop` / `review`). `df` / `inventory` / `task_type`
+  never mutated; no file / figure / lineage / version / model / LLM /
+  network. No new dependency.
+
   **Completed:** 6.1 foundation / `FeatureEngineeringSpec`, 6.2 structural
-  feature inventory, 6.3 transformation recommendations. **Not started:**
-  6.4 feature selection, 6.5 preprocessing requirements, 6.6
-  feature-engineering assessment. Phase 6 is **not complete**.
+  feature inventory, 6.3 transformation recommendations, 6.4
+  feature-selection recommendations. **Not started:** 6.5 preprocessing
+  requirements, 6.6 feature-engineering assessment. Phase 6 is **not
+  complete**.
 
 ### Phase 7 — Classical ML
 - **Objective:** train and evaluate classical models.

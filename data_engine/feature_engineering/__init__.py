@@ -42,6 +42,14 @@ feasibility are later Phase-6 increments.
 from __future__ import annotations
 
 from .feature_inventory import HIGH_UNIQUE_ID_THRESHOLD, inventory_features
+from .feature_selection import (
+    FEATURE_SELECTION_HIGH_CARDINALITY,
+    FEATURE_SELECTION_HIGH_CORRELATION,
+    FEATURE_SELECTION_HIGH_MISSING_THRESHOLD,
+    FEATURE_SELECTION_LOW_VARIANCE_MAX_UNIQUE,
+    FEATURE_SELECTION_MIN_CORR_OBS,
+    recommend_feature_selection,
+)
 from .models import (
     FEATURE_ENGINEERING_ENGINE_VERSION,
     FeatureEngineeringAssessment,
@@ -51,6 +59,8 @@ from .models import (
     FeatureInventory,
     FeatureInventoryCandidate,
     FeatureOperationType,
+    FeatureSelectionAction,
+    FeatureSelectionRecommendation,
     FeatureSelectionRecommendations,
     PreprocessingRequirements,
     TransformationRecommendation,
@@ -69,6 +79,11 @@ from .understanding import understand_feature_engineering
 
 __all__ = [
     "FEATURE_ENGINEERING_ENGINE_VERSION",
+    "FEATURE_SELECTION_HIGH_CARDINALITY",
+    "FEATURE_SELECTION_HIGH_CORRELATION",
+    "FEATURE_SELECTION_HIGH_MISSING_THRESHOLD",
+    "FEATURE_SELECTION_LOW_VARIANCE_MAX_UNIQUE",
+    "FEATURE_SELECTION_MIN_CORR_OBS",
     "HIGH_UNIQUE_ID_THRESHOLD",
     "TRANSFORMATION_ABS_SYMMETRY_RATIO",
     "TRANSFORMATION_LOG_RANGE_RATIO",
@@ -83,11 +98,14 @@ __all__ = [
     "FeatureInventory",
     "FeatureInventoryCandidate",
     "FeatureOperationType",
+    "FeatureSelectionAction",
+    "FeatureSelectionRecommendation",
     "FeatureSelectionRecommendations",
     "PreprocessingRequirements",
     "TransformationRecommendation",
     "TransformationRecommendations",
     "inventory_features",
+    "recommend_feature_selection",
     "recommend_transformations",
     "understand_feature_engineering",
 ]

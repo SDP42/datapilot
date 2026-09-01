@@ -22,8 +22,16 @@ engineering is feasible.
 >   worth considering. **Recommends only** — never executes a
 >   transformation or modifies the DataFrame; never establishes predictive
 >   benefit.
-> - **6.4 feature selection / 6.5 preprocessing requirements / 6.6
->   feature-engineering assessment**: NOT STARTED.
+> - **6.4 — feature-selection recommendations** (`recommend_feature_selection`):
+>   DONE. Deterministic, rule-based retain / drop / review recommendations
+>   from fixed structural + redundancy evidence only (constant,
+>   all-missing, identifier-like, high missingness, near-zero variance,
+>   exact duplicates, high `|Pearson r|`, very high categorical
+>   cardinality). **Never** computes target correlation, mutual
+>   information, model importance, or leakage; never modifies the
+>   DataFrame; never re-selects the target or re-infers the task type.
+> - **6.5 preprocessing requirements / 6.6 feature-engineering
+>   assessment**: NOT STARTED.
 
 ## Entrypoint
 
@@ -93,7 +101,14 @@ non-blank after `.strip()`.
   (`FeatureOperationType`), `description` (specific sub-operation),
   `reason`, `evidence: list[str]`.
 - `FeatureSelectionRecommendations` — `status`, `reason`,
-  `selected_features: list[str]`, `dropped_features: list[str]`, `notes`.
+  `selected_features: list[str]`, `dropped_features: list[str]`,
+  `review_features: list[str]`,
+  `recommendations: list[FeatureSelectionRecommendation]`,
+  `objective_used: bool`, `notes`. (`review_features` / `recommendations`
+  / `objective_used` are additive & defaulted — Phase-6.1 JSON still
+  validates.) `FeatureSelectionRecommendation` — `column`,
+  `action` (`FeatureSelectionAction`: `retain` / `drop` / `review`),
+  `reason`, `evidence: list[str]`.
 - `PreprocessingRequirements` — `status`, `reason`,
   `required_operations: list[str]`, `encoding_required: bool`,
   `scaling_required: bool`, `imputation_required: bool`, `notes`.
@@ -348,25 +363,135 @@ access; no randomness, timestamps, or UUIDs.
 / `preprocessing` / `assessment` and the overall
 `FeatureEngineeringSpec.status` stay `not_yet_inferred`.
 
+## Feature-selection recommendations (6.4) — `recommend_feature_selection`
+
+```python
+from data_engine.feature_engineering import inventory_features, recommend_feature_selection
+
+inv = inventory_features(df, target="churn")
+selection = recommend_feature_selection(df, inv, task_type, objective="reduce dimensionality")
+spec = spec.model_copy(update={"selection": selection})
+```
+
+`recommend_feature_selection(df: pd.DataFrame, inventory: FeatureInventory, task_type: TaskTypeInference, *, objective: str | None = None) -> FeatureSelectionRecommendations`
+
+Deterministic and **rule-based**. It reads the candidate columns from the
+Phase-6.2 `FeatureInventory` and the task type from the Phase-5.3
+`TaskTypeInference`, and recommends **retain**, **drop**, or **review**
+for each candidate using only transparent structural / redundancy
+evidence. It **recommends only** — it never alters `df`, selects/drops a
+real column, rebuilds the inventory, re-selects the target, or re-infers
+the task type. It **never** computes target correlation, mutual
+information, ANOVA / chi-square feature scores, model / permutation
+importance, SHAP, leakage scores, or any predictive ranking.
+
+### Type guards & upstream handling
+
+Non-DataFrame `df`, non-`FeatureInventory` `inventory`, or
+non-`TaskTypeInference` `task_type` → `TypeError`.
+`inventory.status != completed`, `task_type.status != completed`,
+`task_type.task_type is None`, or an unsupported task type
+(`multilabel_classification`, `other`) → `status = unavailable`,
+empty payload, explicit `reason`. A completed inventory with no
+structurally eligible candidates → `status = completed`, empty lists,
+explicit `reason`. Supported tasks: `regression`,
+`binary_classification`, `multiclass_classification`, `clustering`,
+`time_series_forecasting` (task type affects task-aware notes only, e.g.
+retaining a datetime feature as a possible time index for forecasting).
+
+### Deterministic structural rules (first match wins per column)
+
+Named exported constants: `FEATURE_SELECTION_HIGH_MISSING_THRESHOLD = 0.80`,
+`FEATURE_SELECTION_LOW_VARIANCE_MAX_UNIQUE = 2`,
+`FEATURE_SELECTION_HIGH_CORRELATION = 0.95`,
+`FEATURE_SELECTION_MIN_CORR_OBS = 3`,
+`FEATURE_SELECTION_HIGH_CARDINALITY = 50`.
+
+| Rule | Condition | Action |
+| --- | --- | --- |
+| entirely missing | `all_missing` (from inventory) | **drop** |
+| constant | `constant` (≤ 1 distinct non-null) | **drop** |
+| identifier-like | `identifier_like` (from inventory — its evidence is reused) | **drop** |
+| exact duplicate | identical observed values (NaN-aware) to another candidate | **drop** the duplicate; retain the alphabetically-first of the group |
+| very high missingness | `missing_fraction ≥ 0.80` | **review** (not a missing-value handling decision — deferred to 6.5) |
+| near-zero variance | numeric, `n_unique ≤ 2` | **review** |
+| very high cardinality | categorical, `n_unique ≥ 50` | **review** (retained by default; encoding deferred to 6.5) |
+| structural redundancy | numeric pair, `|Pearson r| ≥ 0.95` on ≥ 3 finite overlapping observations | **review** the alphabetically-later column; the earlier is the anchor |
+| otherwise | no structural reason to exclude | **retain** |
+
+The redundancy pass runs **only among columns still undecided after the
+rules above** (i.e. would-be retains), so a spurious correlation on a tiny
+overlap with a flagged column cannot arise. Correlation uses finite
+overlapping observations only; a constant side, or fewer than
+`FEATURE_SELECTION_MIN_CORR_OBS` paired observations, yields no finding.
+Nothing is imputed, filled, or transformed. Boolean and datetime
+candidates are retained unless a structural rule above applies. The target
+is already excluded by Phase 6.2 (`is_target`) and additionally skipped
+here — it is never selected, dropped, or reviewed.
+
+### Selection semantics
+
+`selected_features` = retained; `dropped_features` = a fixed structural
+rule clearly recommends exclusion; `review_features` = worth a human look
+but **not** auto-dropped (high missingness, near-zero variance, high
+cardinality, structural redundancy). A review recommendation is never
+placed in `dropped_features`.
+
+### Objective handling
+
+`objective_used = objective is not None and objective.strip() != ""`. A
+small fixed vocabulary (no stemmer / NLP / fuzzy / embeddings / LLM)
+recognises dimensionality-reduction wording (*remove redundant*,
+*avoid duplicate*, *reduce dimensionality*, *simplify features*,
+*keep fewer*, …) and adds a note only. The objective **never** overrides
+a structural rule.
+
+### Ordering & determinism
+
+`recommendations` are ordered by `(category rank, column name)` where the
+categories are: structural exclusions → duplicate/redundancy → review
+warnings → retained. `selected_features` / `dropped_features` /
+`review_features` are alphabetically sorted. Invariant to DataFrame row
+order and column order; repeated calls produce byte-identical
+`model_dump_json()`. No timestamps, UUIDs, randomness, or filesystem
+access.
+
+### Safety
+
+`df`, `inventory`, and `task_type` are never mutated (deep-copy / JSON
+snapshot verified). No file, figure, network, database, lineage,
+`DatasetVersion`, model, or LLM access.
+
+### Integration
+
+`understand_feature_engineering()` is unchanged. After
+`spec.model_copy(update={"selection": recommend_feature_selection(...)})`,
+`inventory` and `transformations` are unchanged, `selection` is populated,
+and `preprocessing` / `assessment` and the overall
+`FeatureEngineeringSpec.status` stay `not_yet_inferred`.
+
 ## No timestamp
 
 Like `ProblemSpec`, `FeatureEngineeringSpec` has **no `generated_at`**
 field — the determinism requirement is byte-identical repeated output, so
 no wall-clock value is recorded.
 
-## Boundaries (Phase 6.1 / 6.2 / 6.3)
+## Boundaries (Phase 6.1 / 6.2 / 6.3 / 6.4)
 
 - Separate from ingestion / profiling / quality / cleaning / validation /
   lineage / EDA / problem understanding. 6.1 depends on nothing beyond
-  the stdlib + Pydantic; 6.2 and 6.3 additionally reuse only the pure
-  `infer_column_type` helper and the shared `ColumnType` enum, and are
-  not coupled to the Phase-5 engines.
-- **Contract, foundation, structural inventory, and transformation
-  *recommendations* only.** No feature is engineered, transformed,
-  selected, encoded, scaled, imputed, generated, or modified. No
-  correlation / mutual information / feature importance, no leakage
-  detection, no predictive-usefulness scoring, no model training, no
-  train/test split, no cross-validation, no statistical hypothesis
-  testing, no LLM or external call. Feature selection (6.4), preprocessing
-  requirements (6.5), and feature-engineering feasibility (6.6) are later
+  the stdlib + Pydantic; 6.2 and 6.3 reuse only the pure
+  `infer_column_type` helper and the shared `ColumnType` enum; 6.4
+  additionally consumes the Phase-5.3 `TaskTypeInference` **type** (never
+  re-inferring it) and computes a plain in-DataFrame Pearson correlation
+  for redundancy — no coupling to the Phase-5 engines' logic.
+- **Contract, foundation, structural inventory, transformation
+  *recommendations*, and feature-selection *recommendations* only.** No
+  feature is engineered, transformed, selected, encoded, scaled, imputed,
+  generated, or modified. No **target** correlation / mutual information /
+  ANOVA / chi-square feature scores, no model or permutation importance,
+  no SHAP, no leakage detection, no predictive-usefulness scoring, no
+  model training, no train/test split, no cross-validation, no
+  hyperparameter tuning, no LLM or external call. Preprocessing
+  requirements (6.5) and feature-engineering feasibility (6.6) are later
   increments.

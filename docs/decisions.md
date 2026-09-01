@@ -4,6 +4,70 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0068 — Phase 6.4: `recommend_feature_selection` is a standalone deterministic structural / redundancy recommendation engine
+- **Decision:** `data_engine/feature_engineering/feature_selection.py`
+  adds `recommend_feature_selection(df: pd.DataFrame, inventory:
+  FeatureInventory, task_type: TaskTypeInference, *, objective: str | None
+  = None) -> FeatureSelectionRecommendations`, a **standalone** function
+  (`understand_feature_engineering` unchanged; caller merges into
+  `FeatureEngineeringSpec.selection` via `model_copy`). It reads candidate
+  columns from the Phase-6.2 `FeatureInventory` and the task type from the
+  Phase-5.3 `TaskTypeInference` (consumed, never re-inferred) and
+  recommends **retain / drop / review** per candidate — **recommends
+  only**, never altering `df` or a real column.
+- **Reason:** Prompt "Phase 6.4 — Automated Feature Selection
+  Recommendations": "recommend only … never alter df"; "Do NOT infer or
+  re-select the target"; "Do NOT infer the task type. Consume the
+  Phase-5.3 TaskTypeInference"; "Do NOT compute model-based feature
+  importance"; "Do NOT calculate target correlation / mutual information /
+  ANOVA / chi-square / leakage scores"; "Be very conservative".
+- **Rules (documented, first match wins):** **drop** — entirely missing;
+  constant (`≤ 1` distinct non-null); identifier-like (the inventory's
+  own `identifier_like` flag + evidence, not a new detector); exact
+  duplicate (NaN-aware value signature, alphabetically-first column of the
+  group retained). **review** (never auto-dropped) — `missing_fraction ≥
+  FEATURE_SELECTION_HIGH_MISSING_THRESHOLD = 0.80`; numeric `n_unique ≤
+  FEATURE_SELECTION_LOW_VARIANCE_MAX_UNIQUE = 2`; categorical `n_unique ≥
+  FEATURE_SELECTION_HIGH_CARDINALITY = 50`; structural redundancy
+  `|Pearson r| ≥ FEATURE_SELECTION_HIGH_CORRELATION = 0.95` on `≥
+  FEATURE_SELECTION_MIN_CORR_OBS = 3` finite overlapping observations. The
+  redundancy pass runs **only among still-undecided (would-be-retain)
+  numeric candidates**, so a spurious tiny-overlap correlation with a
+  flagged column cannot arise; the alphabetically-earlier column is the
+  anchor and neither is claimed to be more predictive. Everything else →
+  **retain**. Boolean / datetime candidates retained unless a rule
+  applies; for `time_series_forecasting` a retained datetime feature is
+  noted as a possible time index. The target is excluded by Phase 6.2 and
+  additionally skipped here.
+- **Objective:** `objective_used = objective is not None and
+  objective.strip() != ""`; a small fixed vocabulary (no stemmer / NLP /
+  fuzzy / embeddings / LLM) recognises dimensionality-reduction wording
+  and adds a note only — it never overrides a structural rule.
+- **Contract change:** `FeatureSelectionRecommendations` gains additive
+  defaulted `review_features: list[str]`, `recommendations:
+  list[FeatureSelectionRecommendation]`, and `objective_used: bool`; new
+  `FeatureSelectionAction` enum (`retain` / `drop` / `review`) and
+  `FeatureSelectionRecommendation` model (column / action / reason /
+  evidence). Phase-6.1 `FeatureSelectionRecommendations` JSON still
+  validates.
+- **Errors / safety:** non-DataFrame `df`, non-`FeatureInventory`
+  `inventory`, or non-`TaskTypeInference` `task_type` → `TypeError`.
+  `inventory.status != completed`, `task_type.status != completed`,
+  `task_type.task_type is None`, or an unsupported task
+  (`multilabel_classification`, `other`) → `status = unavailable` +
+  reason. Completed inventory with no candidates → `status = completed` +
+  explicit reason. Deterministic (row- and column-order invariant;
+  `recommendations` ordered by (category rank, column); output lists
+  alphabetical; no timestamp / UUID / randomness / filesystem);
+  `df` / `inventory` / `task_type` never mutated; no file / figure /
+  lineage / version / database / network / model / LLM access. Reuses
+  only `ColumnType`, `pandas`, `numpy`, and the Phase-5
+  `TaskType` / `TaskTypeInference` / `ProblemUnderstandingStatus`
+  contracts. No new dependency; `pyproject.toml` unchanged.
+- **Phase state:** Phase 6 **In progress** — 6.1 **Done**, 6.2 **Done**,
+  6.3 **Done**, 6.4 **Done**, 6.5 / 6.6 **Not started**. Phase 6 is
+  **not** complete.
+
 ## 0067 — Phase 6.3: `recommend_transformations` is a standalone deterministic rule-based recommendation engine
 - **Decision:** `data_engine/feature_engineering/transformation_recommendation.py`
   adds `recommend_transformations(df: pd.DataFrame, inventory:

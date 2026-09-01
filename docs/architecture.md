@@ -282,7 +282,23 @@ handling; a datetime column never implies forecasting. Plain log /
 reciprocal are never recommended outside their mathematical domain.
 Output ordered by (column, operation priority, description) → row/column
 -order invariant. `TransformationRecommendations` gained additive
-defaulted `recommendations` + `objective_used` fields.
+defaulted `recommendations` + `objective_used` fields. **6.4 —
+feature-selection recommendations:** `recommend_feature_selection(df,
+inventory, task_type, *, objective=None) -> FeatureSelectionRecommendations`,
+a **standalone**, deterministic, rule-based engine (caller merges into
+`FeatureEngineeringSpec.selection`). It reads candidate columns from the
+6.2 inventory and the task type from the Phase-5.3 `TaskTypeInference`
+(never re-inferred) and recommends **retain / drop / review** per
+candidate from fixed structural + redundancy rules (constant, all-missing,
+identifier-like, exact duplicate → drop; high missingness, near-zero
+variance, high categorical cardinality, `|Pearson r| ≥ 0.95` → review;
+else retain). It **recommends only** — never alters `df`, re-selects the
+target, re-infers the task, imputes, transforms, or computes any
+target-based / model-based feature score. Output ordered by (category,
+column); lists alphabetical → row/column-order invariant.
+`FeatureSelectionRecommendations` gained additive defaulted
+`review_features` + `recommendations` + `objective_used`; new
+`FeatureSelectionAction` enum.
 [feature-engineering.md](feature-engineering.md).
 
 **Future-phase components:** everything else —

@@ -173,22 +173,66 @@ class TransformationRecommendations(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
-class FeatureSelectionRecommendations(BaseModel):
-    """Recommended feature keep / drop decisions.
+class FeatureSelectionAction(str, Enum):
+    """What Phase 6.4 recommends doing with a structurally eligible feature."""
 
-    Populated by a later Phase-6 increment. Phase 6.1 leaves it empty.
+    RETAIN = "retain"  # no deterministic structural reason to exclude
+    DROP = "drop"  # a fixed structural rule clearly recommends exclusion
+    REVIEW = "review"  # worth a human look; NOT automatically dropped
+
+
+class FeatureSelectionRecommendation(BaseModel):
+    """One structurally-justified feature-selection decision for a column.
+
+    Produced by
+    :func:`data_engine.feature_engineering.recommend_feature_selection`
+    (Phase 6.4). ``action`` / ``reason`` describe a **structural** decision
+    only — never a claim about predictive usefulness or model performance.
+    """
+
+    column: str
+    action: FeatureSelectionAction
+    reason: str = Field(description="The structural reason for the action.")
+    evidence: list[str] = Field(
+        default_factory=list, description="Deterministic supporting evidence, fixed order."
+    )
+
+
+class FeatureSelectionRecommendations(BaseModel):
+    """Recommended feature keep / drop / review decisions.
+
+    Populated by
+    :func:`data_engine.feature_engineering.recommend_feature_selection`
+    (Phase 6.4). ``recommendations`` / ``review_features`` /
+    ``objective_used`` are additive and defaulted, so a
+    ``FeatureSelectionRecommendations`` serialised by Phase 6.1 still
+    validates.
     """
 
     status: FeatureEngineeringStatus = FeatureEngineeringStatus.NOT_YET_INFERRED
     reason: str | None = Field(
         default=None,
-        description="Why selection is unavailable; None once produced.",
+        description="Why selection is unavailable, or why a completed result is empty; "
+        "None otherwise.",
     )
     selected_features: list[str] = Field(
-        default_factory=list, description="Features recommended to keep; empty until inferred."
+        default_factory=list,
+        description="Features to retain (no structural reason to exclude), alphabetical.",
     )
     dropped_features: list[str] = Field(
-        default_factory=list, description="Features recommended to drop; empty until inferred."
+        default_factory=list,
+        description="Features a fixed structural rule recommends excluding, alphabetical.",
+    )
+    review_features: list[str] = Field(
+        default_factory=list,
+        description="Features worth a human look but NOT auto-dropped, alphabetical.",
+    )
+    recommendations: list[FeatureSelectionRecommendation] = Field(
+        default_factory=list,
+        description="Structured per-column decisions, deterministically ordered.",
+    )
+    objective_used: bool = Field(
+        default=False, description="True iff a non-blank objective string was supplied."
     )
     notes: list[str] = Field(default_factory=list)
 
