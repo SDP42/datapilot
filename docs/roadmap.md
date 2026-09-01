@@ -11,7 +11,7 @@ future phases are not anticipated in code.
 | 3 | Validation & Data Lineage | **In progress** — `DatasetVersion` + store + lineage validation + lineage graph + opt-in auto-registration + cross-version diffing + version-integrity / family-consistency / version↔lineage-binding checks done; still filesystem-only (no database, no GC) |
 | 4 | EDA & Statistical Analysis | **Done** — deterministic analysis-only `data_engine.eda`: EDA/univariate/bivariate, parametric tests, effect sizes, non-parametric tests, distribution analysis, EDA↔quality cross-reference, visualization foundation (chart-spec selection + in-memory Matplotlib **and Plotly** rendering + explicit chart export), target-aware visualization recommendation, statistical-strength visualization ranking, k-NN / Kraskov mutual-information estimator, datetime mutual information, paired / one-sided non-parametric tests (Wilcoxon signed-rank / sign / Friedman), multiple-testing correction (Bonferroni / Holm / Benjamini-Hochberg). No dashboard/API |
 | 5 | Automated Problem Understanding | **Done** — `data_engine.problem_understanding`: the `ProblemSpec` contract + `understand_problem` foundation (5.1), **target identification** `identify_target` (5.2), **task-type inference** `infer_task_type` (5.3), **candidate metrics** `recommend_metrics` (5.4), **feasibility assessment** `assess_feasibility` (5.5). All deterministic, standalone, analysis-only; no ML/LLM |
-| 6 | Feature Engineering | **In progress** — `data_engine.feature_engineering`: the `FeatureEngineeringSpec` contract + `understand_feature_engineering` foundation (6.1 — done); **structural feature inventory** `inventory_features` — deterministic column classification (candidate vs target / constant / all-missing / identifier-like), no predictive-usefulness assessment (6.2 — done). 6.3 transformations / 6.4 selection / 6.5 preprocessing / 6.6 assessment not started |
+| 6 | Feature Engineering | **In progress** — `data_engine.feature_engineering`: `FeatureEngineeringSpec` contract + `understand_feature_engineering` foundation (6.1 — done); **structural feature inventory** `inventory_features` (6.2 — done); **transformation recommendations** `recommend_transformations` — deterministic rule-based recommendations (log / log1p / sqrt / reciprocal / abs, datetime derivations, scaling-as-a-category), recommends only, no execution, no predictive-benefit claim (6.3 — done). 6.4 selection / 6.5 preprocessing / 6.6 assessment not started |
 | 7 | Classical ML | Not started |
 | 8 | Deep Learning | Not started |
 | 9 | Experiment Tracking | Not started |
@@ -451,8 +451,48 @@ future phases are not anticipated in code.
   No new dependency; `pyproject.toml` unchanged (the package was declared
   in 6.1). See [feature-engineering.md](feature-engineering.md).
 
+  **6.3 — transformation recommendations.** `recommend_transformations(df:
+  pd.DataFrame, inventory: FeatureInventory, *, objective: str | None =
+  None) -> TransformationRecommendations` — a **standalone**, deterministic,
+  rule-based engine (caller merges into
+  `FeatureEngineeringSpec.transformations`). Reads candidate columns from
+  the 6.2 inventory — never rebuilds it, infers a target, or infers a
+  task type. Per numeric candidate: at most one monotonic transform by
+  strict priority — **log** (strictly positive + big multiplicative range
+  `≥ TRANSFORMATION_LOG_RANGE_RATIO = 1000` or strong skew), **reciprocal**
+  (strictly negative, no zeros, strong skew), **log1p** (values `> -1`,
+  contains zero/small-negative, strong skew), **square-root** (non-negative,
+  moderate skew) — plus independent **absolute-value** (both signs,
+  centred on zero) and **numerical_scaling** (recommendation category
+  only, never executed). Skew via `pandas.Series.skew()` (deterministic,
+  no sampling); thresholds are named exported constants
+  (`TRANSFORMATION_SKEW_THRESHOLD = 1.0`,
+  `TRANSFORMATION_STRONG_SKEW_THRESHOLD = 2.0`, …) documented as
+  engineering heuristics, not statistically optimal. Plain log / reciprocal
+  are never recommended outside their mathematical domain. Per datetime
+  candidate: `datetime_derivation` recommendations (year / month / day /
+  day_of_week / day_of_year / quarter, + hour when a time-of-day component
+  exists) and cyclical sin/cos month / day_of_week / hour — **a datetime
+  column never implies forecasting** (Phase 5 task inference is not
+  called). Categorical / boolean candidates get no recommendation (notes
+  defer encoding to a later component). Objective refines priority only
+  via a small fixed vocabulary (no NLP / stemmer / fuzzy / embeddings /
+  LLM) and never overrides a mathematical domain. No missing-value
+  handling — moderate-missingness columns still get recommendations from
+  observed values, with an explicit Phase-6.5 deferral note.
+  `recommendations` + aligned `recommended_operations` sorted by (column,
+  operation priority, description) → row- and column-order invariant,
+  byte-identical repeated calls. `status = completed` even with zero
+  recommendations; completed inventory with no candidates → completed +
+  explicit reason; non-completed inventory → `unavailable`. non-DataFrame
+  / non-`FeatureInventory` → `TypeError`. `TransformationRecommendations`
+  gains additive defaulted `recommendations: list[TransformationRecommendation]`
+  + `objective_used: bool` (6.1 JSON validates). `df` / `inventory` never
+  mutated; no file / figure / lineage / version / model / LLM / network.
+  No new dependency.
+
   **Completed:** 6.1 foundation / `FeatureEngineeringSpec`, 6.2 structural
-  feature inventory. **Not started:** 6.3 transformation recommendations,
+  feature inventory, 6.3 transformation recommendations. **Not started:**
   6.4 feature selection, 6.5 preprocessing requirements, 6.6
   feature-engineering assessment. Phase 6 is **not complete**.
 

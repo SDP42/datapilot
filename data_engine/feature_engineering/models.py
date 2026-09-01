@@ -121,20 +121,54 @@ class FeatureInventory(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class TransformationRecommendation(BaseModel):
+    """One structurally-justified transformation worth considering for a column.
+
+    Produced by
+    :func:`data_engine.feature_engineering.recommend_transformations`
+    (Phase 6.3). ``operation`` is a stable :class:`FeatureOperationType`
+    category; ``description`` is the specific human-readable sub-operation
+    (e.g. ``"log1p transform"``, ``"derive month"``). A recommendation
+    means only *"the observed structure makes this worth considering"* —
+    never *"this will improve model performance"*.
+    """
+
+    column: str
+    operation: FeatureOperationType
+    description: str = Field(description="Specific sub-operation, e.g. 'log transform'.")
+    reason: str = Field(description="The structural reason this is worth considering.")
+    evidence: list[str] = Field(
+        default_factory=list, description="Deterministic supporting evidence, fixed order."
+    )
+
+
 class TransformationRecommendations(BaseModel):
     """Recommended per-feature transformations / derivations.
 
-    Populated by a later Phase-6 increment. Phase 6.1 leaves it empty.
+    Populated by
+    :func:`data_engine.feature_engineering.recommend_transformations`
+    (Phase 6.3). ``recommendations`` / ``objective_used`` are additive and
+    defaulted, so a ``TransformationRecommendations`` serialised by Phase
+    6.1 still validates.
     """
 
     status: FeatureEngineeringStatus = FeatureEngineeringStatus.NOT_YET_INFERRED
     reason: str | None = Field(
         default=None,
-        description="Why transformations are unavailable; None once produced.",
+        description="Why transformations are unavailable, or why an empty completed result "
+        "has no recommendations; None otherwise.",
     )
     recommended_operations: list[str] = Field(
         default_factory=list,
-        description="Recommended transformation identifiers; empty until inferred.",
+        description="'<column>: <description>' for every structured recommendation, "
+        "deterministically ordered; empty until inferred / when none apply.",
+    )
+    recommendations: list[TransformationRecommendation] = Field(
+        default_factory=list,
+        description="Structured recommendations, deterministically ordered.",
+    )
+    objective_used: bool = Field(
+        default=False, description="True iff a non-blank objective string was supplied."
     )
     notes: list[str] = Field(default_factory=list)
 

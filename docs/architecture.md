@@ -264,7 +264,25 @@ target, or uses correlation / MI / feature importance / a model / an LLM.
 `objective` is context only. Output lists are alphabetical → row- and
 column-order invariant; `df` never mutated; `status = unavailable` for no
 columns / no rows / unknown target. `FeatureInventory` gained additive
-defaulted `candidates` + `objective_used` fields.
+defaulted `candidates` + `objective_used` fields. **6.3 — transformation
+recommendations:** `recommend_transformations(df, inventory, *,
+objective=None) -> TransformationRecommendations`, a **standalone**,
+deterministic, rule-based engine (caller merges into
+`FeatureEngineeringSpec.transformations`). It reads candidate columns from
+the 6.2 inventory and, per candidate, **recommends** transformations the
+observed structure makes worth considering — one monotonic transform by
+strict priority (log / reciprocal / log1p / sqrt, each gated on sign,
+multiplicative range, and a deterministic `pandas` skew heuristic with
+named exported thresholds), plus absolute-value and a
+scaling-*as-a-category* recommendation; datetime derivations + cyclical
+encodings for datetime candidates. It **recommends only** — never
+executes a transform, modifies the DataFrame, claims predictive benefit,
+infers a target/task, calls a model / LLM, or does missing-value
+handling; a datetime column never implies forecasting. Plain log /
+reciprocal are never recommended outside their mathematical domain.
+Output ordered by (column, operation priority, description) → row/column
+-order invariant. `TransformationRecommendations` gained additive
+defaulted `recommendations` + `objective_used` fields.
 [feature-engineering.md](feature-engineering.md).
 
 **Future-phase components:** everything else —

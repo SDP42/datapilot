@@ -6,24 +6,37 @@ features, which transformations / encoders / scalers / imputers a model
 would need, which features to keep or drop, and whether feature
 engineering is feasible.
 
-**Implemented so far:** Phase 6.1 (the `FeatureEngineeringSpec` contract +
-`understand_feature_engineering` foundation — infers nothing) and Phase
-6.2 (`inventory_features` — a deterministic **structural** feature
-inventory that classifies each column as a plausible input feature or an
-excluded column; it never assesses predictive usefulness). Transformation
-recommendations, feature selection, preprocessing requirements, and
-feature-engineering feasibility are later Phase-6 increments.
+**Implemented so far:**
+
+- **6.1** — the `FeatureEngineeringSpec` contract +
+  `understand_feature_engineering` foundation (infers nothing).
+- **6.2** — `inventory_features`: a deterministic **structural** feature
+  inventory classifying each column as a candidate input feature or an
+  excluded column.
+- **6.3** — `recommend_transformations`: deterministic, rule-based
+  **recommendations** of transformations (log / log1p / sqrt / reciprocal
+  / absolute-value, datetime derivations, scaling-as-a-category) that the
+  observed structure makes worth considering. It recommends only — it
+  never executes a transformation or modifies the DataFrame.
+
+Feature selection, preprocessing requirements, and feature-engineering
+feasibility are later Phase-6 increments.
 
     from data_engine.feature_engineering import (
         FeatureEngineeringRequest,
         inventory_features,
+        recommend_transformations,
         understand_feature_engineering,
     )
 
     spec = understand_feature_engineering(
         FeatureEngineeringRequest(dataset_id="sales", objective="predict churn")
     )
-    spec = spec.model_copy(update={"inventory": inventory_features(df, target="churn")})
+    inv = inventory_features(df, target="churn")
+    spec = spec.model_copy(update={"inventory": inv})
+    spec = spec.model_copy(
+        update={"transformations": recommend_transformations(df, inv)}
+    )
 """
 
 from __future__ import annotations
@@ -40,13 +53,29 @@ from .models import (
     FeatureOperationType,
     FeatureSelectionRecommendations,
     PreprocessingRequirements,
+    TransformationRecommendation,
     TransformationRecommendations,
+)
+from .transformation_recommendation import (
+    TRANSFORMATION_ABS_SYMMETRY_RATIO,
+    TRANSFORMATION_LOG_RANGE_RATIO,
+    TRANSFORMATION_MIN_OBS,
+    TRANSFORMATION_SCALING_MAGNITUDE,
+    TRANSFORMATION_SKEW_THRESHOLD,
+    TRANSFORMATION_STRONG_SKEW_THRESHOLD,
+    recommend_transformations,
 )
 from .understanding import understand_feature_engineering
 
 __all__ = [
     "FEATURE_ENGINEERING_ENGINE_VERSION",
     "HIGH_UNIQUE_ID_THRESHOLD",
+    "TRANSFORMATION_ABS_SYMMETRY_RATIO",
+    "TRANSFORMATION_LOG_RANGE_RATIO",
+    "TRANSFORMATION_MIN_OBS",
+    "TRANSFORMATION_SCALING_MAGNITUDE",
+    "TRANSFORMATION_SKEW_THRESHOLD",
+    "TRANSFORMATION_STRONG_SKEW_THRESHOLD",
     "FeatureEngineeringAssessment",
     "FeatureEngineeringRequest",
     "FeatureEngineeringSpec",
@@ -56,7 +85,9 @@ __all__ = [
     "FeatureOperationType",
     "FeatureSelectionRecommendations",
     "PreprocessingRequirements",
+    "TransformationRecommendation",
     "TransformationRecommendations",
     "inventory_features",
+    "recommend_transformations",
     "understand_feature_engineering",
 ]

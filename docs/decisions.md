@@ -4,6 +4,73 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0067 — Phase 6.3: `recommend_transformations` is a standalone deterministic rule-based recommendation engine
+- **Decision:** `data_engine/feature_engineering/transformation_recommendation.py`
+  adds `recommend_transformations(df: pd.DataFrame, inventory:
+  FeatureInventory, *, objective: str | None = None) ->
+  TransformationRecommendations`, a **standalone** function
+  (`understand_feature_engineering` unchanged; caller merges into
+  `FeatureEngineeringSpec.transformations` via `model_copy`). It reads the
+  candidate columns from the Phase-6.2 `FeatureInventory` and **recommends
+  only** — it never executes a transformation, modifies the DataFrame,
+  rebuilds the inventory, infers a target or a task type, or claims a
+  recommendation will improve model performance.
+- **Reason:** Prompt "Phase 6.3 — Automated Transformation
+  Recommendations": "The implementation must recommend transformations
+  only"; "A recommendation must never imply 'This transformation will
+  improve model performance.'"; "Do not use ML models / correlations /
+  mutual information / feature importance / … / LLMs"; "The presence of a
+  datetime column alone must never imply forecasting"; "Phase 6.3 must NOT
+  perform missing-value handling"; "Do NOT encode categorical variables".
+- **Rules (documented):** per numeric candidate, at most one monotonic
+  transform by strict priority — **log** (strictly positive AND (`max/min
+  ≥ TRANSFORMATION_LOG_RANGE_RATIO = 1000` OR `skew ≥` strong bar)),
+  **reciprocal** (strictly negative, no zeros, `|skew| ≥` strong bar),
+  **log1p** (min `> -1`, contains zero / small negative, `skew ≥` strong
+  bar), **square-root** (non-negative, `TRANSFORMATION_SKEW_THRESHOLD =
+  1.0 ≤ skew < TRANSFORMATION_STRONG_SKEW_THRESHOLD = 2.0`). Independent:
+  **absolute-value** (both signs, `|mean| ≤
+  TRANSFORMATION_ABS_SYMMETRY_RATIO · std`), **numerical_scaling** as a
+  *recommendation category only* (no monotonic transform chosen AND
+  (largest `|value| > TRANSFORMATION_SCALING_MAGNITUDE = 1000` OR objective
+  scaling intent)). Skew via `pandas.Series.skew()` when `≥
+  TRANSFORMATION_MIN_OBS = 3` values — a deterministic engineering
+  heuristic, explicitly not statistically optimal; all thresholds are
+  named exported constants. Plain log / reciprocal never leave their
+  mathematical domain. Datetime candidates → `datetime_derivation`
+  (year / month / day / day_of_week / day_of_year / quarter, + hour when a
+  time-of-day component exists) and cyclical sin/cos (month / day_of_week
+  / hour). Only the `transformation`, `datetime_derivation`, and
+  `numerical_scaling` `FeatureOperationType` categories are emitted; the
+  stable category is kept separate from the human-readable `description`.
+  Categorical / boolean candidates get no recommendation. Objective refines
+  priority only via a small fixed vocabulary (no stemmer / NLP / fuzzy /
+  embeddings / LLM) and can lower the strong bar to
+  `TRANSFORMATION_SKEW_THRESHOLD` for skew-reduction intent — it can never
+  make an invalid transform valid. No missing-value handling; moderate
+  missingness still yields recommendations from observed values with a
+  Phase-6.5 deferral note. Output sorted by (column, operation priority,
+  description); `recommended_operations` is exactly
+  `"<column>: <description>"` per structured recommendation.
+- **Contract change:** `TransformationRecommendations` gains additive
+  defaulted `recommendations: list[TransformationRecommendation]` and
+  `objective_used: bool` (new `TransformationRecommendation` model:
+  column / operation / description / reason / evidence). Phase-6.1
+  `TransformationRecommendations` JSON still validates.
+- **Errors / safety:** non-DataFrame `df` or non-`FeatureInventory`
+  `inventory` → `TypeError`. `inventory.status != completed` →
+  `status = unavailable` + reason (inventory never rebuilt). Completed
+  inventory with no candidate features → `status = completed`, empty
+  lists, explicit reason. Deterministic (row- and column-order invariant;
+  no timestamp / UUID / randomness / sampling / environment / filesystem);
+  `df` and `inventory` never mutated; no file / figure / lineage /
+  version / database / network / model / LLM access. Reuses only
+  `ColumnType` and `pandas`. No new dependency; `pyproject.toml`
+  unchanged.
+- **Phase state:** Phase 6 **In progress** — 6.1 **Done**, 6.2 **Done**,
+  6.3 **Done**, 6.4 / 6.5 / 6.6 **Not started**. Phase 6 is **not**
+  complete.
+
 ## 0066 — Phase 6.2: `inventory_features` is a standalone deterministic structural column classification
 - **Decision:** `data_engine/feature_engineering/feature_inventory.py`
   adds `inventory_features(df: pd.DataFrame, target: str | None = None, *,

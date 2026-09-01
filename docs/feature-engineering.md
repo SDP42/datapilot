@@ -15,9 +15,15 @@ engineering is feasible.
 >   deterministic **structural** column classification — plausible input
 >   feature vs excluded (target / constant / all-missing /
 >   identifier-like). It does **not** determine predictive usefulness.
-> - **6.3 transformation recommendations / 6.4 feature selection / 6.5
->   preprocessing requirements / 6.6 feature-engineering assessment**: NOT
->   STARTED.
+> - **6.3 — transformation recommendations** (`recommend_transformations`):
+>   DONE. Deterministic, rule-based **recommendations** of transformations
+>   (log / log1p / sqrt / reciprocal / absolute-value, datetime
+>   derivations, scaling-as-a-category) that the observed structure makes
+>   worth considering. **Recommends only** — never executes a
+>   transformation or modifies the DataFrame; never establishes predictive
+>   benefit.
+> - **6.4 feature selection / 6.5 preprocessing requirements / 6.6
+>   feature-engineering assessment**: NOT STARTED.
 
 ## Entrypoint
 
@@ -79,7 +85,13 @@ non-blank after `.strip()`.
   `objective_used: bool`, `notes`. (`candidates` / `objective_used` are
   additive & defaulted — Phase-6.1 JSON still validates.)
 - `TransformationRecommendations` — `status`, `reason`,
-  `recommended_operations: list[str]`, `notes`.
+  `recommended_operations: list[str]`,
+  `recommendations: list[TransformationRecommendation]`,
+  `objective_used: bool`, `notes`. (`recommendations` / `objective_used`
+  are additive & defaulted — Phase-6.1 JSON still validates.)
+  `TransformationRecommendation` — `column`, `operation`
+  (`FeatureOperationType`), `description` (specific sub-operation),
+  `reason`, `evidence: list[str]`.
 - `FeatureSelectionRecommendations` — `status`, `reason`,
   `selected_features: list[str]`, `dropped_features: list[str]`, `notes`.
 - `PreprocessingRequirements` — `status`, `reason`,
@@ -202,22 +214,159 @@ access.
 `preprocessing` / `assessment` and the overall `FeatureEngineeringSpec.status`
 stay `not_yet_inferred`.
 
+## Transformation recommendations (6.3) — `recommend_transformations`
+
+```python
+from data_engine.feature_engineering import inventory_features, recommend_transformations
+
+inv = inventory_features(df, target="churn")
+transformations = recommend_transformations(df, inv, objective="reduce skew")
+spec = spec.model_copy(update={"transformations": transformations})
+```
+
+`recommend_transformations(df: pd.DataFrame, inventory: FeatureInventory, *, objective: str | None = None) -> TransformationRecommendations`
+
+Deterministic and **rule-based**. It reads which columns are candidate
+features straight from the Phase-6.2 `FeatureInventory` (it never rebuilds
+the inventory, infers a target, or infers a task type) and, for each
+candidate, recommends transformations that the *observed structure* makes
+worth considering. **It recommends only** — it never creates, replaces,
+renames, encodes, scales, imputes, bins, or modifies a column, and a
+recommendation never means "this will improve model performance".
+
+### Operation vocabulary
+
+Recommendations reuse `FeatureOperationType`. Phase 6.3 emits only
+`transformation`, `datetime_derivation`, and `numerical_scaling` (the last
+as a *recommendation category* — never executed). `interaction`,
+`aggregation`, `categorical_encoding`, `missing_value_handling`, and
+`feature_selection` are **not** emitted. The stable category
+(`operation`) is kept separate from the human-readable `description`
+(e.g. `operation = transformation`, `description = "log1p transform"`).
+
+### Numeric rules (evaluated on finite, non-missing values)
+
+Named exported constants: `TRANSFORMATION_SKEW_THRESHOLD = 1.0`,
+`TRANSFORMATION_STRONG_SKEW_THRESHOLD = 2.0`,
+`TRANSFORMATION_LOG_RANGE_RATIO = 1000.0`,
+`TRANSFORMATION_SCALING_MAGNITUDE = 1000.0`,
+`TRANSFORMATION_ABS_SYMMETRY_RATIO = 0.1`, `TRANSFORMATION_MIN_OBS = 3`.
+Skewness is `pandas.Series.skew()` (deterministic Fisher-Pearson,
+adjusted; no sampling, no mutation) computed only when at least
+`TRANSFORMATION_MIN_OBS` values are present — it is a **deterministic
+engineering heuristic, not a statistically optimal value**.
+
+**At most one monotonic transform per column**, strict priority:
+
+1. **log** — every usable value is strictly positive **and** (`max/min ≥
+   TRANSFORMATION_LOG_RANGE_RATIO` **or** `skew ≥` the strong bar).
+2. **reciprocal** — every usable value is strictly negative, no zeros, and
+   `|skew| ≥` the strong bar (log cannot apply to negatives).
+3. **log1p** — not strictly positive, every value `> -1`, contains a zero
+   or a small negative, and `skew ≥` the strong bar (domain `x > -1`
+   verified).
+4. **square-root** — non-negative and `TRANSFORMATION_SKEW_THRESHOLD ≤
+   skew < TRANSFORMATION_STRONG_SKEW_THRESHOLD` (a milder alternative to
+   log).
+
+The "strong bar" is `TRANSFORMATION_STRONG_SKEW_THRESHOLD`, lowered to
+`TRANSFORMATION_SKEW_THRESHOLD` only when the objective expresses a
+skew-reduction intent. Plain **reciprocal** is never recommended when any
+value is zero; plain **log** is never recommended when any value is zero
+or negative.
+
+Independently:
+
+- **absolute-value** — the feature has both positive and negative values
+  and `|mean| ≤ TRANSFORMATION_ABS_SYMMETRY_RATIO · std` (distributed
+  around zero).
+- **numerical_scaling** (recommendation category only) — no monotonic
+  transform was chosen for the column **and** (largest absolute value `>
+  TRANSFORMATION_SCALING_MAGNITUDE` **or** the objective mentions
+  scaling / standardisation).
+
+Every recommendation carries an explicit `reason` and ordered `evidence`
+(sign / range / skew / domain facts). Binning, polynomial, and generic
+power transforms are intentionally **not** emitted in 6.3.
+
+### Datetime rules
+
+For a datetime candidate with usable values: `datetime_derivation`
+recommendations for `year`, `month`, `day`, `day_of_week`, `day_of_year`,
+`quarter` (and `hour` only when any timestamp has a non-zero time
+component), plus cyclical `sin/cos` recommendations for `month`,
+`day_of_week` (and `hour` when present). An all-missing datetime column is
+already excluded by Phase 6.2 and receives nothing. **The presence of a
+datetime column never implies a forecasting task** — Phase 5 task
+inference is not called.
+
+### Categorical / boolean
+
+Categorical candidates receive **no** recommendation and a note that
+categorical encoding is deferred to a later Phase-6 component. Boolean
+candidates receive **no** recommendation and a note that none is needed.
+
+### Objective handling
+
+`objective_used = objective is not None and objective.strip() != ""`. A
+small fixed vocabulary (no stemmer / NLP / fuzzy matching / embeddings /
+LLM) recognises skew-reduction, cyclical/seasonal, and
+scaling/standardisation intents; these **refine priority only** and can
+never make a mathematically invalid transform valid.
+
+### Missingness
+
+Phase 6.3 performs **no** missing-value handling. A candidate with
+moderate missingness still receives recommendations based on its observed
+non-missing values, and the evidence/notes state that missing-value
+handling is deferred to Phase 6.5. All-missing columns are already
+excluded by Phase 6.2. No imputation operation is ever recommended.
+
+### Result & ordering
+
+`recommendations` and the aligned `recommended_operations`
+(`"<column>: <description>"`) are sorted by `(column name, operation
+priority, description)` — invariant to DataFrame row order and column
+order; five repeated calls yield one distinct JSON. `status = completed`
+even when nothing is recommended; a completed inventory with **no**
+candidate features yields `status = completed`, empty lists, and an
+explicit `reason`. `inventory.status != completed` →
+`status = unavailable` with a reason. Non-DataFrame `df` or
+non-`FeatureInventory` `inventory` → `TypeError`.
+
+### Safety
+
+`df` and `inventory` are never mutated (deep-copy verified); no file,
+figure, network, database, lineage, `DatasetVersion`, LLM, or model
+access; no randomness, timestamps, or UUIDs.
+
+### Integration
+
+`understand_feature_engineering()` is unchanged. After
+`spec.model_copy(update={"transformations": recommend_transformations(...)})`,
+`inventory` is unchanged, `transformations` is populated, and `selection`
+/ `preprocessing` / `assessment` and the overall
+`FeatureEngineeringSpec.status` stay `not_yet_inferred`.
+
 ## No timestamp
 
 Like `ProblemSpec`, `FeatureEngineeringSpec` has **no `generated_at`**
 field — the determinism requirement is byte-identical repeated output, so
 no wall-clock value is recorded.
 
-## Boundaries (Phase 6.1 / 6.2)
+## Boundaries (Phase 6.1 / 6.2 / 6.3)
 
 - Separate from ingestion / profiling / quality / cleaning / validation /
   lineage / EDA / problem understanding. 6.1 depends on nothing beyond
-  the stdlib + Pydantic; 6.2 additionally reuses only the pure
-  `infer_column_type` helper and the shared `ColumnType` enum, and is not
-  coupled to the Phase-5 target-selection engine.
-- **Contract, foundation, and structural inventory only.** No feature is
-  engineered, transformed, selected, encoded, scaled, imputed, generated,
-  or modified. No correlation / mutual information / feature importance,
-  no leakage detection, no predictive-usefulness scoring, no model
-  training, no train/test split, no cross-validation, no statistical
-  testing, no LLM or external call. Those belong to Phase 6.3+.
+  the stdlib + Pydantic; 6.2 and 6.3 additionally reuse only the pure
+  `infer_column_type` helper and the shared `ColumnType` enum, and are
+  not coupled to the Phase-5 engines.
+- **Contract, foundation, structural inventory, and transformation
+  *recommendations* only.** No feature is engineered, transformed,
+  selected, encoded, scaled, imputed, generated, or modified. No
+  correlation / mutual information / feature importance, no leakage
+  detection, no predictive-usefulness scoring, no model training, no
+  train/test split, no cross-validation, no statistical hypothesis
+  testing, no LLM or external call. Feature selection (6.4), preprocessing
+  requirements (6.5), and feature-engineering feasibility (6.6) are later
+  increments.
