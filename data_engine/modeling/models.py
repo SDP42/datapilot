@@ -281,15 +281,67 @@ class EvaluationResults(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
-class ModelSelection(BaseModel):
-    """Future model comparison and selection.
+class ModelSelectionRank(BaseModel):
+    """One training run's place in the deterministic selection ranking.
 
-    Populated by a later Phase-7 increment. Phase 7.1 selects no model.
+    Produced by :func:`data_engine.modeling.select_model` (Phase 7.5).
+    ``rank`` is ``1``-based for runs eligible for selection and ``None``
+    for runs that are not (failed / unavailable / missing the selection
+    metric / not a Phase-7.3 candidate). ``score`` is populated **only**
+    for eligible runs — it is the existing Phase-7.4 metric value, never
+    recomputed.
+    """
+
+    family: str
+    estimator_name: str
+    status: str = Field(description="The Phase-7.4 TrainingRun status value.")
+    score: float | None = Field(
+        default=None, description="The selection-metric value for an eligible run; else None."
+    )
+    metric: str | None = Field(default=None, description="The selection metric name; else None.")
+    rank: int | None = Field(
+        default=None, description="1-based rank among eligible runs; else None."
+    )
+    reason: str = Field(description="Why the run is eligible, or why it is not selectable.")
+
+
+class ModelSelection(BaseModel):
+    """A deterministic model recommendation from the Phase-7.4 results.
+
+    Populated by :func:`data_engine.modeling.select_model` (Phase 7.5).
+    All fields beyond ``status`` / ``reason`` / ``notes`` are additive and
+    defaulted, so a ``ModelSelection`` serialised by Phase 7.1 still
+    validates. Phase 7.5 **retrains nothing and recomputes no metric** —
+    it only compares the values already recorded in
+    ``TrainingOutcome.runs[*].metrics``.
     """
 
     status: ModelingStatus = ModelingStatus.NOT_YET_INFERRED
     reason: str | None = Field(
-        default=None, description="Why a selection is unavailable; None once produced."
+        default=None, description="Why a selection is unavailable / has no recommendation."
+    )
+    selected_family: str | None = Field(
+        default=None, description="The recommended model family; None when nothing is selectable."
+    )
+    selected_estimator: str | None = Field(
+        default=None,
+        description="The recommended concrete estimator; None when nothing is selectable.",
+    )
+    selection_metric: str | None = Field(
+        default=None, description="The fixed selection metric for the task."
+    )
+    selection_direction: str | None = Field(
+        default=None, description="'minimize' or 'maximize' for the selection metric."
+    )
+    selected_score: float | None = Field(
+        default=None, description="The winning run's selection-metric value (from Phase 7.4)."
+    )
+    ranking: list[ModelSelectionRank] = Field(
+        default_factory=list,
+        description="Every training run's selection standing, deterministically ordered.",
+    )
+    objective_used: bool = Field(
+        default=False, description="True iff a non-blank objective string was supplied."
     )
     notes: list[str] = Field(default_factory=list)
 

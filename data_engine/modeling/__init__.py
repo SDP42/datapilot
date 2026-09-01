@@ -41,6 +41,7 @@ from .models import (
     ModelingStatus,
     ModelReadiness,
     ModelSelection,
+    ModelSelectionRank,
     TrainingOutcome,
     TrainingRun,
     TrainingRunStatus,
@@ -50,6 +51,7 @@ from .readiness import (
     MODEL_READINESS_ROWS_WARNING,
     assess_model_readiness,
 )
+from .selection import select_model
 from .split_planning import (
     DEFAULT_TEST_FRACTION,
     DEFAULT_TRAIN_FRACTION,
@@ -100,6 +102,7 @@ __all__ = [
     "ModelFamily",
     "ModelReadiness",
     "ModelSelection",
+    "ModelSelectionRank",
     "ModelingRequest",
     "ModelingSpec",
     "ModelingStatus",
@@ -109,6 +112,7 @@ __all__ = [
     "assess_model_readiness",
     "generate_model_candidates",
     "recommend_data_split",
+    "select_model",
     "train_and_evaluate_models",
     "understand_modeling",
 ]

@@ -332,11 +332,14 @@ additive defaulted `checks` + `objective_used`; new
 `FeatureEngineeringCheck` model. **Phase 6 is complete.**
 [feature-engineering.md](feature-engineering.md).
 
-**Phase 7 (in progress):** `data_engine.modeling` — a deterministic,
-**analysis-only** layer that will turn an understood problem + engineered
-features into a structured `ModelingSpec` (model readiness, data-split
-plan, candidate model families, training, evaluation, model selection).
-**7.1 — contract + foundation:** `understand_modeling(request:
+**Phase 7 (done):** `data_engine.modeling` — a deterministic layer that
+turns an understood problem + engineered features into a structured
+`ModelingSpec` (model readiness, data-split plan, candidate model
+families, training, evaluation, model selection). 7.1–7.5 are all
+implemented as standalone functions the caller composes; only Phase 7.4
+fits estimators (conservative scikit-learn baselines), and no phase
+tunes, cross-validates, or persists a model. **7.1 — contract +
+foundation:** `understand_modeling(request:
 ModelingRequest) -> ModelingSpec` validates dataset identity + an explicit
 objective (never inferred from data; blank objective strings preserved
 verbatim) and returns a spec whose overall status and all six sections
@@ -399,12 +402,27 @@ are never mutated; the returned contract holds only JSON primitives.
 `failed_runs` / `objective_used`; new `TrainingRun` model +
 `TrainingRunStatus` enum. **`scikit-learn>=1.4` was added to the runtime
 dependencies** — Phase 7 is the modeling phase that first needs an
-estimator library. [modeling.md](modeling.md).
+estimator library. **7.5 — model selection & recommendation:**
+`select_model(problem, feature_engineering, readiness, split, candidates,
+training, *, objective=None) -> ModelSelection`, a **standalone**
+deterministic function (caller merges into `ModelingSpec.selection`; **no
+`df` parameter**). It ranks the successful Phase-7.4 runs by a fixed
+per-task metric (`rmse`↓ / macro `f1`↑ / `silhouette_score`↑), breaks ties
+by the fixed Phase-7.3 family order then estimator name, and recommends
+`ranking[0]` — comparing only the metrics Phase 7.4 already recorded. It
+**retrains nothing, recomputes no metric, reads no DataFrame, and mutates
+no upstream object**. `status = unavailable` on a fixed precedence (task →
+readiness → `ready is False` → split → candidates → training → Phase-6.6
+assessment); `status = completed` with `selected_* = None` when no run is
+eligible. `ModelSelection` gained additive defaulted `selected_family` /
+`selected_estimator` / `selection_metric` / `selection_direction` /
+`selected_score` / `ranking` / `objective_used`; new `ModelSelectionRank`
+model. **Phase 7 is complete.** [modeling.md](modeling.md).
 
 **Future-phase components:** everything else —
-figure generation, executing the Phase-6 recommendations, the Phase-7
-execution stages (training / evaluation / selection),
-`ml_engine`, `dl_engine`,
+figure generation, executing the Phase-6 recommendations, executing /
+deploying the Phase-7 recommended model,
+`dl_engine`,
 `experimentation`, `explainability`, `ai_engine`, `database`, `backend`,
 `frontend`, MLOps.
 

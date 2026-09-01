@@ -4,6 +4,79 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0075 — Phase 7.5: `select_model` recommends deterministically from the Phase-7.4 metrics; retrains nothing
+- **Decision:** `data_engine/modeling/selection.py` adds
+  `select_model(problem: ProblemSpec, feature_engineering:
+  FeatureEngineeringSpec, readiness: ModelReadiness, split: DataSplitPlan,
+  candidates: ModelCandidates, training: TrainingOutcome, *, objective:
+  str | None = None) -> ModelSelection`, a **standalone** function
+  (`understand_modeling` unchanged; caller merges into
+  `ModelingSpec.selection` via `model_copy`; **no `df` parameter**). It is
+  the **final** Phase-7 increment — **Phase 7 is now complete**.
+- **Reason:** Prompt "Phase 7.5 — Automated Model Selection &
+  Recommendation": "selection only … must not retrain anything … The only
+  source of model-performance evidence is the existing Phase-7.4
+  `TrainingOutcome.runs[*].metrics`"; fixed per-task metric rules; "Do not
+  substitute another metric"; "do not claim one model is statistically
+  superior"; deterministic tie-break by "metric score → fixed ModelFamily
+  ordering → estimator_name".
+- **Rules (documented):** fixed selection metric per supported task —
+  `regression` / `time_series_forecasting` → `rmse` (minimize); `binary` /
+  `multiclass` classification → the Phase-7.4 macro `f1` (maximize);
+  `clustering` → `silhouette_score` (maximize). The metric is never
+  substituted and clustering metrics are never combined. A `TrainingRun`
+  is **eligible** iff `status == completed`, its `family` is a Phase-7.3
+  candidate (`candidates.candidates`), and its `metrics` holds a **finite**
+  value for the task metric. Ineligible runs (`failed` / `unavailable` /
+  missing metric / unknown family) stay in `ranking` with `rank = None`,
+  `score = None`, and a deterministic `reason` — never rewritten into a
+  candidate, and `ModelCandidates` is never modified. Eligible runs are
+  ranked by score (with the task direction) → fixed Phase-7.3 family order
+  (`linear < tree_based < ensemble < probabilistic < distance_based <
+  neural`) → estimator name; `ranking[0]` is the winner. Equal scores →
+  a note records the tie and that the deterministic ordering broke it (no
+  performance-superiority claim). Runs exist but none eligible →
+  `status = completed`, `selected_* = None`, `selection_metric` /
+  `selection_direction` set, explicit reason. `training` completed with no
+  runs → `status = completed`, `selected_* = None`, "no model training
+  runs are available for selection".
+- **Upstream precedence:** `status = unavailable` (empty selection
+  payload) in order — task type not completed / absent / unsupported
+  (`multilabel_classification`, `other`) → `readiness.status != completed`
+  → `readiness.ready is False` (reason names the first readiness blocking
+  issue; readiness stays authoritative, never repaired) → `split.status !=
+  completed` → `candidates.status != completed` → `training.status !=
+  completed` → Phase-6.6 assessment not completed.
+- **Objective:** `objective_used = objective is not None and
+  objective.strip() != ""`; preserved verbatim, recorded in one note —
+  it never changes the metric, direction, ranking, or winner, and never
+  introduces NLP / fuzzy / embedding / LLM behaviour.
+- **Contract change:** `ModelSelection` gains additive defaulted
+  `selected_family: str | None`, `selected_estimator: str | None`,
+  `selection_metric: str | None`, `selection_direction: str | None`,
+  `selected_score: float | None`, `ranking: list[ModelSelectionRank]`,
+  `objective_used: bool`; new `ModelSelectionRank` model (`family` /
+  `estimator_name` / `status` / `score` / `metric` / `rank` / `reason`).
+  Existing `status` / `reason` / `notes` unchanged; Phase-7.1 JSON still
+  validates. (The Phase-7.1 `test_nothing_fabricated` check was tightened
+  to assert all-`not_yet_inferred` nested sections with only null/empty
+  payload rather than banning the substring `"estimator"`, which the new
+  additive field name legitimately contains.)
+- **Errors / safety / boundary:** any of the six required arguments of
+  the wrong type → `TypeError`. Fully deterministic from the Pydantic
+  inputs (no `df`, no DataFrame access); byte-identical repeated calls; no
+  timestamp / UUID / run id / randomness / filesystem / network. The six
+  upstream models are never mutated (JSON-snapshot verified); no file /
+  plot / artifact / cache / report; the output holds only JSON primitives
+  — no estimator object. **No retraining, no metric recomputation, no
+  preprocessing / feature engineering / split execution, no hyperparameter
+  tuning, no cross-validation, no feature importance / SHAP / correlation,
+  no leakage detection, no statistical significance testing, no new model
+  family, no artifact persistence, no deployment.** No new dependency;
+  `pyproject.toml` unchanged.
+- **Phase state:** Phase 7.1 **Done**, 7.2 **Done**, 7.3 **Done**, 7.4
+  **Done**, 7.5 **Done** → **Phase 7 Done**. Phase 8 **Not started**.
+
 ## 0074 — Phase 7.4: `train_and_evaluate_models` fits deterministic baseline estimators; scikit-learn added
 - **Decision:** `data_engine/modeling/training.py` adds
   `train_and_evaluate_models(df: pd.DataFrame, problem: ProblemSpec,

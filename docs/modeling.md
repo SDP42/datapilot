@@ -1,13 +1,19 @@
 # Model Development / Modeling (Phase 7)
 
-`data_engine/modeling/` — a deterministic, **analysis-only** layer that
-turns a dataset plus an **explicit** objective (and, in later increments,
-the upstream Phase-5 `ProblemSpec` and Phase-6 `FeatureEngineeringSpec`)
-into a structured `ModelingSpec`: whether the data is ready for modeling,
-how to split it, which model families to consider, the training outcome,
-the evaluation results, and the selected model.
+`data_engine/modeling/` — a deterministic layer that turns a dataset plus
+an **explicit** objective and the upstream Phase-5 `ProblemSpec` /
+Phase-6 `FeatureEngineeringSpec` into a structured `ModelingSpec`: whether
+the data is ready for modeling, how to split it, which model families to
+consider, the training outcome, the evaluation results, and a recommended
+model. Only Phase 7.4 fits estimators (conservative scikit-learn
+baselines); every other increment is analysis / planning / selection
+only, and no increment tunes, cross-validates, or persists a model.
 
-> **Status.** Phase 7 is **in progress**.
+> **Status.** Phase 7 is **complete** (7.1–7.5). Each increment is a
+> standalone deterministic function the caller composes into
+> `ModelingSpec`; `understand_modeling` still infers nothing and the
+> overall `ModelingSpec.status` is left at `not_yet_inferred` until a
+> caller sets it.
 >
 > - **7.1 — foundation** (`understand_modeling`): DONE. Infers nothing;
 >   returns an all-`not_yet_inferred` spec; no DataFrame parameter.
@@ -30,7 +36,12 @@ the evaluation results, and the selected model.
 >   one conservative scikit-learn baseline per Phase-7.3 family, and
 >   reports per-candidate metrics. It selects, ranks, and recommends
 >   **nothing**, tunes no hyperparameters, and persists no artifact.
-> - **7.5 model selection**: NOT STARTED.
+> - **7.5 — model selection & recommendation** (`select_model`): DONE.
+>   Deterministically ranks the successful Phase-7.4 training runs by a
+>   fixed per-task metric and recommends one family / estimator. It
+>   **retrains nothing, recomputes no metric, and modifies no upstream
+>   object** — it only compares the values already in
+>   `TrainingOutcome.runs[*].metrics`. **Phase 7 is complete.**
 
 ## Entrypoint
 
@@ -123,8 +134,15 @@ Pydantic's protected `model_` namespace so it is a plain data field.
   artifact path.
 - `EvaluationResults` — `status`, `reason`, `notes`. Future evaluation /
   metric results. **7.1 calculates no metric.**
-- `ModelSelection` — `status`, `reason`, `notes`. Future model comparison
-  and selection. **7.1 selects no model.**
+- `ModelSelection` — `status`, `reason`, `notes`, plus the additive
+  defaulted `selected_family: str | None`, `selected_estimator: str | None`,
+  `selection_metric: str | None`, `selection_direction: str | None`,
+  `selected_score: float | None`, `ranking: list[ModelSelectionRank]`,
+  `objective_used: bool`. Populated by Phase 7.5 (see below).
+  `ModelSelectionRank` — `family`, `estimator_name`, `status` (the
+  Phase-7.4 run status), `score: float | None`, `metric: str | None`,
+  `rank: int | None` (1-based for eligible runs, `None` otherwise),
+  `reason`.
 
 In Phase 7.1 every section is `status = not_yet_inferred` with the
 payload `None` / `[]` — **never** a fabricated model name, score,
@@ -526,7 +544,124 @@ populated, and `evaluation` / `selection` and the overall
 `ModelingSpec.status` stay `not_yet_inferred` — Phase 7.4 does not
 activate Phase 7.5.
 
-## Boundaries (Phase 7.1 / 7.2 / 7.3 / 7.4)
+## Model selection & recommendation (7.5)
+
+```python
+from data_engine.modeling import select_model
+
+selection = select_model(
+    problem_spec,
+    feature_engineering_spec,
+    readiness,
+    split,
+    candidates,
+    training,
+    objective="predict churn",
+)
+spec = spec.model_copy(update={"selection": selection})
+```
+
+`select_model(problem: ProblemSpec, feature_engineering: FeatureEngineeringSpec, readiness: ModelReadiness, split: DataSplitPlan, candidates: ModelCandidates, training: TrainingOutcome, *, objective=None) -> ModelSelection`
+
+**Phase 7.5 selects from existing Phase-7.4 results. It does not retrain,
+re-evaluate, tune, or modify data.** The only source of model-performance
+evidence is `TrainingOutcome.runs[*].metrics`. There is **no `df`
+parameter** — the function reads only Pydantic contracts.
+
+### Type guards & upstream dependencies (fixed precedence)
+
+Any of the six required arguments of the wrong type → `TypeError`.
+`status = unavailable` (empty selection payload, explicit `reason`) in
+this order: (1) task type not completed / absent / unsupported
+(`multilabel_classification`, `other`); (2) `readiness.status !=
+completed`; (3) `readiness.ready is False` (reason names the first
+readiness blocking issue — readiness stays authoritative, never
+repaired); (4) `split.status != completed`; (5) `candidates.status !=
+completed`; (6) `training.status != completed`; (7) Phase-6.6
+feature-engineering assessment not completed.
+
+### Fixed selection metric per task
+
+| Task | Metric | Direction |
+| --- | --- | --- |
+| `regression` | `rmse` | minimize |
+| `time_series_forecasting` | `rmse` | minimize (selects among the existing baseline regression runs only) |
+| `binary_classification` / `multiclass_classification` | `f1` (the Phase-7.4 macro F1) | maximize |
+| `clustering` | `silhouette_score` | maximize |
+
+The metric is **never** substituted (no switching to `accuracy` /
+`roc_auc` / `mae` because they happen to be present) and clustering
+metrics are **never** combined into a composite score.
+
+### Eligibility & ranking
+
+A training run is **eligible** iff `status == completed`, its `family` is
+a Phase-7.3 candidate, and its `metrics` contains a finite value for the
+task's selection metric. Ineligible runs — `failed`, `unavailable`,
+missing the metric, or referencing an unknown family — stay in `ranking`
+with `rank = None`, `score = None`, and a deterministic `reason`; they are
+never converted into a successful candidate and `ModelCandidates` is
+never modified. Eligible runs are ranked by: **selection score** (with
+the task direction), then the **fixed Phase-7.3 family order** (`linear <
+tree_based < ensemble < probabilistic < distance_based < neural`), then
+the **estimator name**. Ranks are `1..N`; the winner is exactly
+`ranking[0]`. No Python set/dict iteration, randomness, or candidate
+input order affects the outcome.
+
+### Selected model / no-recommendation / empty
+
+- `≥ 1` eligible run → `selected_family` / `selected_estimator` /
+  `selection_metric` / `selection_direction` / `selected_score` are set
+  from the top-ranked run; `reason = None`. When multiple eligible runs
+  have exactly equal scores, a note records the tie and that the
+  deterministic family/estimator ordering broke it — no model is claimed
+  to perform better.
+- Runs exist but none is eligible → `status = completed`,
+  `selected_* = None`, `selection_metric` / `selection_direction` set,
+  `selected_score = None`, `reason` = "no completed training run had a
+  usable '<metric>' selection metric".
+- `training.status == completed` with **no** runs → `status = completed`,
+  `selected_* = None`, `reason` = "no model training runs are available
+  for selection".
+
+### Objective
+
+`objective_used = objective is not None and objective.strip() != ""`. A
+supplied objective is preserved verbatim and adds one note — it **never**
+changes the fixed metric, direction, ranking, or winner (`"minimize
+prediction error"`, `"best classification model"`, `"fastest model"` all
+have no effect). No NLP / fuzzy / embeddings / LLM.
+
+### Notes / transparency
+
+Every completed result states that selection is based only on the
+Phase-7.4 results and that no model was retrained, no prediction
+generated, no metric recomputed, no hyperparameter tuned, no
+preprocessing / feature engineering executed, the DataFrame was not
+modified, and no final estimator artifact was persisted. For forecasting
+it additionally states that Phase 5 supplied the task, that Phase 7.5 does
+not infer forecasting from datetime columns, that no lag/rolling features
+were generated, and that selection is among the existing Phase-7.4
+baseline runs.
+
+### Determinism & safety
+
+No `df` and no DataFrame access; fully deterministic from the Pydantic
+inputs; byte-identical repeated calls; no timestamps / UUIDs / run ids /
+randomness / filesystem / network. `problem` / `feature_engineering` /
+`readiness` / `split` / `candidates` / `training` are never mutated (JSON
+snapshots verified). No file, plot, artifact, cache, or report is
+created; the output holds only JSON primitives — no estimator object.
+
+### Integration
+
+`understand_modeling()` is unchanged. After
+`spec.model_copy(update={"selection": select_model(...)})`, `readiness` /
+`split` / `candidates` / `training` are unchanged, `selection` is
+populated, and the overall `ModelingSpec.status` stays as the existing
+Phase-7 contract leaves it (`not_yet_inferred` unless a caller sets it).
+
+## Boundaries (Phase 7.1 – 7.5 — Phase 7 complete)
 
 - 7.1 depends on **nothing** beyond the stdlib and Pydantic and does not
   import or inspect a DataFrame. 7.2 reads the DataFrame **shape only**
@@ -538,23 +673,22 @@ activate Phase 7.5.
   preprocessing, perform the physical train/validation/test split, and
   compute evaluation metrics — but it reads only the eligible feature and
   target columns, on copies, and mutates nothing.
-- **No model selection, ranking, tuning, or artifacts, in any of 7.1–7.4.**
-  No `best model` / `winner` / `champion` / `recommended final model`; no
-  hyperparameter search (grid / random / Bayesian / Optuna); no
-  cross-validation; no model-based feature selection, feature importance,
-  or SHAP; no separate leakage-detection capability; no statistical
-  significance testing; no target correlation / mutual information / ANOVA
-  / chi-square; no target encoding / SMOTE / oversampling / undersampling
-  / PCA; no feature generation; no `.pkl` / `.joblib` / `.onnx` / model
-  directory / cache / report / plot persisted; no deployment; no XGBoost /
-  LightGBM / CatBoost / TensorFlow / PyTorch / MLflow / experiment
-  tracking / LLM / agent / external API / backend / frontend / dashboard.
-  **Phase 7.4 trains baseline estimators and reports per-candidate metrics
-  only. It does not choose which model is best.**
+- 7.5 **compares** the metrics Phase 7.4 already recorded and recommends
+  one family / estimator — it retrains nothing, recomputes no metric,
+  reads no DataFrame, and mutates no upstream object.
+- **Across all of 7.1–7.5:** no hyperparameter search (grid / random /
+  Bayesian / Optuna); no cross-validation; no model-based feature
+  selection, feature importance, or SHAP; no separate leakage-detection
+  capability; no statistical significance testing; no target correlation /
+  mutual information / ANOVA / chi-square; no target encoding / SMOTE /
+  oversampling / undersampling / PCA; no feature generation; no `.pkl` /
+  `.joblib` / `.onnx` / model directory / cache / report / plot persisted;
+  no deployment; no XGBoost / LightGBM / CatBoost / TensorFlow / PyTorch /
+  MLflow / experiment tracking / LLM / agent / external API / backend /
+  frontend / dashboard. Only scikit-learn's dependency-light baselines are
+  fitted (in 7.4).
 
-## What Phase 7.5 will eventually provide (not yet implemented)
+## Phase 8 (not started)
 
-- **7.5 — model selection:** a deterministic comparison and choice from
-  the Phase-7.4 evaluation results.
-
-This capability does not exist today.
+Deep learning (`dl_engine`) is a later phase. Nothing in Phase 7
+implements or anticipates it.

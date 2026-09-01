@@ -188,6 +188,20 @@ def test_bare_nested_model_defaults():
 def test_nothing_fabricated():
     spec = _spec(objective="predict churn")
     assert spec.candidates.candidates == []
+    # every nested section must be all-not_yet_inferred with only null / empty payload
+    for section in (
+        spec.readiness,
+        spec.split,
+        spec.candidates,
+        spec.training,
+        spec.evaluation,
+        spec.selection,
+    ):
+        data = json.loads(section.model_dump_json())
+        assert data["status"] == "not_yet_inferred"
+        for value in data.values():
+            assert value in (None, [], {}, False, "not_yet_inferred")
+    # and no fabricated model / score / metric content anywhere in the spec
     payload = json.dumps(json.loads(spec.model_dump_json())).lower()
     for token in (
         "logisticregression",
@@ -197,12 +211,8 @@ def test_nothing_fabricated():
         "rmse",
         "roc_auc",
         "hyperparam",
-        "n_estimators",
         "cv_score",
         "shap",
-        "prediction",
-        "importance",
-        "estimator",
         "run_id",
         "uuid",
         "timestamp",

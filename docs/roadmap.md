@@ -12,8 +12,8 @@ future phases are not anticipated in code.
 | 4 | EDA & Statistical Analysis | **Done** — deterministic analysis-only `data_engine.eda`: EDA/univariate/bivariate, parametric tests, effect sizes, non-parametric tests, distribution analysis, EDA↔quality cross-reference, visualization foundation (chart-spec selection + in-memory Matplotlib **and Plotly** rendering + explicit chart export), target-aware visualization recommendation, statistical-strength visualization ranking, k-NN / Kraskov mutual-information estimator, datetime mutual information, paired / one-sided non-parametric tests (Wilcoxon signed-rank / sign / Friedman), multiple-testing correction (Bonferroni / Holm / Benjamini-Hochberg). No dashboard/API |
 | 5 | Automated Problem Understanding | **Done** — `data_engine.problem_understanding`: the `ProblemSpec` contract + `understand_problem` foundation (5.1), **target identification** `identify_target` (5.2), **task-type inference** `infer_task_type` (5.3), **candidate metrics** `recommend_metrics` (5.4), **feasibility assessment** `assess_feasibility` (5.5). All deterministic, standalone, analysis-only; no ML/LLM |
 | 6 | Feature Engineering | **Done** — `data_engine.feature_engineering`, all deterministic, standalone, analysis-only: `FeatureEngineeringSpec` contract + foundation (6.1); **structural feature inventory** `inventory_features` (6.2); **transformation recommendations** `recommend_transformations` (6.3); **feature-selection recommendations** `recommend_feature_selection` (6.4); **preprocessing requirements** `recommend_preprocessing` (6.5); **feature-engineering assessment** `assess_feature_engineering` — structural consistency & readiness check over 6.2–6.5, `feasible` True/False from blocking structural inconsistencies (6.6). Nothing is executed; no ML/LLM |
-| 7 | Model Development / Modeling | **In progress** — `data_engine.modeling`: the `ModelingSpec` contract + `understand_modeling` foundation (7.1 — done); **model readiness** `assess_model_readiness` + **data-split planning** `recommend_data_split` (7.2 — done); **model candidate generation** `generate_model_candidates` (7.3 — done); **training & evaluation** `train_and_evaluate_models` (7.4 — done) — the first component that fits estimators: executes the plan's physical train/val/test split (fixed seed), runs the Phase-6.5 preprocessing fitted only on the training partition, fits one conservative scikit-learn baseline per Phase-7.3 family, reports per-candidate metrics. **Selects, ranks, and recommends nothing; tunes no hyperparameters; persists no artifact.** scikit-learn added as a dependency (first modeling phase). 7.5 (model selection) not started |
-| 8 | Deep Learning | Not started |
+| 7 | Model Development / Modeling | **Done** — `data_engine.modeling`, all deterministic and standalone: `ModelingSpec` contract + foundation (7.1); **model readiness** `assess_model_readiness` + **data-split planning** `recommend_data_split` (7.2); **model candidate generation** `generate_model_candidates` (7.3); **training & evaluation** `train_and_evaluate_models` (7.4) — fits one conservative scikit-learn baseline per candidate family and reports per-candidate metrics; **model selection & recommendation** `select_model` (7.5) — deterministically ranks the successful 7.4 runs by a fixed per-task metric and recommends one family/estimator. Nothing beyond the 7.4 baselines is trained; no hyperparameter tuning, CV, feature importance, SHAP, or artifact persistence anywhere in Phase 7 |
+| 8 | Deep Learning | **Not started** |
 | 9 | Experiment Tracking | Not started |
 | 10 | Explainable AI | Not started |
 | 11 | AI Scientist / Agent | Not started |
@@ -593,7 +593,7 @@ future phases are not anticipated in code.
   recommendations is a later phase; `understand_feature_engineering()`
   still composes nothing automatically.
 
-### Phase 7 — Model Development / Modeling — **In progress**
+### Phase 7 — Model Development / Modeling — **Done**
 - **Objective:** deterministically turn an understood problem + engineered
   features into a modeling plan and, in later increments, trained &
   evaluated models.
@@ -742,12 +742,49 @@ future phases are not anticipated in code.
   fits estimators, as the roadmap's dependency comment always anticipated.
   `understand_modeling` and the overall `ModelingSpec.status` unchanged.
 
+  **7.5 — model selection & recommendation.** `select_model(problem:
+  ProblemSpec, feature_engineering: FeatureEngineeringSpec, readiness:
+  ModelReadiness, split: DataSplitPlan, candidates: ModelCandidates,
+  training: TrainingOutcome, *, objective=None) -> ModelSelection` — a
+  **standalone**, deterministic function (caller merges into
+  `ModelingSpec.selection`; **no `df` parameter**). It ranks the
+  successful Phase-7.4 runs and recommends one family / estimator — it
+  **retrains nothing, recomputes no metric, and mutates no upstream
+  object**; the only performance evidence is
+  `TrainingOutcome.runs[*].metrics`. Fixed upstream precedence for
+  `status = unavailable`: task → readiness → `ready is False` → split →
+  candidates → training → Phase-6.6 assessment. Fixed selection metric per
+  task: `regression` / `time_series_forecasting` → `rmse` (minimize),
+  `binary` / `multiclass` classification → macro `f1` (maximize),
+  `clustering` → `silhouette_score` (maximize) — never substituted, never
+  a composite. A run is eligible iff `status == completed`, its family is
+  a Phase-7.3 candidate, and it carries a finite selection-metric value;
+  ineligible runs (failed / unavailable / missing metric / unknown
+  family) stay in `ranking` with `rank = None` and a deterministic
+  reason, and are never rewritten into candidates. Eligible runs are
+  ranked by score (task direction) → fixed Phase-7.3 family order →
+  estimator name; the winner is `ranking[0]`. Ties are broken by that same
+  ordering with an explicit note (no claim that either model performs
+  better). Runs exist but none eligible → `status = completed`,
+  `selected_* = None`, explicit reason; `training` completed with no runs
+  → `status = completed`, `selected_* = None`, "no model training runs are
+  available for selection". Objective is recorded in a note only and never
+  changes the metric / direction / winner. Byte-identical repeated calls;
+  no timestamp / UUID / run id / randomness / filesystem / network; the
+  six upstream models never mutated; output holds only JSON primitives —
+  no estimator object. `ModelSelection` gains additive defaulted
+  `selected_family` / `selected_estimator` / `selection_metric` /
+  `selection_direction` / `selected_score` / `ranking:
+  list[ModelSelectionRank]` / `objective_used` (Phase-7.1 JSON validates);
+  new `ModelSelectionRank` model. No new dependency.
+
   **Completed:** 7.1 foundation / `ModelingSpec`, 7.2 model readiness &
   data-split planning, 7.3 model candidate generation, 7.4 training &
-  evaluation. **Not started:** 7.5 model selection. Phase 7 is **not
-  complete**.
+  evaluation, 7.5 model selection & recommendation. **Phase 7 is
+  complete.** Executing / deploying the recommended model is a later
+  phase; `understand_modeling()` still composes nothing automatically.
 
-### Phase 8 — Deep Learning
+### Phase 8 — Deep Learning — **Not started**
 - **Objective:** add DL where justified.
 - **Components:** `dl_engine` PyTorch models, training loops, evaluation.
 - **Output:** trained DL models + evaluation reports.

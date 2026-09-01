@@ -84,6 +84,7 @@ ENGINE_PACKAGES = [
     "data_engine.modeling.split_planning",
     "data_engine.modeling.candidate_generation",
     "data_engine.modeling.training",
+    "data_engine.modeling.selection",
     "database",
     "dl_engine",
     "experimentation",
