@@ -7,8 +7,9 @@ human data scientist would — and explains every step.
 > ⚠️ **Under active development.** Phases 1–4 of the data engine are
 > implemented (ingestion, profiling, quality, cleaning, validation &
 > lineage, and a complete deterministic EDA / statistical-analysis
-> layer); Phase 5 (Automated Problem Understanding) has begun with the
-> `ProblemSpec` contract. ML, DL, LLM, API, and UI functionality are
+> layer); Phase 5 (Automated Problem Understanding) is in progress — the
+> `ProblemSpec` contract, target identification, task-type inference, and
+> candidate-metric recommendation (5.1–5.4). ML, DL, LLM, API, and UI functionality are
 > **not started**. See [docs/roadmap.md](docs/roadmap.md).
 
 ---
@@ -116,7 +117,7 @@ continuous Testing/Benchmarking/Docs. See [docs/roadmap.md](docs/roadmap.md).
 | **Phase 2 — Cleaning executor** (`data_engine.cleaning`) | ✅ Implemented (deterministic; runs only explicitly approved operations on a derived copy) |
 | **Phase 3 — Validation & Data Lineage** (`data_engine.validation`) | ✅ In progress — `DatasetVersion`, version store, lineage validation, lineage graph, opt-in auto-registration, cross-version diff, version-integrity / family-consistency / lineage-binding checks (filesystem-only, no database; detects & reports, never repairs) |
 | **Phase 4 — EDA & Statistical Analysis** (`data_engine.eda`) | ✅ Done — deterministic analysis-only EDA foundation + parametric tests (Welch t-test, one-way ANOVA, chi-square) + effect sizes (Cramér's V, correlation ratio, mutual information) + non-parametric tests (Spearman, Kendall, Mann-Whitney U, Kruskal-Wallis H) + richer distribution analysis (variance, skew, excess kurtosis, full quantiles, structured histogram) + EDA↔quality cross-reference + visualization foundation (deterministic chart-spec selection + in-memory Matplotlib **and** Plotly rendering: histogram / bar / scatter / box, + explicit chart export) + target-aware visualization recommendation (structural usefulness heuristic) + statistical-strength visualization ranking (real effect sizes / p-values) + k-NN / Kraskov continuous mutual information (numeric pairs **and** datetime columns) + paired / one-sided non-parametric tests (Wilcoxon signed-rank, sign, Friedman) + multiple-testing correction (Bonferroni / Holm / Benjamini-Hochberg); no dashboard/API |
-| **Phase 5 — Automated Problem Understanding** (`data_engine.problem_understanding`) | 🚧 In progress — the deterministic `ProblemSpec` contract + `understand_problem` foundation (5.1); **target identification** `identify_target()` — ranks plausible target columns from structural evidence + transparent objective name-matching (5.2); **task-type inference** `infer_task_type()` — rule-based `regression` / `*_classification` / `clustering` / `time_series_forecasting` from the target dtype + a small fixed objective vocabulary (5.3). No ML/LLM. Candidate metrics & feasibility not started |
+| **Phase 5 — Automated Problem Understanding** (`data_engine.problem_understanding`) | 🚧 In progress — the deterministic `ProblemSpec` contract + `understand_problem` foundation (5.1); **target identification** `identify_target()` — ranks plausible target columns from structural evidence + transparent objective name-matching (5.2); **task-type inference** `infer_task_type()` — rule-based `regression` / `*_classification` / `clustering` / `time_series_forecasting` from the target dtype + a small fixed objective vocabulary (5.3); **candidate metrics** `recommend_metrics()` — a fixed per-task metric vocabulary + fixed-vocabulary objective refinement, `mape` gated on a non-zero non-negative target (5.4). No ML/LLM. Feasibility assessment not started |
 | AI-driven cleaning approval / reasoning | ⛔ Not started (Phase 11+) |
 | ML experimentation | ⛔ Not started |
 | Everything else | ⛔ Not started |

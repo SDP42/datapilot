@@ -185,24 +185,35 @@ def _objective_signals(objective: str) -> frozenset[str]:
 
 
 def _unavailable(
-    reason: str, *, objective_used: bool, notes: list[str] | None = None
+    reason: str,
+    *,
+    objective_used: bool,
+    target_column: str | None = None,
+    notes: list[str] | None = None,
 ) -> TaskTypeInference:
     return TaskTypeInference(
         status=ProblemUnderstandingStatus.UNAVAILABLE,
         reason=reason,
         task_type=None,
+        target_column=target_column,
         objective_used=objective_used,
         notes=notes or [],
     )
 
 
 def _completed(
-    task_type: TaskType, primary: str, *, objective_used: bool, extra: list[str] | None = None
+    task_type: TaskType,
+    primary: str,
+    *,
+    objective_used: bool,
+    target_column: str | None = None,
+    extra: list[str] | None = None,
 ) -> TaskTypeInference:
     return TaskTypeInference(
         status=ProblemUnderstandingStatus.COMPLETED,
         reason=None,
         task_type=task_type,
+        target_column=target_column,
         objective_used=objective_used,
         notes=[primary, *(extra or [])],
     )
@@ -287,6 +298,8 @@ def infer_task_type(
             f"infer_task_type expects a TargetIdentification, got {type(target).__name__}"
         )
 
+    resolved_target_column = target.target_column
+
     objective_used = objective is not None and objective.strip() != ""
     signals = (
         _objective_signals(objective) if objective_used and objective is not None else frozenset()
@@ -304,6 +317,7 @@ def infer_task_type(
         return _unavailable(
             f"target identification was unavailable ({target.reason or 'no reason given'})",
             objective_used=objective_used,
+            target_column=resolved_target_column,
             notes=[signal_note],
         )
     if target.target_column is None:
@@ -313,6 +327,7 @@ def infer_task_type(
                 "no target column was identified and the objective indicates a clustering "
                 "(inherently targetless) task",
                 objective_used=objective_used,
+                target_column=resolved_target_column,
                 extra=[signal_note],
             )
         notes = [signal_note]
@@ -324,6 +339,7 @@ def infer_task_type(
         return _unavailable(
             "cannot infer task type because no single target column was identified",
             objective_used=objective_used,
+            target_column=resolved_target_column,
             notes=notes,
         )
 
@@ -334,6 +350,7 @@ def infer_task_type(
         return _unavailable(
             f"the identified target column '{column}' is not in the DataFrame",
             objective_used=objective_used,
+            target_column=resolved_target_column,
             notes=[signal_note],
         )
     series = df.iloc[:, column_names.index(column)]
@@ -342,6 +359,7 @@ def infer_task_type(
         return _unavailable(
             f"the target column '{column}' is entirely missing",
             objective_used=objective_used,
+            target_column=resolved_target_column,
             notes=[signal_note],
         )
     n_classes = int(non_null.nunique())
@@ -349,6 +367,7 @@ def infer_task_type(
         return _unavailable(
             f"the target column '{column}' is constant",
             objective_used=objective_used,
+            target_column=resolved_target_column,
             notes=[signal_note],
         )
 
@@ -363,18 +382,21 @@ def infer_task_type(
                 f"datetime target '{column}' with an explicit forecasting objective "
                 "-> time_series_forecasting",
                 objective_used=objective_used,
+                target_column=resolved_target_column,
                 extra=[signal_note],
             )
         return _unavailable(
             f"the target column '{column}' is a datetime; a datetime target alone is not "
             "sufficient evidence for time_series_forecasting",
             objective_used=objective_used,
+            target_column=resolved_target_column,
             notes=[signal_note],
         )
     if column_type is ColumnType.UNKNOWN:
         return _unavailable(
             f"the target column '{column}' has an unrecognised type",
             objective_used=objective_used,
+            target_column=resolved_target_column,
             notes=[signal_note],
         )
 
@@ -427,4 +449,10 @@ def infer_task_type(
                 "treating as regression"
             )
 
-    return _completed(task, primary, objective_used=objective_used, extra=extra)
+    return _completed(
+        task,
+        primary,
+        objective_used=objective_used,
+        target_column=resolved_target_column,
+        extra=extra,
+    )

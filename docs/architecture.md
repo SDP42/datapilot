@@ -171,7 +171,8 @@ record, or lineage is modified; no new version is registered.
 **Phase 5 (in progress):** `data_engine.problem_understanding` — a
 deterministic, **analysis-only** layer that will turn a dataset + an
 **explicit** objective into a structured `ProblemSpec` (task type,
-target, candidate metrics, feasibility). **5.1 — contract + foundation:**
+target, candidate metrics, feasibility); 5.1–5.4 are implemented, 5.5
+(feasibility) is not. **5.1 — contract + foundation:**
 `understand_problem(request: ProblemUnderstandingRequest) -> ProblemSpec`
 validates dataset identity + an explicit objective (never inferred from
 data) and returns a spec whose overall status and all four sections are
@@ -201,6 +202,19 @@ objective → `clustering`; structural evidence is primary; forecasting is
 a refinement of `regression` requiring both a forecasting objective and a
 datetime column. `multilabel_classification` / `other` are never emitted;
 insufficient / contradictory evidence → `unavailable` + a reason.
+**5.4 — candidate metrics:** `recommend_metrics(df, task_type, *,
+objective=None) -> CandidateMetrics`, also **standalone** (caller merges
+into `ProblemSpec.metrics`). Deterministic and rule-based — it reads the
+task type and target column from the 5.3 result and never re-infers
+either, trains no model, and computes no metric. A **fixed metric
+vocabulary per task** (e.g. regression `rmse,mae,r2`, binary
+`f1,roc_auc,precision,recall,accuracy`), with `mape` added for
+regression / forecasting only when the target has no zero and no negative
+value. A small **fixed objective phrase vocabulary** (no NLP) refines the
+primary metric; unsupported task or non-completed inference →
+`unavailable` with `primary_metric = None` and no fabricated metric.
+`TaskTypeInference` gained a minimal additive `target_column` field
+(echoed from 5.2) so the `mape` rule needs no target re-selection.
 Separate from ingestion / profiling / quality / cleaning / validation /
 lineage / EDA — the Phase-5 functions reuse only the pure
 `infer_column_type` helper and the shared `ColumnType` enum, modify

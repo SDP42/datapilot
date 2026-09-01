@@ -140,6 +140,14 @@ class TaskTypeInference(BaseModel):
     task_type: TaskType | None = Field(
         default=None, description="The inferred task type; None until inferred / when unavailable."
     )
+    target_column: str | None = Field(
+        default=None,
+        description=(
+            "The target column this inference was made for, echoed from the "
+            "TargetIdentification. None for a targetless task (clustering) or when no target "
+            "was supplied. Additive and defaulted — legacy JSON validates."
+        ),
+    )
     objective_used: bool = Field(
         default=False, description="True iff a non-blank objective string was supplied."
     )
@@ -150,17 +158,33 @@ class TaskTypeInference(BaseModel):
 
 
 class CandidateMetrics(BaseModel):
-    """Evaluation metrics that would make sense for the task. Populated later."""
+    """Evaluation metrics that would make sense for the task.
+
+    Populated by :func:`data_engine.problem_understanding.recommend_metrics`
+    (Phase 5.4). ``objective_used`` is additive and defaulted — a
+    ``CandidateMetrics`` serialised by Phase 5.1–5.3 still validates.
+    """
 
     status: ProblemUnderstandingStatus = ProblemUnderstandingStatus.NOT_YET_INFERRED
-    reason: str | None = None
+    reason: str | None = Field(
+        default=None,
+        description="Why metrics are unavailable; None when a recommendation was produced.",
+    )
     primary_metric: str | None = Field(
-        default=None, description="Recommended primary metric; None until inferred."
+        default=None,
+        description="Recommended primary metric — always one of `metrics`; None if unavailable.",
     )
     metrics: list[str] = Field(
-        default_factory=list, description="All candidate metric names; empty until inferred."
+        default_factory=list,
+        description="Candidate metric names, best-first; empty if unavailable.",
     )
-    notes: list[str] = Field(default_factory=list)
+    objective_used: bool = Field(
+        default=False, description="True iff a non-blank objective string was supplied."
+    )
+    notes: list[str] = Field(
+        default_factory=list,
+        description="Selection evidence, in a fixed order (first = primary reason).",
+    )
 
 
 class FeasibilityAssessment(BaseModel):

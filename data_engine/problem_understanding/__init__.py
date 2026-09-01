@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from datapilot.contracts import ColumnType
 
+from .metrics_recommendation import recommend_metrics
 from .models import (
     PROBLEM_UNDERSTANDING_ENGINE_VERSION,
     CandidateMetrics,
@@ -65,5 +66,6 @@ __all__ = [
     "TaskTypeInference",
     "identify_target",
     "infer_task_type",
+    "recommend_metrics",
     "understand_problem",
 ]

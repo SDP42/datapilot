@@ -7,11 +7,12 @@ target is, which metrics make sense, and whether the problem is feasible.
 
 > **Status.** Implemented: Phase 5.1 (the `ProblemSpec` contract +
 > `understand_problem` foundation), 5.2 (**target identification** —
-> `identify_target`), and 5.3 (**task-type inference** —
-> `infer_task_type`). Each is a **standalone** deterministic function
-> whose result the caller merges into `ProblemSpec`; `understand_problem`
-> itself still infers nothing. Candidate metrics (5.4) and feasibility
-> assessment (5.5) are still to come — Phase 5 is **In progress**.
+> `identify_target`), 5.3 (**task-type inference** — `infer_task_type`),
+> and 5.4 (**candidate metrics** — `recommend_metrics`). Each is a
+> **standalone** deterministic function whose result the caller merges
+> into `ProblemSpec`; `understand_problem` itself still infers nothing.
+> Feasibility assessment (5.5) is still to come — Phase 5 is
+> **In progress**.
 
 ## Entrypoint
 
@@ -329,6 +330,88 @@ membership); repeated calls are byte-identical. `df` and `target` are
 never mutated; no file, figure, dataset / version / lineage access, or
 external call.
 
+## Candidate metrics (5.4) — `recommend_metrics`
+
+```python
+from data_engine.problem_understanding import infer_task_type, recommend_metrics
+
+metrics = recommend_metrics(df, task, objective="minimize absolute error")
+merged = spec.model_copy(update={"metrics": metrics})
+```
+
+`recommend_metrics(df: pd.DataFrame, task_type: TaskTypeInference, *, objective: str | None = None) -> CandidateMetrics`
+
+Deterministic and **rule-based**. It reads the task type and target column
+straight from the Phase-5.3 `TaskTypeInference` — it never re-infers the
+target or the task, trains no model, predicts nothing, runs no
+cross-validation or statistical test.
+
+### Fixed metric vocabulary (best-first default priority)
+
+| Task | Metrics | Default primary priority |
+| --- | --- | --- |
+| `regression` | `rmse, mae, r2` (+ `mape`) | `rmse > mae > r2` |
+| `binary_classification` | `f1, roc_auc, precision, recall, accuracy` | `f1 > roc_auc > precision > recall > accuracy` |
+| `multiclass_classification` | `f1_macro, accuracy, precision_macro, recall_macro` | `f1_macro > accuracy > precision_macro > recall_macro` |
+| `clustering` | `silhouette_score, calinski_harabasz_score, davies_bouldin_score` | `silhouette_score > calinski_harabasz_score > davies_bouldin_score` |
+| `time_series_forecasting` | `mae, rmse` (+ `mape`) | `mae > rmse` |
+
+`mape` is appended for regression / forecasting **only** when the target
+column has finite numeric values with no zero and no negative value.
+Metric names are never generated dynamically and cross-task metrics are
+never mixed.
+
+### Objective-aware refinement (fixed vocabulary, no NLP)
+
+The verbatim objective is matched against a small fixed phrase / token
+vocabulary: e.g. *minimize absolute error* → `mae`, *penalize large
+errors* / *squared error* → `rmse`, *percentage error* → `mape` (only if
+compatible), *explained variance* → `r2`, *avoid false positives* →
+`precision`, *avoid false negatives* → `recall`, *balance precision and
+recall* → `f1`. *imbalanced* / *rare positive* prioritises `f1` /
+`f1_macro` over `accuracy`. *ranking* adds a note that ranking-specific
+evaluation is not yet supported — no ranking metric is invented. An
+objective metric that is incompatible with the task is ignored with a
+note.
+
+### Primary-metric precedence
+
+1. An explicit, task-compatible objective preference.
+2. Otherwise the task's default priority (table above).
+3. `mape` compatibility constraint always applies.
+4. Ties broken by alphabetical order. `primary_metric` is **always** one
+   of `metrics`.
+
+### Unavailable
+
+`TaskTypeInference.status != completed`, a completed inference with no
+`task_type`, or an unsupported task (`multilabel_classification`,
+`other`) → `status = unavailable`, `primary_metric = None`,
+`metrics = []`, explicit `reason`. A metric is never fabricated.
+
+### `CandidateMetrics` fields
+
+`status`, `reason` (set only when unavailable), `primary_metric`,
+`metrics` (best-first), `objective_used: bool` (additive & defaulted —
+legacy JSON validates), `notes` (fixed order — `notes[0]` is the primary
+explanation).
+
+### Validation & determinism
+
+`df` not a DataFrame, or `task_type` not a `TaskTypeInference` →
+`TypeError`. All evidence (target dtype / sign / zero-membership) is
+row- and column-order-invariant; repeated calls are byte-identical.
+`df` and `task_type` are never mutated; no file, figure, dataset access,
+or external / LLM call.
+
+### `TaskTypeInference.target_column` (additive)
+
+To apply the `mape` rule without re-selecting a target, `TaskTypeInference`
+gained a minimal additive `target_column: str | None = None` field,
+echoed from the `TargetIdentification` by `infer_task_type`. The
+task-decision logic is unchanged; legacy JSON (no `target_column`)
+validates (default `None`).
+
 ## No timestamp
 
 Unlike `DatasetProfile` / `QualityReport` / `EDAReport`, `ProblemSpec`
@@ -342,9 +425,9 @@ value is recorded.
   lineage / EDA internals. `identify_target` reuses one pure profiling
   helper (`infer_column_type`) and the shared `datapilot.contracts.ColumnType`
   enum; it modifies nothing and adds no `EDAReport` field.
-- **Target identification (5.2)** and **task-type inference (5.3)** only.
-  No metric recommendation / primary-metric selection, no feasibility
-  scoring, no target-leakage assessment, no train/test split, no feature
-  engineering / selection / preprocessing, no model selection or
-  training, no clustering / forecasting / classification *models* — those
-  are later Phase-5 increments or later phases.
+- **Target identification (5.2)**, **task-type inference (5.3)** and
+  **candidate metrics (5.4)** only. No feasibility scoring, no
+  target-leakage assessment, no train/test split, no feature engineering
+  / selection / preprocessing, no model selection or training, no
+  clustering / forecasting / classification *models*, no metric
+  *computation* — those are later Phase-5 increments or later phases.

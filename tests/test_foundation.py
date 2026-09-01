@@ -67,6 +67,7 @@ ENGINE_PACKAGES = [
     "data_engine.problem_understanding.understanding",
     "data_engine.problem_understanding.target_identification",
     "data_engine.problem_understanding.task_type_inference",
+    "data_engine.problem_understanding.metrics_recommendation",
     "data_engine.feature_engineering",
     "database",
     "dl_engine",

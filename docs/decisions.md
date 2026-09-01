@@ -4,6 +4,54 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0063 — Phase 5.4: `recommend_metrics` is standalone, rule-based, with a fixed per-task metric vocabulary
+- **Decision:** `data_engine/problem_understanding/metrics_recommendation.py`
+  adds `recommend_metrics(df, task_type: TaskTypeInference, *, objective:
+  str | None = None) -> CandidateMetrics`, a **standalone** function
+  (`understand_problem` unchanged; caller merges into
+  `ProblemSpec.metrics` via `model_copy`, matching 5.2 / 5.3). It
+  **consumes** the 5.3 `TaskTypeInference` and never re-infers the target
+  or task type, trains no model, predicts nothing, runs no CV / stat
+  test. A **fixed metric vocabulary per task** (regression `rmse,mae,r2`;
+  binary `f1,roc_auc,precision,recall,accuracy`; multiclass
+  `f1_macro,accuracy,precision_macro,recall_macro`; clustering
+  `silhouette_score,calinski_harabasz_score,davies_bouldin_score`;
+  forecasting `mae,rmse`) — metric names are never generated dynamically
+  and cross-task metrics never mix. `mape` is appended for regression /
+  forecasting **only** when the target column has finite numeric values
+  with no zero and no negative.
+- **Reason:** Prompt "Phase 5.4 — Candidate Metrics Recommendation":
+  "Deterministic, rule-based"; "Do not fabricate a metric merely because
+  the function must return something"; "No NLP library, stemmer,
+  embeddings, fuzzy matching, or LLM"; "never infer or change the target;
+  never re-infer the task type; never perform model training, prediction,
+  cross-validation, or statistical testing".
+- **Rules (documented):** objective refinement uses a small **fixed
+  phrase / bare-token vocabulary** → e.g. *absolute error* → `mae`,
+  *squared error* / *penalize large errors* → `rmse`, *percentage error*
+  → `mape` (only if compatible), *explained variance* → `r2`, *avoid
+  false positives / negatives* → `precision` / `recall`, *balance
+  precision and recall* → `f1`, *imbalanced* / *rare positive* →
+  prioritise `f1` / `f1_macro` over `accuracy`, *ranking* → a note only
+  (no ranking metric invented). Primary-metric precedence: (1) a
+  task-compatible objective preference; (2) the task default priority;
+  (3) `mape` compatibility; (4) alphabetical tie-break. `primary_metric`
+  is **always** one of `metrics`. Unsupported task
+  (`multilabel_classification`, `other`) or a non-`completed`
+  `TaskTypeInference` → `status = unavailable`, `primary_metric = None`,
+  `metrics = []`, explicit `reason`.
+- **Contract change:** `TaskTypeInference` gains one minimal additive
+  defaulted field `target_column: str | None = None` (echoed from the
+  `TargetIdentification` by `infer_task_type`) so the `mape` rule can
+  inspect the target column without re-selecting one; the task-decision
+  logic is unchanged. `CandidateMetrics` gains an additive defaulted
+  `objective_used: bool`. Legacy 5.1–5.3 JSON still validates.
+- **Errors / safety:** non-DataFrame or non-`TaskTypeInference` →
+  `TypeError`. Deterministic (target dtype / sign / zero-membership are
+  row- and column-order-invariant; repeated calls byte-identical); `df`
+  and `task_type` never mutated; no file / figure / dataset / external /
+  LLM call. No new dependency.
+
 ## 0062 — Phase 5.3: `infer_task_type` is standalone, structural-first, and never re-selects a target
 - **Decision:** `data_engine/problem_understanding/task_type_inference.py`
   adds `infer_task_type(df, target: TargetIdentification, *, objective:
