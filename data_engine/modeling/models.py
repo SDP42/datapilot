@@ -154,20 +154,49 @@ class DataSplitPlan(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
-class ModelCandidates(BaseModel):
-    """Future candidate model families.
+class ModelCandidate(BaseModel):
+    """One structurally-suitable candidate model family.
 
-    Populated by a later Phase-7 increment. Phase 7.1 recommends and
-    trains nothing; ``candidates`` is empty.
+    Produced by :func:`data_engine.modeling.generate_model_candidates`
+    (Phase 7.3). ``reason`` / ``evidence`` describe **structural**
+    suitability for the inferred task — never a prediction that the family
+    will perform well.
+    """
+
+    family: ModelFamily
+    reason: str = Field(description="The structural reason this family is worth considering.")
+    evidence: list[str] = Field(
+        default_factory=list, description="Deterministic supporting evidence, fixed order."
+    )
+
+
+class ModelCandidates(BaseModel):
+    """Candidate model families for the inferred task.
+
+    Populated by :func:`data_engine.modeling.generate_model_candidates`
+    (Phase 7.3). ``candidates_detail`` / ``objective_used`` are additive
+    and defaulted, so a ``ModelCandidates`` serialised by Phase 7.1 still
+    validates.
     """
 
     status: ModelingStatus = ModelingStatus.NOT_YET_INFERRED
     reason: str | None = Field(
-        default=None, description="Why candidates are unavailable; None once produced."
+        default=None,
+        description="Why candidates are unavailable, or why a completed result is empty; "
+        "None otherwise.",
     )
     candidates: list[str] = Field(
         default_factory=list,
-        description="Candidate model-family identifiers, empty until inferred.",
+        description="Candidate model-family identifiers, deterministically ordered; empty "
+        "until inferred / when none apply.",
+    )
+    candidates_detail: list[ModelCandidate] = Field(
+        default_factory=list,
+        description="Structured per-family candidates, deterministically ordered; one entry "
+        "per name in `candidates`.",
+    )
+    objective_used: bool = Field(
+        default=False, description="True iff a non-blank objective string was supplied."
     )
     notes: list[str] = Field(default_factory=list)
 

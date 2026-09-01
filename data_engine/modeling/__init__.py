@@ -23,11 +23,17 @@ inspected.
 
 from __future__ import annotations
 
+from .candidate_generation import (
+    MODEL_CANDIDATE_NEURAL_MIN_FEATURES,
+    MODEL_CANDIDATE_NEURAL_MIN_ROWS,
+    generate_model_candidates,
+)
 from .models import (
     MODEL_ENGINE_VERSION,
     DataSplitPlan,
     DataSplitStrategy,
     EvaluationResults,
+    ModelCandidate,
     ModelCandidates,
     ModelFamily,
     ModelingRequest,
@@ -59,6 +65,8 @@ __all__ = [
     "DEFAULT_TEST_FRACTION",
     "DEFAULT_TRAIN_FRACTION",
     "DEFAULT_VALIDATION_FRACTION",
+    "MODEL_CANDIDATE_NEURAL_MIN_FEATURES",
+    "MODEL_CANDIDATE_NEURAL_MIN_ROWS",
     "MODEL_ENGINE_VERSION",
     "MODEL_READINESS_MIN_ROWS",
     "MODEL_READINESS_ROWS_WARNING",
@@ -70,6 +78,7 @@ __all__ = [
     "DataSplitPlan",
     "DataSplitStrategy",
     "EvaluationResults",
+    "ModelCandidate",
     "ModelCandidates",
     "ModelFamily",
     "ModelReadiness",
@@ -79,6 +88,7 @@ __all__ = [
     "ModelingStatus",
     "TrainingOutcome",
     "assess_model_readiness",
+    "generate_model_candidates",
     "recommend_data_split",
     "understand_modeling",
 ]

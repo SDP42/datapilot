@@ -361,7 +361,22 @@ lag features, or forecasting**, and a datetime column alone never implies
 forecasting. Row/column-order invariant; `df` and upstream models never
 mutated; no estimator / prediction / metric / file. `ModelReadiness` and
 `DataSplitPlan` gained additive defaulted structured fields; new
-`DataSplitStrategy` enum. [modeling.md](modeling.md).
+`DataSplitStrategy` enum. **7.3 — model candidate generation:**
+`generate_model_candidates(df, problem, feature_engineering, readiness,
+split, *, objective=None) -> ModelCandidates`, a **standalone**,
+deterministic, rule-based engine (caller merges into
+`ModelingSpec.candidates`). It recommends candidate `ModelFamily` values
+(the Phase-7.1 vocabulary only) from the Phase-5 task type, the Phase-7.2
+readiness / split, and the Phase-6 structural feature representation —
+**recommends families only**, trains / fits / evaluates / benchmarks /
+compares / tunes / selects nothing, names no estimator class or
+hyperparameter, and does not read DataFrame content. `status =
+unavailable` on a fixed upstream precedence (task type → readiness →
+`ready is False` → split → Phase-6.6 assessment). Each candidate carries
+a structural `reason` and fixed-vocabulary `evidence` — no performance
+claims. Fixed family ordering; no duplicates. `ModelCandidates` gained
+additive defaulted `candidates_detail` + `objective_used`; new
+`ModelCandidate` model. [modeling.md](modeling.md).
 
 **Future-phase components:** everything else —
 figure generation, executing the Phase-6 recommendations, the Phase-7

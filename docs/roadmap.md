@@ -12,7 +12,7 @@ future phases are not anticipated in code.
 | 4 | EDA & Statistical Analysis | **Done** — deterministic analysis-only `data_engine.eda`: EDA/univariate/bivariate, parametric tests, effect sizes, non-parametric tests, distribution analysis, EDA↔quality cross-reference, visualization foundation (chart-spec selection + in-memory Matplotlib **and Plotly** rendering + explicit chart export), target-aware visualization recommendation, statistical-strength visualization ranking, k-NN / Kraskov mutual-information estimator, datetime mutual information, paired / one-sided non-parametric tests (Wilcoxon signed-rank / sign / Friedman), multiple-testing correction (Bonferroni / Holm / Benjamini-Hochberg). No dashboard/API |
 | 5 | Automated Problem Understanding | **Done** — `data_engine.problem_understanding`: the `ProblemSpec` contract + `understand_problem` foundation (5.1), **target identification** `identify_target` (5.2), **task-type inference** `infer_task_type` (5.3), **candidate metrics** `recommend_metrics` (5.4), **feasibility assessment** `assess_feasibility` (5.5). All deterministic, standalone, analysis-only; no ML/LLM |
 | 6 | Feature Engineering | **Done** — `data_engine.feature_engineering`, all deterministic, standalone, analysis-only: `FeatureEngineeringSpec` contract + foundation (6.1); **structural feature inventory** `inventory_features` (6.2); **transformation recommendations** `recommend_transformations` (6.3); **feature-selection recommendations** `recommend_feature_selection` (6.4); **preprocessing requirements** `recommend_preprocessing` (6.5); **feature-engineering assessment** `assess_feature_engineering` — structural consistency & readiness check over 6.2–6.5, `feasible` True/False from blocking structural inconsistencies (6.6). Nothing is executed; no ML/LLM |
-| 7 | Model Development / Modeling | **In progress** — `data_engine.modeling`: the `ModelingSpec` contract + `understand_modeling` foundation (7.1 — done); **model readiness** `assess_model_readiness` + **data-split planning** `recommend_data_split` (7.2 — done) — a deterministic structural readiness check over the Phase-5 `ProblemSpec` + Phase-6 `FeatureEngineeringSpec` + DataFrame shape, and a transparent train/val/test split-strategy recommendation (stratified for classification, chronological for forecasting, never a physical split). **Trains nothing, evaluates nothing.** 7.3+ (candidates / training / evaluation / selection) not started |
+| 7 | Model Development / Modeling | **In progress** — `data_engine.modeling`: the `ModelingSpec` contract + `understand_modeling` foundation (7.1 — done); **model readiness** `assess_model_readiness` + **data-split planning** `recommend_data_split` (7.2 — done); **model candidate generation** `generate_model_candidates` (7.3 — done) — a deterministic rule-based recommendation of candidate `ModelFamily` values (linear / tree_based / ensemble / probabilistic / distance_based / neural) from the Phase-5 task type + Phase-7.2 readiness / split + Phase-6 structural feature representation. **Recommends families only — trains, fits, evaluates, benchmarks, compares, tunes, and selects nothing.** 7.4+ (training / evaluation / selection) not started |
 | 8 | Deep Learning | Not started |
 | 9 | Experiment Tracking | Not started |
 | 10 | Explainable AI | Not started |
@@ -655,9 +655,43 @@ future phases are not anticipated in code.
   `DataSplitPlan` gain additive defaulted structured fields (Phase-7.1
   JSON validates); new `DataSplitStrategy` enum. No new dependency.
 
+  **7.3 — model candidate generation.** `generate_model_candidates(df,
+  problem: ProblemSpec, feature_engineering: FeatureEngineeringSpec,
+  readiness: ModelReadiness, split: DataSplitPlan, *, objective=None) ->
+  ModelCandidates` — a **standalone**, deterministic, rule-based engine
+  (caller merges into `ModelingSpec.candidates`). Recommends candidate
+  `ModelFamily` values only (the Phase-7.1 vocabulary — no estimator
+  class, hyperparameter, or library named). Fixed upstream precedence for
+  `status = unavailable`: task type not completed / absent / unsupported
+  (`multilabel_classification`, `other`) → readiness not completed →
+  `readiness.ready is False` (reason names the first readiness blocking
+  issue; the readiness result is never repaired) → split not completed →
+  Phase-6.6 assessment not completed. Task rules: regression → `linear` /
+  `tree_based` / `ensemble` (+ `distance_based` when every eligible
+  feature is numeric/boolean); classification → those + `probabilistic`
+  (+ `distance_based` when numeric-only; + `neural` when `n_observations ≥
+  MODEL_CANDIDATE_NEURAL_MIN_ROWS = 1000` and `eligible_feature_count ≥
+  MODEL_CANDIDATE_NEURAL_MIN_FEATURES = 20`); forecasting → `linear` /
+  `tree_based` / `ensemble` with evidence/notes stating no lag / rolling
+  features, forecasting transforms, or forecasting models (the task came
+  from Phase 5, never a datetime column); clustering → `distance_based` /
+  `probabilistic`. Each candidate carries a **structural** `reason` and
+  fixed-vocabulary `evidence` — no performance claims. `candidates_detail`
+  and the string `candidates` are ordered by a fixed family ranking, no
+  duplicates, and consistent. A supported task with no justifiable family
+  → `status = completed` with empty lists and an explicit reason (no
+  family fabricated). Objective refines a note only (no NLP / LLM) and can
+  never add / remove a family. Does **not** read DataFrame content (only
+  its type) → trivially row/column-order invariant, byte-identical
+  repeated calls; `df` and all five upstream models never mutated; no
+  file / figure / estimator / prediction / metric / artifact.
+  `ModelCandidates` gains additive defaulted `candidates_detail:
+  list[ModelCandidate]` + `objective_used` (Phase-7.1 JSON validates);
+  new `ModelCandidate` model. No new dependency.
+
   **Completed:** 7.1 foundation / `ModelingSpec`, 7.2 model readiness &
-  data-split planning. **Not started:** 7.3 candidate model families, 7.4
-  training & evaluation, 7.5 model selection. Phase 7 is **not
+  data-split planning, 7.3 model candidate generation. **Not started:**
+  7.4 training & evaluation, 7.5 model selection. Phase 7 is **not
   complete**.
 
 ### Phase 8 — Deep Learning

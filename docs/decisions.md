@@ -4,6 +4,74 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0073 — Phase 7.3: `generate_model_candidates` is a standalone deterministic rule-based family recommender
+- **Decision:** `data_engine/modeling/candidate_generation.py` adds
+  `generate_model_candidates(df: pd.DataFrame, problem: ProblemSpec,
+  feature_engineering: FeatureEngineeringSpec, readiness: ModelReadiness,
+  split: DataSplitPlan, *, objective: str | None = None) ->
+  ModelCandidates`, a **standalone** function (`understand_modeling`
+  unchanged; caller merges into `ModelingSpec.candidates` via
+  `model_copy`). It recommends candidate `ModelFamily` values for the
+  inferred task from the real Phase-5 `ProblemSpec`, Phase-6
+  `FeatureEngineeringSpec`, and Phase-7.2 `ModelReadiness` / `DataSplitPlan`
+  contracts (no parallel abstraction invented).
+- **Reason:** Prompt "Phase 7.3 — Automated Model Candidate Generation":
+  "recommendation/generation only … must not train, fit, evaluate,
+  benchmark, compare, select, or execute any model"; "recommend model
+  families, not instantiate estimator objects"; "must not use target
+  correlation, mutual information, ANOVA, chi-square, feature importance,
+  SHAP, predictive performance, or model benchmarking"; "No performance
+  claims are allowed in Phase 7.3".
+- **Rules (documented):** fixed upstream precedence for `status =
+  unavailable` — task type not completed / `None` / unsupported
+  (`multilabel_classification`, `other`) → `readiness.status != completed`
+  → `readiness.ready is False` (reason names the first readiness blocking
+  issue; readiness is never repaired) → `split.status != completed` →
+  Phase-6.6 assessment not completed. Structural signals: eligible feature
+  column types from the Phase-6 inventory restricted to the Phase-6.4
+  `selected ∪ review` set (or the inventory candidates when 6.4 has not
+  run); `numeric_only_representation` = every eligible feature is
+  `NUMERIC` / `BOOLEAN`. Task rules: **regression** → `linear` /
+  `tree_based` / `ensemble` (+ `distance_based` when numeric-only);
+  **binary / multiclass classification** → those + `probabilistic` (+
+  `distance_based` when numeric-only; + `neural` when `n_observations ≥
+  MODEL_CANDIDATE_NEURAL_MIN_ROWS = 1000` **and** `eligible_feature_count
+  ≥ MODEL_CANDIDATE_NEURAL_MIN_FEATURES = 20`); **time_series_forecasting**
+  → `linear` / `tree_based` / `ensemble`, every candidate's evidence and
+  the notes stating no lag / rolling features, forecasting transforms, or
+  forecasting models (the task came from Phase 5, never a datetime
+  column); **clustering** → `distance_based` / `probabilistic`. A
+  supported task with no justifiable family → `status = completed` with
+  empty lists + explicit reason (no family fabricated). Each candidate
+  carries a **structural** `reason` and fixed-vocabulary `evidence`; no
+  "best model" / "highest accuracy" / "outperform" / "lowest RMSE"
+  language. Output ordered by a fixed family ranking (`linear <
+  tree_based < ensemble < probabilistic < distance_based < neural`), no
+  duplicates, and the string `candidates` list equals `[c.family.value
+  for c in candidates_detail]`.
+- **Objective:** `objective_used = objective is not None and
+  objective.strip() != ""`; preserved verbatim, recorded in one note
+  only; no NLP / embeddings / fuzzy matching / LLM. It can never add or
+  remove a family or introduce a forbidden recommendation (target
+  encoding, a named algorithm).
+- **Contract change:** `ModelCandidates` gains additive defaulted
+  `candidates_detail: list[ModelCandidate]` and `objective_used: bool`;
+  new `ModelCandidate` model (`family: ModelFamily`, `reason`,
+  `evidence: list[str]`). Existing `status` / `reason` / `candidates` /
+  `notes` unchanged; Phase-7.1 JSON still validates.
+- **Errors / safety:** non-DataFrame `df`, non-`ProblemSpec` `problem`,
+  non-`FeatureEngineeringSpec` `feature_engineering`, non-`ModelReadiness`
+  `readiness`, or non-`DataSplitPlan` `split` → `TypeError`. The function
+  never reads DataFrame **content** (only its type), so it is trivially
+  row- and column-order invariant; byte-identical repeated calls; no
+  timestamp / UUID / run id / randomness / filesystem / network.
+  `df` and all five upstream models are never mutated; no file / figure /
+  estimator / prediction / metric / model artifact. Reuses only
+  `ColumnType` and the Phase-5 / 6 / 7 contracts. No new dependency;
+  `pyproject.toml` unchanged.
+- **Phase state:** Phase 7 **In progress** — 7.1 **Done**, 7.2 **Done**,
+  7.3 **Done**, 7.4 / 7.5 **Not started**. Phase 7 is **not** complete.
+
 ## 0072 — Phase 7.2: `assess_model_readiness` + `recommend_data_split` are standalone deterministic planning functions
 - **Decision:** `data_engine/modeling/readiness.py` adds
   `assess_model_readiness(df: pd.DataFrame, problem: ProblemSpec,

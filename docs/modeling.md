@@ -17,8 +17,13 @@ the evaluation results, and the selected model.
 >   `FeatureEngineeringSpec` + DataFrame shape, and a transparent
 >   split-strategy **recommendation**. It trains nothing, fits no
 >   estimator, computes no metric, and performs no split.
-> - **7.3 model candidate generation / 7.4 training & evaluation / 7.5
->   model selection**: NOT STARTED.
+> - **7.3 — model candidate generation** (`generate_model_candidates`):
+>   DONE. Deterministic, rule-based recommendation of candidate
+>   `ModelFamily` values from the Phase-5 task type + Phase-7.2 readiness /
+>   split + Phase-6 structural feature information. It recommends families
+>   only — it trains, fits, evaluates, benchmarks, compares, tunes, and
+>   selects **nothing**.
+> - **7.4 training & evaluation / 7.5 model selection**: NOT STARTED.
 
 ## Entrypoint
 
@@ -96,8 +101,10 @@ Pydantic's protected `model_` namespace so it is a plain data field.
   `stratify: bool`, `preserve_temporal_order: bool`, `shuffle: bool`.
   Populated by Phase 7.2 (see below).
 - `ModelCandidates` — `status`, `reason`, `candidates: list[str]`,
-  `notes`. Future candidate model families. **7.1 recommends and trains
-  nothing;** `candidates` is empty.
+  `notes`, plus the additive defaulted
+  `candidates_detail: list[ModelCandidate]` and `objective_used: bool`.
+  Populated by Phase 7.3 (see below). `ModelCandidate` — `family`
+  (`ModelFamily`), `reason`, `evidence: list[str]`.
 - `TrainingOutcome` — `status`, `reason`, `notes`. Future model-training
   execution. **7.1 trains nothing.**
 - `EvaluationResults` — `status`, `reason`, `notes`. Future evaluation /
@@ -229,36 +236,133 @@ complete the modeling pipeline.
 `random_holdout`, `stratified_holdout`, `time_ordered_holdout`,
 `not_applicable`.
 
+## Model candidate generation (7.3)
+
+```python
+from data_engine.modeling import generate_model_candidates
+
+candidates = generate_model_candidates(
+    df, problem_spec, feature_engineering_spec, readiness, split, objective="predict churn"
+)
+spec = spec.model_copy(update={"candidates": candidates})
+```
+
+`generate_model_candidates(df, problem: ProblemSpec, feature_engineering: FeatureEngineeringSpec, readiness: ModelReadiness, split: DataSplitPlan, *, objective=None) -> ModelCandidates`
+
+Deterministic and **rule-based**. It recommends candidate `ModelFamily`
+values for the inferred task from the Phase-5 task type, the Phase-7.2
+readiness / split, and the Phase-6 structural feature representation. It
+**recommends families only** — it trains, fits, evaluates, benchmarks,
+compares, tunes, and selects nothing; creates no estimator, prediction,
+metric, or artifact; never re-infers the task type; and never uses target
+correlation / mutual information / ANOVA / chi-square / feature importance
+/ SHAP.
+
+### Candidate vocabulary
+
+Only the Phase-7.1 `ModelFamily` values: `linear`, `tree_based`,
+`ensemble`, `probabilistic`, `distance_based`, `neural`. No estimator
+class, hyperparameter, or library (XGBoost / LightGBM / …) is named.
+
+### Type guards & upstream dependencies (fixed precedence)
+
+Non-DataFrame `df` / non-`ProblemSpec` `problem` /
+non-`FeatureEngineeringSpec` `feature_engineering` / non-`ModelReadiness`
+`readiness` / non-`DataSplitPlan` `split` → `TypeError`.
+`status = unavailable` (empty `candidates` / `candidates_detail`,
+explicit `reason`) in this order: (1) `problem.task_type` not completed /
+no task type / unsupported task (`multilabel_classification`, `other`);
+(2) `readiness.status != completed`; (3) `readiness.ready is False`
+(reason names the first readiness blocking issue — the readiness result
+is never repaired); (4) `split.status != completed`; (5) Phase-6.6
+feature-engineering assessment not completed.
+
+### Task-based rules
+
+Structural signals come from the Phase-6 inventory candidate column types
+(restricted to the Phase-6.4 `selected ∪ review` features, or the
+inventory candidates when 6.4 has not run) — `numeric_only_representation`
+means every eligible feature is `NUMERIC` or `BOOLEAN`.
+
+| Task | Always | Conditional |
+| --- | --- | --- |
+| `regression` | `linear`, `tree_based`, `ensemble` | `distance_based` when `numeric_only_representation` |
+| `binary_classification` / `multiclass_classification` | `linear`, `tree_based`, `ensemble`, `probabilistic` | `distance_based` when `numeric_only_representation`; `neural` when `n_observations ≥ MODEL_CANDIDATE_NEURAL_MIN_ROWS` (1000) **and** `eligible_feature_count ≥ MODEL_CANDIDATE_NEURAL_MIN_FEATURES` (20) |
+| `time_series_forecasting` | `linear`, `tree_based`, `ensemble` | — (every candidate's `evidence` and the `notes` state that Phase 7.3 creates no lag / rolling features, forecasting-specific transformations, or forecasting models; the forecasting task came from Phase 5, never from a datetime column) |
+| `clustering` | `distance_based`, `probabilistic` | — |
+
+A supported task with no justifiable family → `status = completed`,
+empty lists, explicit `reason` (no family is invented to avoid an empty
+result).
+
+### Structured candidate output & ordering
+
+`candidates_detail` is a list of `ModelCandidate(family, reason,
+evidence)`. `reason` describes **structural suitability**, never
+predicted performance (no "best model" / "highest accuracy" / "likely to
+outperform" / "lowest RMSE" language). Evidence items are drawn from a
+fixed vocabulary (`"task type is …"`, `"model-readiness assessment
+completed"`, `"a … split is available"`, feature-representation facts).
+Both `candidates_detail` and the string `candidates` list are ordered by
+a **fixed family ranking** (`linear < tree_based < ensemble <
+probabilistic < distance_based < neural`), contain no duplicates, and the
+string list is exactly `[c.family.value for c in candidates_detail]`.
+
+### Objective semantics
+
+`objective_used = objective is not None and objective.strip() != ""`. A
+supplied objective is preserved verbatim and recorded in a single note
+only — no NLP / embeddings / fuzzy matching / LLM. It can never add a
+family, remove a family, or introduce a forbidden recommendation (e.g.
+target encoding or a named algorithm).
+
+### Determinism & safety
+
+The function does not read DataFrame **content** at all (only its type);
+all structural signals come from the upstream models, so the result is
+trivially row- and column-order invariant and byte-identical across
+repeated calls. No timestamps, UUIDs, run ids, randomness, filesystem, or
+network. `df` and all five upstream models are never mutated; no file,
+figure, estimator, prediction, metric, or model artifact is produced.
+
+### Integration
+
+`understand_modeling()` is unchanged. After
+`spec.model_copy(update={"candidates": generate_model_candidates(...)})`,
+the `candidates` section is populated and `training` / `evaluation` /
+`selection` and the overall `ModelingSpec.status` stay
+`not_yet_inferred` — Phase 7.3 does not activate Phase 7.4 or 7.5.
+
 ## No timestamp
 
 Like `ProblemSpec` / `FeatureEngineeringSpec`, `ModelingSpec` has **no
 `generated_at`** field — the determinism requirement is byte-identical
 repeated output, so no wall-clock value is recorded.
 
-## Boundaries (Phase 7.1 / 7.2)
+## Boundaries (Phase 7.1 / 7.2 / 7.3)
 
 - 7.1 depends on **nothing** beyond the stdlib and Pydantic and does not
   import or inspect a DataFrame. 7.2 reads the DataFrame **shape only**
-  (`len(df)`, the set of column names, and target class *counts*) and
-  reuses the Phase-5 `ProblemSpec` / Phase-6 `FeatureEngineeringSpec`
-  contracts without re-running them.
-- **Planning / assessment only.** No model is trained, fitted, tuned,
-  selected, benchmarked, or compared; no estimator is created; no
-  prediction is generated; no metric, CV result, feature importance, or
-  SHAP is computed; **no train/test split is physically performed** and
-  no dataset is created or persisted; no cross-validation, no target
-  correlation / mutual information / ANOVA / chi-square, no model-based
-  feature selection, no leakage detection; no preprocessing is executed
-  and the DataFrame is never modified; no XGBoost / LightGBM / deep
-  learning / Optuna / MLflow / experiment tracking / LLM / agent /
-  external API / backend / frontend / dashboard is added. Those belong to
-  Phase 7.3+ or later phases. **Phase 7.2 recommends readiness and a split
-  strategy only. It does not train, evaluate, compare, or select models.**
+  (`len(df)`, the set of column names, and target class *counts*). 7.3
+  does not read DataFrame **content at all** — every structural signal
+  comes from the Phase-5 / Phase-6 / Phase-7.2 contracts. None of them
+  re-run an upstream phase.
+- **Planning / assessment / recommendation only.** No model is trained,
+  fitted, tuned, selected, benchmarked, or compared; no estimator is
+  created; no prediction is generated; no metric, CV result, feature
+  importance, or SHAP is computed; **no train/test split is physically
+  performed** and no dataset is created or persisted; no cross-validation,
+  no target correlation / mutual information / ANOVA / chi-square, no
+  model-based feature selection, no leakage detection; no preprocessing is
+  executed and the DataFrame is never modified; no XGBoost / LightGBM /
+  CatBoost / deep learning / Optuna / MLflow / experiment tracking / LLM /
+  agent / external API / backend / frontend / dashboard is added. Those
+  belong to Phase 7.4+ or later phases. **Phases 7.2 / 7.3 recommend
+  readiness, a split strategy, and candidate model families only. They do
+  not train, evaluate, compare, or select models.**
 
-## What Phase 7.3+ will eventually provide (not yet implemented)
+## What Phase 7.4+ will eventually provide (not yet implemented)
 
-- **7.3 — candidate model families:** a deterministic, rule-based mapping
-  from the inferred task type to a shortlist of `ModelFamily` values.
 - **7.4 — training & evaluation:** the execution stages that actually fit
   models and compute the Phase-5.4 candidate metrics.
 - **7.5 — model selection:** a deterministic comparison and choice from
