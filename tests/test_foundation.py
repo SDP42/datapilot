@@ -70,6 +70,8 @@ ENGINE_PACKAGES = [
     "data_engine.problem_understanding.metrics_recommendation",
     "data_engine.problem_understanding.feasibility_assessment",
     "data_engine.feature_engineering",
+    "data_engine.feature_engineering.models",
+    "data_engine.feature_engineering.understanding",
     "database",
     "dl_engine",
     "experimentation",

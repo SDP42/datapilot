@@ -1,0 +1,220 @@
+"""Structured contract for automated feature engineering (Phase 6).
+
+Pydantic v2, JSON round-trip safe, JSON-primitive only — no DataFrame,
+NumPy array, SciPy object, model instance, figure, or file handle.
+
+This module defines the **contract** only. Later Phase-6 increments
+(feature inventory, transformation recommendations, feature selection,
+preprocessing requirements, feature-engineering feasibility) will
+*populate* the nested sections below; **Phase 6.1 infers nothing** and
+never fabricates a feature name, a transformation, an encoder, a scaler,
+an importance score, or a feasibility verdict.
+
+Design rule (mirrors Phase 5): the distinction between **known**
+(``completed``), **tried and impossible** (``unavailable``), and **not
+attempted yet** (``not_yet_inferred``) is explicit — an unknown value is
+``None`` / ``[]`` / ``False`` plus a reason, never a fabricated name.
+"""
+
+from __future__ import annotations
+
+from enum import Enum
+
+from pydantic import BaseModel, Field
+
+FEATURE_ENGINEERING_ENGINE_VERSION = "1"
+
+
+class FeatureEngineeringStatus(str, Enum):
+    """Lifecycle of one piece of the feature-engineering understanding."""
+
+    NOT_YET_INFERRED = "not_yet_inferred"  # no Phase-6 increment has attempted it
+    COMPLETED = "completed"  # a later increment produced a value
+    UNAVAILABLE = "unavailable"  # a later increment attempted it and could not (see `reason`)
+
+
+class FeatureOperationType(str, Enum):
+    """Categories of feature-engineering operation.
+
+    Defined now so the contract is stable; **no operation is executed,
+    recommended, or even named** by Phase 6.1.
+    """
+
+    TRANSFORMATION = "transformation"
+    INTERACTION = "interaction"
+    AGGREGATION = "aggregation"
+    DATETIME_DERIVATION = "datetime_derivation"
+    CATEGORICAL_ENCODING = "categorical_encoding"
+    NUMERICAL_SCALING = "numerical_scaling"
+    MISSING_VALUE_HANDLING = "missing_value_handling"
+    FEATURE_SELECTION = "feature_selection"
+
+
+class FeatureInventory(BaseModel):
+    """Candidate input features identified from the dataset.
+
+    Populated by a later Phase-6 increment. Phase 6.1 leaves it empty at
+    ``status = not_yet_inferred``.
+    """
+
+    status: FeatureEngineeringStatus = FeatureEngineeringStatus.NOT_YET_INFERRED
+    reason: str | None = Field(
+        default=None,
+        description="Why the inventory is unavailable; None once it is produced.",
+    )
+    candidate_features: list[str] = Field(
+        default_factory=list,
+        description="Column names usable as input features, best-first; empty until inferred.",
+    )
+    excluded_features: list[str] = Field(
+        default_factory=list,
+        description="Columns deliberately excluded from feature engineering (e.g. the target).",
+    )
+    notes: list[str] = Field(default_factory=list)
+
+
+class TransformationRecommendations(BaseModel):
+    """Recommended per-feature transformations / derivations.
+
+    Populated by a later Phase-6 increment. Phase 6.1 leaves it empty.
+    """
+
+    status: FeatureEngineeringStatus = FeatureEngineeringStatus.NOT_YET_INFERRED
+    reason: str | None = Field(
+        default=None,
+        description="Why transformations are unavailable; None once produced.",
+    )
+    recommended_operations: list[str] = Field(
+        default_factory=list,
+        description="Recommended transformation identifiers; empty until inferred.",
+    )
+    notes: list[str] = Field(default_factory=list)
+
+
+class FeatureSelectionRecommendations(BaseModel):
+    """Recommended feature keep / drop decisions.
+
+    Populated by a later Phase-6 increment. Phase 6.1 leaves it empty.
+    """
+
+    status: FeatureEngineeringStatus = FeatureEngineeringStatus.NOT_YET_INFERRED
+    reason: str | None = Field(
+        default=None,
+        description="Why selection is unavailable; None once produced.",
+    )
+    selected_features: list[str] = Field(
+        default_factory=list, description="Features recommended to keep; empty until inferred."
+    )
+    dropped_features: list[str] = Field(
+        default_factory=list, description="Features recommended to drop; empty until inferred."
+    )
+    notes: list[str] = Field(default_factory=list)
+
+
+class PreprocessingRequirements(BaseModel):
+    """Preprocessing a model would require (encoding / scaling / imputation).
+
+    Populated by a later Phase-6 increment. Phase 6.1 leaves it empty.
+    """
+
+    status: FeatureEngineeringStatus = FeatureEngineeringStatus.NOT_YET_INFERRED
+    reason: str | None = Field(
+        default=None,
+        description="Why preprocessing requirements are unavailable; None once produced.",
+    )
+    required_operations: list[str] = Field(
+        default_factory=list,
+        description="Required preprocessing operation identifiers; empty until inferred.",
+    )
+    encoding_required: bool = Field(
+        default=False, description="True once a later increment confirms encoding is needed."
+    )
+    scaling_required: bool = Field(
+        default=False, description="True once a later increment confirms scaling is needed."
+    )
+    imputation_required: bool = Field(
+        default=False, description="True once a later increment confirms imputation is needed."
+    )
+    notes: list[str] = Field(default_factory=list)
+
+
+class FeatureEngineeringAssessment(BaseModel):
+    """Whether feature engineering is feasible / safe to proceed with.
+
+    Populated by a later Phase-6 increment. Phase 6.1 leaves it at
+    ``not_yet_inferred`` with ``feasible = None`` — never a fabricated
+    ``False``.
+    """
+
+    status: FeatureEngineeringStatus = FeatureEngineeringStatus.NOT_YET_INFERRED
+    reason: str | None = Field(
+        default=None,
+        description="Why the assessment is unavailable; None once produced.",
+    )
+    feasible: bool | None = Field(
+        default=None,
+        description="True/False once assessed; None until then (never a fabricated False).",
+    )
+    blocking_issues: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
+class FeatureEngineeringRequest(BaseModel):
+    """The explicit input to :func:`understand_feature_engineering`.
+
+    Carries **dataset identity** (reusing the ``dataset_id`` /
+    ``dataset_version_id`` convention shared by ``DatasetProfile`` /
+    ``QualityReport`` / ``EDAReport`` / ``ProblemSpec``) and, optionally,
+    the **explicit** user objective. The objective is preserved verbatim
+    and never inferred from column names or data content.
+    """
+
+    dataset_id: str = Field(description="Identifier of the dataset being analysed.")
+    dataset_version_id: str | None = Field(
+        default=None, description="Registered DatasetVersion id, when the caller has one."
+    )
+    objective: str | None = Field(
+        default=None,
+        description="Plain-language analytical goal, exactly as the user supplied it.",
+    )
+
+
+class FeatureEngineeringSpec(BaseModel):
+    """The structured answer to 'what feature engineering does this need?'.
+
+    Phase 6.1 produces a spec whose overall ``status`` and every nested
+    section are ``not_yet_inferred``; the ``dataset_id`` /
+    ``dataset_version_id`` / ``objective`` fields echo the request. Later
+    increments fill in ``inventory`` / ``transformations`` / ``selection``
+    / ``preprocessing`` / ``assessment`` in place, additively.
+    """
+
+    feature_engineering_engine_version: str = FEATURE_ENGINEERING_ENGINE_VERSION
+
+    dataset_id: str
+    dataset_version_id: str | None = None
+    objective: str | None = Field(
+        default=None, description="The user's objective, verbatim; None if none was supplied."
+    )
+    objective_provided: bool = Field(
+        description="True iff the request carried a non-blank objective string (after strip)."
+    )
+
+    status: FeatureEngineeringStatus = FeatureEngineeringStatus.NOT_YET_INFERRED
+    reason: str | None = Field(
+        default=None,
+        description="Explains a non-completed overall status.",
+    )
+
+    inventory: FeatureInventory = Field(default_factory=FeatureInventory)
+    transformations: TransformationRecommendations = Field(
+        default_factory=TransformationRecommendations
+    )
+    selection: FeatureSelectionRecommendations = Field(
+        default_factory=FeatureSelectionRecommendations
+    )
+    preprocessing: PreprocessingRequirements = Field(default_factory=PreprocessingRequirements)
+    assessment: FeatureEngineeringAssessment = Field(default_factory=FeatureEngineeringAssessment)
+
+    notes: list[str] = Field(default_factory=list)

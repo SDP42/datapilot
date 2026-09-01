@@ -11,7 +11,7 @@ future phases are not anticipated in code.
 | 3 | Validation & Data Lineage | **In progress** — `DatasetVersion` + store + lineage validation + lineage graph + opt-in auto-registration + cross-version diffing + version-integrity / family-consistency / version↔lineage-binding checks done; still filesystem-only (no database, no GC) |
 | 4 | EDA & Statistical Analysis | **Done** — deterministic analysis-only `data_engine.eda`: EDA/univariate/bivariate, parametric tests, effect sizes, non-parametric tests, distribution analysis, EDA↔quality cross-reference, visualization foundation (chart-spec selection + in-memory Matplotlib **and Plotly** rendering + explicit chart export), target-aware visualization recommendation, statistical-strength visualization ranking, k-NN / Kraskov mutual-information estimator, datetime mutual information, paired / one-sided non-parametric tests (Wilcoxon signed-rank / sign / Friedman), multiple-testing correction (Bonferroni / Holm / Benjamini-Hochberg). No dashboard/API |
 | 5 | Automated Problem Understanding | **Done** — `data_engine.problem_understanding`: the `ProblemSpec` contract + `understand_problem` foundation (5.1), **target identification** `identify_target` (5.2), **task-type inference** `infer_task_type` (5.3), **candidate metrics** `recommend_metrics` (5.4), **feasibility assessment** `assess_feasibility` (5.5). All deterministic, standalone, analysis-only; no ML/LLM |
-| 6 | Feature Engineering | Not started |
+| 6 | Feature Engineering | **In progress** — `data_engine.feature_engineering`: the `FeatureEngineeringSpec` contract + `understand_feature_engineering` foundation (6.1 — done); infers nothing yet. 6.2+ (inventory / transformations / selection / preprocessing / feasibility) not started |
 | 7 | Classical ML | Not started |
 | 8 | Deep Learning | Not started |
 | 9 | Experiment Tracking | Not started |
@@ -396,11 +396,38 @@ future phases are not anticipated in code.
   still composes nothing automatically — a caller merges the four
   standalone results into `ProblemSpec` and decides the overall status.
 
-### Phase 6 — Feature Engineering — **Not started**
+### Phase 6 — Feature Engineering — **In progress**
 - **Objective:** build and select informative features deterministically.
 - **Components:** transformers, encoders, interaction/aggregation features,
   selection methods; all recorded in lineage.
 - **Output:** a feature matrix + feature definitions.
+- **Status:** `data_engine.feature_engineering` — a deterministic,
+  analysis-only layer.
+
+  **6.1 — contract + foundation.** `understand_feature_engineering(request:
+  FeatureEngineeringRequest) -> FeatureEngineeringSpec` validates dataset
+  identity + an explicit objective (never inferred from data, blank
+  strings preserved verbatim) and returns a spec whose overall status and
+  all five sections (`inventory` / `transformations` / `selection` /
+  `preprocessing` / `assessment`) are `not_yet_inferred` — nothing
+  fabricated (no feature / transformation / encoder / scaler / imputer /
+  importance / correlation / leakage / feasibility verdict). Three-state
+  status enum (`not_yet_inferred` / `completed` / `unavailable`); stable
+  `FeatureOperationType` enum (transformation / interaction / aggregation
+  / datetime_derivation / categorical_encoding / numerical_scaling /
+  missing_value_handling / feature_selection) defined but **nothing
+  executed**. No `generated_at`, so repeated calls are byte-identical.
+  Non-model input → `TypeError` (a DataFrame is rejected); blank
+  `dataset_id` → `ValueError`. Standalone: reads no data, no DataFrame
+  param, no file, no version / lineage, no external / LLM call, no
+  cross-phase coupling. `pyproject.toml` already declared the
+  `data_engine.feature_engineering` package — no change needed; no new
+  dependency. See [feature-engineering.md](feature-engineering.md).
+
+  **Completed:** 6.1 foundation / `FeatureEngineeringSpec`. **Not
+  started:** 6.2+ (feature inventory, transformation recommendations,
+  feature selection, preprocessing requirements, feature-engineering
+  feasibility). Phase 6 is **not complete**.
 
 ### Phase 7 — Classical ML
 - **Objective:** train and evaluate classical models.

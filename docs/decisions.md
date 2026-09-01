@@ -4,6 +4,52 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0065 — Phase 6.1: `FeatureEngineeringSpec` contract + inference-free foundation
+- **Decision:** a new first-class `data_engine/feature_engineering/`
+  package (`models.py`, `understanding.py`, `__init__.py`) mirrors the
+  Phase-5 architecture. `understand_feature_engineering(request:
+  FeatureEngineeringRequest) -> FeatureEngineeringSpec` **infers nothing**
+  — it validates the explicit request, echoes the dataset identity + the
+  verbatim objective, and returns a spec whose overall `status` and all
+  five nested sections (`inventory`, `transformations`, `selection`,
+  `preprocessing`, `assessment`) are `not_yet_inferred`.
+- **Reason:** Prompt "Phase 6.1 — Feature Engineering Foundation &
+  `FeatureEngineeringSpec` Contract": "Phase 6.1 must NOT actually
+  engineer, transform, select, encode, scale, impute, generate, or
+  modify features yet"; "The foundation function must infer NOTHING";
+  "It must NOT inspect a DataFrame … call an LLM … call external
+  services"; "establish the stable data structures, enums, request
+  contract, result contract, and deterministic foundation".
+- **Contract:** `FEATURE_ENGINEERING_ENGINE_VERSION = "1"`; three-state
+  `FeatureEngineeringStatus` (`not_yet_inferred` / `completed` /
+  `unavailable`); stable `FeatureOperationType` enum (transformation /
+  interaction / aggregation / datetime_derivation / categorical_encoding
+  / numerical_scaling / missing_value_handling / feature_selection) —
+  defined for a stable contract, **nothing executed or named**;
+  `FeatureEngineeringRequest` (`dataset_id` required, `dataset_version_id`
+  / `objective` optional, objective preserved verbatim including blank
+  strings, `objective_provided` = non-blank after `.strip()`);
+  `FeatureEngineeringSpec` with the five nested sections. All Pydantic v2,
+  JSON-primitive only, no `generated_at` / UUID / timestamp — repeated
+  calls are byte-identical.
+- **Validation / safety:** non-`FeatureEngineeringRequest` input →
+  `TypeError` (a DataFrame is rejected); blank / whitespace `dataset_id`
+  → `ValueError`. Pure deterministic function of the request: no clock,
+  timestamp, UUID, randomness, environment, filesystem, external call,
+  LLM, or DataFrame access; the request is never mutated. Nested payloads
+  are `None` / `[]` / `False` — no feature / transformation / encoder /
+  scaler / imputer / importance / correlation / leakage / feasibility
+  verdict is fabricated. `reason` states the increment is contract /
+  foundation only.
+- **Backward compatibility:** additive only. `pyproject.toml` already
+  declared `data_engine.feature_engineering` (no change); no new
+  dependency. Phase 1–5 code, `understand_problem()`, and every existing
+  API and signature are untouched; the foundation import-smoke test adds
+  the two new modules.
+- **Phase state:** Phase 5 **Done**, Phase 6 **In progress**, Phase 6.1
+  **Done**, Phase 6.2+ **Not started**. Phase 6 is **not** marked
+  complete.
+
 ## 0064 — Phase 5.5: `assess_feasibility` is a standalone deterministic structural feasibility screen
 - **Decision:** `data_engine/problem_understanding/feasibility_assessment.py`
   adds `assess_feasibility(df, target: TargetIdentification, task_type:

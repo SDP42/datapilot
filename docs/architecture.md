@@ -235,8 +235,25 @@ lineage / EDA — the Phase-5 functions reuse only the pure
 nothing, and add no `EDAReport` field.
 [problem-understanding.md](problem-understanding.md).
 
+**Phase 6 (in progress):** `data_engine.feature_engineering` — a
+deterministic, **analysis-only** layer that will turn a dataset + an
+**explicit** objective into a structured `FeatureEngineeringSpec`
+(feature inventory, transformation recommendations, feature selection,
+preprocessing requirements, feature-engineering feasibility). **6.1 —
+contract + foundation:** `understand_feature_engineering(request:
+FeatureEngineeringRequest) -> FeatureEngineeringSpec` validates dataset
+identity + an explicit objective (never inferred from data; blank
+objective strings preserved verbatim) and returns a spec whose overall
+status and all five sections are `not_yet_inferred` — nothing fabricated;
+three-state status enum; a stable `FeatureOperationType` enum is defined
+but **no operation is executed, recommended, or named**; no
+`generated_at`, so repeated calls are byte-identical. Non-model input →
+`TypeError` (a DataFrame is rejected); blank `dataset_id` → `ValueError`.
+Depends on nothing beyond the stdlib + Pydantic; does not import or
+inspect a DataFrame. [feature-engineering.md](feature-engineering.md).
+
 **Future-phase components:** everything else —
-figure generation, feature engineering,
+figure generation, later feature-engineering increments,
 `ml_engine`, `dl_engine`,
 `experimentation`, `explainability`, `ai_engine`, `database`, `backend`,
 `frontend`, MLOps.
