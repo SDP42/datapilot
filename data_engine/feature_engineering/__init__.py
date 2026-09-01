@@ -41,6 +41,7 @@ feasibility are later Phase-6 increments.
 
 from __future__ import annotations
 
+from .assessment import assess_feature_engineering
 from .feature_inventory import HIGH_UNIQUE_ID_THRESHOLD, inventory_features
 from .feature_selection import (
     FEATURE_SELECTION_HIGH_CARDINALITY,
@@ -53,6 +54,8 @@ from .feature_selection import (
 from .models import (
     FEATURE_ENGINEERING_ENGINE_VERSION,
     FeatureEngineeringAssessment,
+    FeatureEngineeringCheck,
+    FeatureEngineeringCheckOutcome,
     FeatureEngineeringRequest,
     FeatureEngineeringSpec,
     FeatureEngineeringStatus,
@@ -94,6 +97,8 @@ __all__ = [
     "TRANSFORMATION_SKEW_THRESHOLD",
     "TRANSFORMATION_STRONG_SKEW_THRESHOLD",
     "FeatureEngineeringAssessment",
+    "FeatureEngineeringCheck",
+    "FeatureEngineeringCheckOutcome",
     "FeatureEngineeringRequest",
     "FeatureEngineeringSpec",
     "FeatureEngineeringStatus",
@@ -107,6 +112,7 @@ __all__ = [
     "PreprocessingRequirements",
     "TransformationRecommendation",
     "TransformationRecommendations",
+    "assess_feature_engineering",
     "inventory_features",
     "recommend_feature_selection",
     "recommend_preprocessing",

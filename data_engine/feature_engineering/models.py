@@ -303,12 +303,38 @@ class PreprocessingRequirements(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
-class FeatureEngineeringAssessment(BaseModel):
-    """Whether feature engineering is feasible / safe to proceed with.
+class FeatureEngineeringCheckOutcome(str, Enum):
+    """Result of one structural consistency check."""
 
-    Populated by a later Phase-6 increment. Phase 6.1 leaves it at
-    ``not_yet_inferred`` with ``feasible = None`` — never a fabricated
-    ``False``.
+    PASS = "pass"
+    WARNING = "warning"
+    BLOCKING = "blocking"
+
+
+class FeatureEngineeringCheck(BaseModel):
+    """One structural consistency / readiness check.
+
+    Produced by
+    :func:`data_engine.feature_engineering.assess_feature_engineering`
+    (Phase 6.6). A check is purely **structural** — it never measures
+    predictive usefulness, leakage, or model performance.
+    """
+
+    category: str = Field(description="Fixed check category, e.g. 'inventory consistency'.")
+    outcome: FeatureEngineeringCheckOutcome
+    detail: str = Field(description="What was checked and what was found.")
+
+
+class FeatureEngineeringAssessment(BaseModel):
+    """Whether the Phase-6 recommendations are structurally coherent.
+
+    Populated by
+    :func:`data_engine.feature_engineering.assess_feature_engineering`
+    (Phase 6.6). ``checks`` / ``objective_used`` are additive and
+    defaulted, so a ``FeatureEngineeringAssessment`` serialised by Phase
+    6.1 still validates. ``feasible`` mirrors the Phase-5 feasibility
+    semantics: ``True`` / ``False`` once assessed, ``None`` only while an
+    upstream section is unavailable — never a fabricated ``False``.
     """
 
     status: FeatureEngineeringStatus = FeatureEngineeringStatus.NOT_YET_INFERRED
@@ -322,6 +348,13 @@ class FeatureEngineeringAssessment(BaseModel):
     )
     blocking_issues: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    checks: list[FeatureEngineeringCheck] = Field(
+        default_factory=list,
+        description="Structured per-check results, deterministically ordered.",
+    )
+    objective_used: bool = Field(
+        default=False, description="True iff a non-blank objective string was supplied."
+    )
     notes: list[str] = Field(default_factory=list)
 
 

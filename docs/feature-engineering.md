@@ -7,7 +7,11 @@ features, which transformations / encoders / scalers / imputers a model
 would need, which features to keep or drop, and whether feature
 engineering is feasible.
 
-> **Status.** Phase 6 is **in progress**.
+> **Status.** Phase 6 is **complete** (6.1–6.6). Every increment is a
+> standalone deterministic function the caller composes into
+> `FeatureEngineeringSpec`; `understand_feature_engineering` still infers
+> nothing and the overall `FeatureEngineeringSpec.status` is left at
+> `not_yet_inferred` until a caller sets it.
 >
 > - **6.1 — foundation** (`understand_feature_engineering`): DONE. Infers
 >   nothing; returns an all-`not_yet_inferred` spec.
@@ -38,7 +42,14 @@ engineering is feasible.
 >   review candidates. **Identifies requirements only** — never executes
 >   preprocessing, fills a value, chooses an encoder/imputer/scaler
 >   algorithm, or modifies the DataFrame. No target encoding.
-> - **6.6 feature-engineering assessment**: NOT STARTED.
+> - **6.6 — feature-engineering assessment** (`assess_feature_engineering`):
+>   DONE. Deterministic **structural consistency & readiness check** over
+>   the 6.2 / 6.3 / 6.4 / 6.5 outputs — internal consistency, cross-section
+>   agreement, target safety. `feasible = False` iff `≥ 1` blocking
+>   structural inconsistency, else `True`; `None` only while upstream is
+>   incomplete. **Never** executes anything, measures predictive
+>   performance, infers the target/task, detects leakage, or overrides an
+>   upstream decision.
 
 ## Entrypoint
 
@@ -126,7 +137,12 @@ non-blank after `.strip()`.
   `reason`, `evidence: list[str]`.
 - `FeatureEngineeringAssessment` — `status`, `reason`,
   `feasible: bool | None`, `blocking_issues: list[str]`,
-  `warnings: list[str]`, `notes`.
+  `warnings: list[str]`, `checks: list[FeatureEngineeringCheck]`,
+  `objective_used: bool`, `notes`. (`checks` / `objective_used` are
+  additive & defaulted — Phase-6.1 JSON still validates.)
+  `FeatureEngineeringCheck` — `category`, `outcome`
+  (`FeatureEngineeringCheckOutcome`: `pass` / `warning` / `blocking`),
+  `detail`.
 
 In Phase 6.1 every section is `status = not_yet_inferred` with the
 payload `None` / `[]` / `False` — **never** a fabricated feature name,
@@ -600,13 +616,137 @@ snapshot verified). No file, figure, network, database, lineage,
 `preprocessing` is populated, and `assessment` and the overall
 `FeatureEngineeringSpec.status` stay `not_yet_inferred`.
 
+## Feature-engineering assessment (6.6) — `assess_feature_engineering`
+
+```python
+from data_engine.feature_engineering import (
+    inventory_features,
+    recommend_transformations,
+    recommend_feature_selection,
+    recommend_preprocessing,
+    assess_feature_engineering,
+)
+
+inv = inventory_features(df, target="churn")
+trans = recommend_transformations(df, inv)
+sel = recommend_feature_selection(df, inv, task_type)
+pre = recommend_preprocessing(df, inv, trans, sel)
+assessment = assess_feature_engineering(df, inv, trans, sel, pre, objective="predict churn")
+spec = spec.model_copy(update={"assessment": assessment})
+```
+
+`assess_feature_engineering(df: pd.DataFrame, inventory: FeatureInventory, transformations: TransformationRecommendations, selection: FeatureSelectionRecommendations, preprocessing: PreprocessingRequirements, *, objective: str | None = None) -> FeatureEngineeringAssessment`
+
+A deterministic **structural consistency and readiness check**. It
+answers *"are the Phase-6 recommendations internally consistent and
+sufficiently specified to proceed to a later execution stage?"* — **not**
+*"will these features improve model performance?"*, *"is there leakage?"*,
+or *"which feature is predictive?"*. It executes nothing, modifies
+nothing, trains nothing, and overrides no upstream decision.
+
+### Type guards & upstream handling
+
+Any of `df` / `inventory` / `transformations` / `selection` /
+`preprocessing` of the wrong type → `TypeError`. All four Phase-6
+sections must be `completed`; otherwise `status = unavailable`,
+`feasible = None`, empty issue/warning lists, and a `reason` naming the
+**first** non-completed section in the fixed precedence order **inventory
+→ transformations → selection → preprocessing**.
+
+### Check categories (fixed order)
+
+Blocking issues and warnings are grouped and ordered by category:
+
+1. upstream consistency
+2. inventory consistency — unique candidate names, candidates present in
+   `df`, `candidate_features` matches the `candidate=True` entries, no
+   candidate/excluded overlap, no target-marked / all-missing / constant /
+   identifier-like candidate, and internally plausible statistics
+   (`n_observations + n_missing == len(df)`, fractions consistent, no
+   negatives).
+3. target safety — the target column never appears in any selection list,
+   selection recommendation, transformation recommendation, or
+   preprocessing requirement.
+4. selection consistency — selected / dropped / review are inventory
+   candidates, the three lists never overlap, and each structured
+   recommendation's `action` matches the list it is in.
+5. transformation consistency — every recommendation targets a known
+   candidate, no duplicate `(column, operation, description)`,
+   `recommended_operations` matches the structured list and is
+   column-sorted, no `missing_value_handling` operation, categorical
+   columns get no numeric-only transform, datetime columns get only
+   datetime derivations.
+6. preprocessing consistency — every requirement targets a known
+   candidate, no duplicate `(column, operation)`, `required_operations`
+   matches the structured list in the fixed 6.5 order, the three boolean
+   flags agree with the requirements, encoding only on categorical,
+   scaling only on numeric, no datetime encoding/scaling, no imputation
+   for an entirely-missing column.
+7. cross-section consistency — a dropped or inventory-excluded feature
+   never has a transformation recommendation or a preprocessing
+   requirement.
+8. structural completeness — every downstream reference resolves to an
+   inventory candidate (or the target).
+
+### Blocking vs warning semantics
+
+`status = completed` once all four upstream sections are completed,
+regardless of findings. `feasible = False` iff there is `≥ 1` **blocking**
+structural inconsistency; otherwise `feasible = True`. **Warnings never
+change `feasible`** and never claim predictive weakness, model
+performance, or leakage. `feasible = None` only when an upstream section
+is unavailable / not-yet-inferred (mirroring the Phase-5 feasibility
+semantics). A valid **no-op** pipeline (no transformations, nothing
+dropped, no preprocessing) is `feasible = True`.
+
+Warnings flag structurally noteworthy but non-invalidating situations —
+no candidate features, no selected features, all eligible features are
+review, transformations recommended but no preprocessing follows,
+high-cardinality categorical review candidates, missing values still
+present (imputation only recommended), datetime derivations / numeric
+transformations recommended but not executed, an objective supplied that
+changed no structural recommendation, no transformation recommendations,
+no preprocessing requirements.
+
+### Objective handling
+
+`objective_used = objective is not None and objective.strip() != ""`. The
+objective is recorded only — it never overrides a structural consistency
+rule and is not interpreted with NLP / embeddings / fuzzy matching / an
+LLM.
+
+### Notes
+
+`notes` always state that no feature engineering was executed, no feature
+was encoded / scaled / imputed / dropped / generated, no transformation
+was applied, no target / task inference was performed, and no predictive
+evaluation, feature importance, or leakage detection was performed.
+
+### Determinism & safety
+
+Row- and column-order invariant (all checks use aggregate structural
+properties and model contents, never row positions or indices); repeated
+calls are byte-identical (no timestamps, UUIDs, randomness, or
+filesystem). `df` and every upstream model are never mutated (deep-copy /
+JSON snapshot verified). No file, figure, network, database, lineage,
+`DatasetVersion`, model, or LLM access.
+
+### Integration
+
+`understand_feature_engineering()` is unchanged. After
+`spec.model_copy(update={"assessment": assess_feature_engineering(...)})`,
+`inventory` / `transformations` / `selection` / `preprocessing` are
+unchanged, `assessment` is populated, and the overall
+`FeatureEngineeringSpec.status` stays `not_yet_inferred` — the assessment
+never marks the whole spec completed.
+
 ## No timestamp
 
 Like `ProblemSpec`, `FeatureEngineeringSpec` has **no `generated_at`**
 field — the determinism requirement is byte-identical repeated output, so
 no wall-clock value is recorded.
 
-## Boundaries (Phase 6.1 / 6.2 / 6.3 / 6.4 / 6.5)
+## Boundaries (Phase 6.1 – 6.6 — Phase 6 complete)
 
 - Separate from ingestion / profiling / quality / cleaning / validation /
   lineage / EDA / problem understanding. 6.1 depends on nothing beyond
@@ -615,15 +755,15 @@ no wall-clock value is recorded.
   additionally consumes the Phase-5.3 `TaskTypeInference` **type** (never
   re-inferring it) and computes a plain in-DataFrame Pearson correlation
   for redundancy — no coupling to the Phase-5 engines' logic.
-- **Contract, foundation, structural inventory, transformation
-  *recommendations*, feature-selection *recommendations*, and
-  preprocessing *requirements* only.** No feature is engineered,
-  transformed, selected, encoded, scaled, imputed, generated, or modified;
-  no value is filled; no encoder / imputer / scaler algorithm is chosen.
-  No target encoding or any target-dependent preprocessing. No **target**
-  correlation / mutual information / ANOVA / chi-square feature scores, no
-  model or permutation importance, no SHAP, no leakage detection, no
-  predictive-usefulness scoring, no model training, no train/test split,
-  no cross-validation, no hyperparameter tuning, no SMOTE / oversampling /
-  undersampling, no PCA, no LLM or external call. Feature-engineering
-  feasibility (6.6) is a later increment.
+- **Analysis / recommendation / assessment only — nothing is executed.**
+  Across all of 6.1–6.6: no feature is engineered, transformed, selected,
+  encoded, scaled, imputed, generated, or modified; no value is filled; no
+  encoder / imputer / scaler algorithm is chosen; the DataFrame is never
+  mutated. No target encoding or any target-dependent preprocessing. No
+  **target** correlation / mutual information / ANOVA / chi-square feature
+  scores, no model or permutation importance, no SHAP, no leakage
+  detection, no predictive-usefulness or predictive-performance scoring,
+  no model training or prediction, no train/test split, no
+  cross-validation, no hyperparameter tuning, no SMOTE / oversampling /
+  undersampling, no PCA, no LLM or external call. Executing the
+  recommendations is a later phase.

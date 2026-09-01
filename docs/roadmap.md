@@ -11,8 +11,8 @@ future phases are not anticipated in code.
 | 3 | Validation & Data Lineage | **In progress** — `DatasetVersion` + store + lineage validation + lineage graph + opt-in auto-registration + cross-version diffing + version-integrity / family-consistency / version↔lineage-binding checks done; still filesystem-only (no database, no GC) |
 | 4 | EDA & Statistical Analysis | **Done** — deterministic analysis-only `data_engine.eda`: EDA/univariate/bivariate, parametric tests, effect sizes, non-parametric tests, distribution analysis, EDA↔quality cross-reference, visualization foundation (chart-spec selection + in-memory Matplotlib **and Plotly** rendering + explicit chart export), target-aware visualization recommendation, statistical-strength visualization ranking, k-NN / Kraskov mutual-information estimator, datetime mutual information, paired / one-sided non-parametric tests (Wilcoxon signed-rank / sign / Friedman), multiple-testing correction (Bonferroni / Holm / Benjamini-Hochberg). No dashboard/API |
 | 5 | Automated Problem Understanding | **Done** — `data_engine.problem_understanding`: the `ProblemSpec` contract + `understand_problem` foundation (5.1), **target identification** `identify_target` (5.2), **task-type inference** `infer_task_type` (5.3), **candidate metrics** `recommend_metrics` (5.4), **feasibility assessment** `assess_feasibility` (5.5). All deterministic, standalone, analysis-only; no ML/LLM |
-| 6 | Feature Engineering | **In progress** — `data_engine.feature_engineering`: `FeatureEngineeringSpec` contract + foundation (6.1); **structural feature inventory** `inventory_features` (6.2); **transformation recommendations** `recommend_transformations` (6.3); **feature-selection recommendations** `recommend_feature_selection` (6.4); **preprocessing requirements** `recommend_preprocessing` — deterministic identification of missing-value imputation / categorical encoding / numerical scaling requirements for the 6.4 retained/review candidates (consumes 6.2/6.3/6.4, executes nothing, no encoder/imputer/scaler chosen, no target encoding) (6.5 — done). 6.6 assessment not started |
-| 7 | Classical ML | Not started |
+| 6 | Feature Engineering | **Done** — `data_engine.feature_engineering`, all deterministic, standalone, analysis-only: `FeatureEngineeringSpec` contract + foundation (6.1); **structural feature inventory** `inventory_features` (6.2); **transformation recommendations** `recommend_transformations` (6.3); **feature-selection recommendations** `recommend_feature_selection` (6.4); **preprocessing requirements** `recommend_preprocessing` (6.5); **feature-engineering assessment** `assess_feature_engineering` — structural consistency & readiness check over 6.2–6.5, `feasible` True/False from blocking structural inconsistencies (6.6). Nothing is executed; no ML/LLM |
+| 7 | Classical ML | **Not started** |
 | 8 | Deep Learning | Not started |
 | 9 | Experiment Tracking | Not started |
 | 10 | Explainable AI | Not started |
@@ -396,7 +396,7 @@ future phases are not anticipated in code.
   still composes nothing automatically — a caller merges the four
   standalone results into `ProblemSpec` and decides the overall status.
 
-### Phase 6 — Feature Engineering — **In progress**
+### Phase 6 — Feature Engineering — **Done**
 - **Objective:** build and select informative features deterministically.
 - **Components:** transformers, encoders, interaction/aggregation features,
   selection methods; all recorded in lineage.
@@ -560,13 +560,40 @@ future phases are not anticipated in code.
   defaulted `requirements: list[PreprocessingRequirement]` +
   `objective_used` (6.1 JSON validates). No new dependency.
 
+  **6.6 — feature-engineering assessment.** `assess_feature_engineering(df:
+  pd.DataFrame, inventory: FeatureInventory, transformations:
+  TransformationRecommendations, selection: FeatureSelectionRecommendations,
+  preprocessing: PreprocessingRequirements, *, objective: str | None =
+  None) -> FeatureEngineeringAssessment` — a **standalone**, deterministic
+  **structural consistency & readiness check** (caller merges into
+  `FeatureEngineeringSpec.assessment`). Requires all four upstream
+  sections `completed` (fixed failure precedence inventory →
+  transformations → selection → preprocessing); otherwise `status =
+  unavailable`, `feasible = None`. Otherwise `status = completed` and
+  `feasible = False` iff `≥ 1` blocking structural inconsistency across
+  the fixed check categories (inventory consistency, target safety,
+  selection consistency, transformation consistency, preprocessing
+  consistency, cross-section consistency, structural completeness), else
+  `feasible = True`. Warnings (no candidates / all-review / missing values
+  still present / transformations-not-executed / …) never change
+  `feasible` and never claim leakage or performance. It **executes
+  nothing**, modifies nothing, infers no target/task, detects no leakage,
+  computes no feature importance / correlation / MI / statistical test,
+  and overrides no upstream decision. Row- and column-order invariant,
+  byte-identical repeated calls. `df` and all upstream models never
+  mutated; no file / figure / lineage / version / model / LLM / network.
+  `FeatureEngineeringAssessment` gains additive defaulted `checks:
+  list[FeatureEngineeringCheck]` + `objective_used` (6.1 JSON validates);
+  new `FeatureEngineeringCheckOutcome` enum. No new dependency.
+
   **Completed:** 6.1 foundation / `FeatureEngineeringSpec`, 6.2 structural
   feature inventory, 6.3 transformation recommendations, 6.4
-  feature-selection recommendations, 6.5 preprocessing requirements.
-  **Not started:** 6.6 feature-engineering assessment. Phase 6 is **not
-  complete**.
+  feature-selection recommendations, 6.5 preprocessing requirements, 6.6
+  feature-engineering assessment. **Phase 6 is complete.** Executing the
+  recommendations is a later phase; `understand_feature_engineering()`
+  still composes nothing automatically.
 
-### Phase 7 — Classical ML
+### Phase 7 — Classical ML — **Not started**
 - **Objective:** train and evaluate classical models.
 - **Components:** `ml_engine` model registry, training, prediction,
   cross-validation, evaluation with task-appropriate metrics

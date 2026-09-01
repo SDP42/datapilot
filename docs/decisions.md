@@ -4,6 +4,74 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0070 — Phase 6.6: `assess_feature_engineering` is a standalone deterministic structural consistency & readiness check
+- **Decision:** `data_engine/feature_engineering/assessment.py` adds
+  `assess_feature_engineering(df: pd.DataFrame, inventory: FeatureInventory,
+  transformations: TransformationRecommendations, selection:
+  FeatureSelectionRecommendations, preprocessing: PreprocessingRequirements,
+  *, objective: str | None = None) -> FeatureEngineeringAssessment`, a
+  **standalone** function (`understand_feature_engineering` unchanged;
+  caller merges into `FeatureEngineeringSpec.assessment` via `model_copy`).
+  It checks whether the Phase-6.2 / 6.3 / 6.4 / 6.5 outputs are
+  structurally coherent, internally consistent, and sufficiently specified
+  to proceed to a later execution stage. **It is a consistency check
+  only** — it executes nothing and never claims predictive benefit. This
+  is the final Phase-6 increment; **Phase 6 is now complete.**
+- **Reason:** Prompt "Phase 6.6 — Automated Feature Engineering
+  Assessment": "ASSESSMENT / CONSISTENCY CHECK only"; "It must NOT execute
+  feature engineering … NOT train models … NOT calculate predictive
+  performance … NOT infer or re-select the target … NOT perform leakage
+  detection"; "The assessment must evaluate ONLY the consistency and
+  structural completeness of the four Phase-6 sections"; "mirrors the
+  existing Phase-5 feasibility semantics".
+- **Upstream handling:** all four upstream sections must be `completed`;
+  otherwise `status = unavailable`, `feasible = None`, empty lists, and a
+  `reason` naming the **first** non-completed section in the fixed
+  precedence `inventory → transformations → selection → preprocessing`.
+- **Rules (documented):** once completed, blocking issues and warnings are
+  grouped by a fixed category order — upstream, inventory consistency,
+  target safety, selection consistency, transformation consistency,
+  preprocessing consistency, cross-section consistency, structural
+  completeness. Blocking checks include: duplicate / absent / mis-typed /
+  target-marked / degenerate inventory candidates and implausible
+  statistics (`n_observations + n_missing == len(df)`, consistent
+  fractions); the target column appearing in any selection list /
+  recommendation / transformation / preprocessing entry; selected /
+  dropped / review overlap or not being inventory candidates; a selection
+  recommendation whose `action` mismatches its list; transformation or
+  preprocessing entries for unknown / dropped / inventory-excluded
+  features, duplicates, `recommended_operations` / `required_operations`
+  disagreeing with the structured lists, flag / requirement disagreement,
+  a numeric-only transform on a categorical column, a non-datetime
+  transform on a datetime column, categorical-encoding on a non-categorical
+  or numeric-scaling on a non-numeric column, datetime encoding / scaling,
+  and imputation for an entirely-missing column. Warnings are
+  structurally-noteworthy but non-invalidating (no candidates, all review,
+  missing values still present, transformations recommended but not
+  executed, objective with no structural effect, …) and **never** claim
+  leakage or model performance.
+- **Feasibility semantics:** `status = completed` regardless of findings;
+  `feasible = False` iff `≥ 1` blocking issue, else `feasible = True`;
+  warnings never change `feasible`; `feasible = None` only when upstream
+  is incomplete. A valid no-op pipeline is `feasible = True`.
+- **Contract change:** `FeatureEngineeringAssessment` gains additive
+  defaulted `checks: list[FeatureEngineeringCheck]` and `objective_used:
+  bool`; new `FeatureEngineeringCheck` model and
+  `FeatureEngineeringCheckOutcome` enum (`pass` / `warning` / `blocking`).
+  Existing fields (`status`, `reason`, `feasible`, `blocking_issues`,
+  `warnings`, `notes`) unchanged; Phase-6.1 JSON still validates.
+- **Errors / safety:** any of the five arguments of the wrong type →
+  `TypeError`. Deterministic (row- and column-order invariant — all
+  checks use aggregate structural properties and model contents, never row
+  positions; no timestamp / UUID / randomness / filesystem); `df` and
+  every upstream model never mutated; no file / figure / lineage /
+  version / database / network / model / LLM access. `objective` is
+  recorded only and never overrides a rule. Reuses only `ColumnType` and
+  the Phase-6 models. No new dependency; `pyproject.toml` unchanged.
+- **Phase state:** Phase 6.1 **Done**, 6.2 **Done**, 6.3 **Done**, 6.4
+  **Done**, 6.5 **Done**, 6.6 **Done** → **Phase 6 Done**. Phase 7 **Not
+  started**.
+
 ## 0069 — Phase 6.5: `recommend_preprocessing` identifies preprocessing *requirements* only, deterministically
 - **Decision:** `data_engine/feature_engineering/preprocessing_requirements.py`
   adds `recommend_preprocessing(df: pd.DataFrame, inventory:

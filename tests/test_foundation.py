@@ -76,6 +76,7 @@ ENGINE_PACKAGES = [
     "data_engine.feature_engineering.transformation_recommendation",
     "data_engine.feature_engineering.feature_selection",
     "data_engine.feature_engineering.preprocessing_requirements",
+    "data_engine.feature_engineering.assessment",
     "database",
     "dl_engine",
     "experimentation",

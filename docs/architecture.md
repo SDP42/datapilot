@@ -235,12 +235,13 @@ lineage / EDA — the Phase-5 functions reuse only the pure
 nothing, and add no `EDAReport` field.
 [problem-understanding.md](problem-understanding.md).
 
-**Phase 6 (in progress):** `data_engine.feature_engineering` — a
-deterministic, **analysis-only** layer that will turn a dataset + an
+**Phase 6 (done):** `data_engine.feature_engineering` — a
+deterministic, **analysis-only** layer that turns a dataset + an
 **explicit** objective into a structured `FeatureEngineeringSpec`
 (feature inventory, transformation recommendations, feature selection,
-preprocessing requirements, feature-engineering feasibility). **6.1 —
-contract + foundation:** `understand_feature_engineering(request:
+preprocessing requirements, feature-engineering assessment). 6.1–6.6 are
+all implemented as standalone functions the caller composes; nothing is
+executed. **6.1 — contract + foundation:** `understand_feature_engineering(request:
 FeatureEngineeringRequest) -> FeatureEngineeringSpec` validates dataset
 identity + an explicit objective (never inferred from data; blank
 objective strings preserved verbatim) and returns a spec whose overall
@@ -313,10 +314,26 @@ target (no target encoding), re-infers the task, or modifies `df`. Flags
 agree with `required_operations` (fixed order: imputation → encoding →
 scaling). `PreprocessingRequirements` gained additive defaulted
 `requirements` + `objective_used`; new `PreprocessingRequirement` model.
+**6.6 — feature-engineering assessment:** `assess_feature_engineering(df,
+inventory, transformations, selection, preprocessing, *, objective=None)
+-> FeatureEngineeringAssessment`, a **standalone**, deterministic
+**structural consistency & readiness check** (caller merges into
+`FeatureEngineeringSpec.assessment`). It requires all four upstream
+sections `completed` (else `unavailable` / `feasible = None`, fixed
+failure precedence inventory → transformations → selection →
+preprocessing) and then reports blocking structural inconsistencies
+(internal consistency of each section, cross-section agreement, target
+safety) vs non-invalidating warnings; `feasible = False` iff `≥ 1`
+blocking issue, else `True` — warnings never change feasibility
+(mirroring Phase-5 feasibility semantics). It **executes nothing**,
+modifies nothing, infers no target/task, detects no leakage, and
+overrides no upstream decision. `FeatureEngineeringAssessment` gained
+additive defaulted `checks` + `objective_used`; new
+`FeatureEngineeringCheck` model. **Phase 6 is complete.**
 [feature-engineering.md](feature-engineering.md).
 
 **Future-phase components:** everything else —
-figure generation, later feature-engineering increments,
+figure generation, executing the Phase-6 recommendations,
 `ml_engine`, `dl_engine`,
 `experimentation`, `explainability`, `ai_engine`, `database`, `backend`,
 `frontend`, MLOps.
