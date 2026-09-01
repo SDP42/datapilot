@@ -7,8 +7,9 @@ human data scientist would — and explains every step.
 > ⚠️ **Under active development.** Phases 1–4 of the data engine are
 > implemented (ingestion, profiling, quality, cleaning, validation &
 > lineage, and a complete deterministic EDA / statistical-analysis
-> layer). ML, DL, LLM, API, and UI functionality (Phase 5+) are **not
-> started**. See [docs/roadmap.md](docs/roadmap.md).
+> layer); Phase 5 (Automated Problem Understanding) has begun with the
+> `ProblemSpec` contract. ML, DL, LLM, API, and UI functionality are
+> **not started**. See [docs/roadmap.md](docs/roadmap.md).
 
 ---
 
@@ -115,6 +116,7 @@ continuous Testing/Benchmarking/Docs. See [docs/roadmap.md](docs/roadmap.md).
 | **Phase 2 — Cleaning executor** (`data_engine.cleaning`) | ✅ Implemented (deterministic; runs only explicitly approved operations on a derived copy) |
 | **Phase 3 — Validation & Data Lineage** (`data_engine.validation`) | ✅ In progress — `DatasetVersion`, version store, lineage validation, lineage graph, opt-in auto-registration, cross-version diff, version-integrity / family-consistency / lineage-binding checks (filesystem-only, no database; detects & reports, never repairs) |
 | **Phase 4 — EDA & Statistical Analysis** (`data_engine.eda`) | ✅ Done — deterministic analysis-only EDA foundation + parametric tests (Welch t-test, one-way ANOVA, chi-square) + effect sizes (Cramér's V, correlation ratio, mutual information) + non-parametric tests (Spearman, Kendall, Mann-Whitney U, Kruskal-Wallis H) + richer distribution analysis (variance, skew, excess kurtosis, full quantiles, structured histogram) + EDA↔quality cross-reference + visualization foundation (deterministic chart-spec selection + in-memory Matplotlib **and** Plotly rendering: histogram / bar / scatter / box, + explicit chart export) + target-aware visualization recommendation (structural usefulness heuristic) + statistical-strength visualization ranking (real effect sizes / p-values) + k-NN / Kraskov continuous mutual information (numeric pairs **and** datetime columns) + paired / one-sided non-parametric tests (Wilcoxon signed-rank, sign, Friedman) + multiple-testing correction (Bonferroni / Holm / Benjamini-Hochberg); no dashboard/API |
+| **Phase 5 — Automated Problem Understanding** (`data_engine.problem_understanding`) | 🚧 In progress — Phase 5.1: the deterministic `ProblemSpec` contract + `understand_problem` foundation only (identity + explicit objective in, all sections `not_yet_inferred`). No target/task/metric/feasibility inference yet |
 | AI-driven cleaning approval / reasoning | ⛔ Not started (Phase 11+) |
 | ML experimentation | ⛔ Not started |
 | Everything else | ⛔ Not started |
@@ -122,7 +124,8 @@ continuous Testing/Benchmarking/Docs. See [docs/roadmap.md](docs/roadmap.md).
 Detail: [docs/data-engine-contract.md](docs/data-engine-contract.md),
 [docs/data-quality.md](docs/data-quality.md), [docs/cleaning.md](docs/cleaning.md),
 [docs/cleaning-execution.md](docs/cleaning-execution.md),
-[docs/data-lineage.md](docs/data-lineage.md), [docs/eda.md](docs/eda.md).
+[docs/data-lineage.md](docs/data-lineage.md), [docs/eda.md](docs/eda.md),
+[docs/problem-understanding.md](docs/problem-understanding.md).
 
 ## Development setup
 

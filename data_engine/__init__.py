@@ -1,1 +1,1 @@
-"""Deterministic data-science engine: ingestion, profiling, quality, cleaning, preprocessing, validation, feature engineering."""
+"""Deterministic data-science engine: ingestion, profiling, quality, cleaning, preprocessing, validation, EDA, problem understanding, feature engineering."""

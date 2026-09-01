@@ -62,6 +62,7 @@ packages = [
     "data_engine.preprocessing",
     "data_engine.validation",
     "data_engine.eda",
+    "data_engine.problem_understanding",
     "data_engine.feature_engineering",
     "database",
     "dl_engine",

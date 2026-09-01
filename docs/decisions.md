@@ -4,6 +4,41 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0060 — Phase 5.1: `ProblemSpec` contract + `understand_problem` foundation, infers nothing
+- **Decision:** new package `data_engine/problem_understanding/`
+  (`models.py`, `understanding.py`, `__init__.py`) with
+  `understand_problem(request: ProblemUnderstandingRequest) ->
+  ProblemSpec`. Phase 5.1 **infers nothing** — it validates the request
+  and returns a `ProblemSpec` whose overall `status` and all four
+  sections (`target` / `task_type` / `metrics` / `feasibility`) are
+  `not_yet_inferred`, echoing `dataset_id` / `dataset_version_id` /
+  `objective`. `docs/roadmap.md`: Phase 5 → **In progress** (5.1 only).
+- **Reason:** Prompt "Phase 5.1: Automated Problem Understanding
+  Foundation & ProblemSpec Contract" — "implementing only the foundation
+  and contract"; "Do not over-engineer"; "designed so that later Phase 5
+  increments can add target identification / task-type inference /
+  candidate metrics / feasibility results without an incompatible
+  redesign".
+- **Contract shape:** a **three-state** status enum —
+  `not_yet_inferred` (the 5.1 state) / `completed` / `unavailable` —
+  making the "known vs unavailable vs not-attempted" distinction explicit
+  (§4). `TaskType` is defined now (regression / binary- / multiclass- /
+  multilabel-classification / clustering / time-series-forecasting /
+  other) so the eventual answer's shape is stable, but **not populated**.
+  Each section is a small model with `status` + `reason` + a nullable
+  payload (`None` / `[]`, never a fake `"classification"` / `0` /
+  `False`). `dataset_id` / `dataset_version_id` reuse the existing report
+  convention; the request carries the **explicit** objective, which is
+  never inferred from column names or data.
+- **No `generated_at`:** unlike `DatasetProfile` / `QualityReport` /
+  `EDAReport`, `ProblemSpec` records no wall-clock value, because the
+  Phase-5 determinism requirement is byte-identical repeated output. The
+  entrypoint reads no data, writes no file, touches no dataset / version
+  / lineage, and makes no external call. Invalid API arguments raise
+  (`TypeError` for a non-request argument, `ValueError` for a blank
+  `dataset_id`). No new dependency; `pyproject.toml` gains only the
+  `data_engine.problem_understanding` package declaration.
+
 ## 0059 — Multiple-testing correction: standalone NumPy layer over already-computed p-values
 - **Decision:** `data_engine/eda/multiple_testing_models.py` +
   `multiple_testing.py` add `correct_multiple_testing(p_values, *,

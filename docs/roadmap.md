@@ -10,7 +10,7 @@ future phases are not anticipated in code.
 | 2 | Data Quality & Cleaning | **Done** — quality analysis + cleaning planning + safe cleaning execution (deterministic; no AI approval/reasoning yet) |
 | 3 | Validation & Data Lineage | **In progress** — `DatasetVersion` + store + lineage validation + lineage graph + opt-in auto-registration + cross-version diffing + version-integrity / family-consistency / version↔lineage-binding checks done; still filesystem-only (no database, no GC) |
 | 4 | EDA & Statistical Analysis | **Done** — deterministic analysis-only `data_engine.eda`: EDA/univariate/bivariate, parametric tests, effect sizes, non-parametric tests, distribution analysis, EDA↔quality cross-reference, visualization foundation (chart-spec selection + in-memory Matplotlib **and Plotly** rendering + explicit chart export), target-aware visualization recommendation, statistical-strength visualization ranking, k-NN / Kraskov mutual-information estimator, datetime mutual information, paired / one-sided non-parametric tests (Wilcoxon signed-rank / sign / Friedman), multiple-testing correction (Bonferroni / Holm / Benjamini-Hochberg). No dashboard/API |
-| 5 | Automated Problem Understanding | Not started |
+| 5 | Automated Problem Understanding | **In progress** — Phase 5.1: the deterministic `ProblemSpec` contract + `understand_problem` foundation in `data_engine.problem_understanding` (identity + explicit objective in, all sections `not_yet_inferred`). Target identification, task-type inference, candidate metrics, and feasibility checks are later increments |
 | 6 | Feature Engineering | Not started |
 | 7 | Classical ML | Not started |
 | 8 | Deep Learning | Not started |
@@ -154,19 +154,11 @@ future phases are not anticipated in code.
      (histogram / bar chart / scatter plot / box plot), selected
      deterministically by DataFrame structure alone (alphabetical order,
      per-family caps of 50, `unavailable` + reason for degenerate
-     columns, no target inference). The same spec renders through
-     **either** backend — `render_visualization(df, spec)` →
-     `matplotlib.figure.Figure`, or `render_plotly_visualization(df,
-     spec)` → `plotly.graph_objects.Figure` — both **in-memory**, both
-     reusing the shared `sturges_bin_count`, both raising on an
-     unavailable / unplottable spec. `export_visualization(figure,
-     output_path, *, format=None, overwrite=False)` writes an
-     already-rendered Plotly figure to an **explicit** path (HTML with no
-     extra tooling; PNG / SVG / PDF via the optional `kaleido` extra;
-     never creates directories, refuses silent overwrite). No `Figure` is
-     stored in `EDAReport`; only `export_visualization` writes a file.
-     Adds `matplotlib>=3.8` and `plotly>=5.0` as runtime dependencies
-     (`kaleido` is an optional `[export]` extra).
+     columns, no target inference), plus `render_visualization(df, spec)`
+     → an **in-memory** `matplotlib.figure.Figure` (object API, no
+     `pyplot`, no files). Histogram bins reuse the shared
+     `sturges_bin_count`. Adds `matplotlib>=3.8`. No `Figure` is stored
+     in `EDAReport`.
   8. **Target-aware visualization recommendation** —
      `recommend_visualizations(df, target_column, *,
      max_recommendations=10)` → `VisualizationRecommendationAnalysis`,
@@ -177,7 +169,20 @@ future phases are not anticipated in code.
      all-missing / too-high-cardinality target returns
      `status = unavailable` + a reason. `analyze_dataframe`'s signature
      is unchanged and it leaves the field at its "no target" default.
-  9. **Statistical-strength visualization ranking** —
+  9. **Plotly rendering + chart export** —
+     `render_plotly_visualization(df, spec)` →
+     `plotly.graph_objects.Figure`, a second **in-memory** backend for
+     the *same* `VisualizationSpec` (reuses `sturges_bin_count`, freezes
+     category order, raises on an unavailable / unplottable spec). The
+     Matplotlib path is unchanged. `export_visualization(figure,
+     output_path, *, format=None, overwrite=False)` writes an
+     already-rendered Plotly figure to an **explicit** path — the only
+     file writer in the EDA layer (HTML with no extra tooling; PNG / SVG /
+     PDF via the optional `kaleido` extra; never creates directories,
+     refuses silent overwrite; rejects a Matplotlib figure). Adds
+     `plotly>=5.0` (`kaleido` is an optional `[export]` extra). No
+     `Figure` is stored in `EDAReport`.
+  10. **Statistical-strength visualization ranking** —
      `rank_visualizations_by_statistical_strength(df, target_column, *,
      max_recommendations=10)` → `VisualizationStatisticalStrengthAnalysis`.
      A **distinct** layer from #8: it ranks the *existing* specs by the
@@ -193,7 +198,7 @@ future phases are not anticipated in code.
      Target required; absent / datetime / all-missing / too-high-
      cardinality → `status = unavailable`. `analyze_dataframe`'s signature
      is unchanged and it leaves the field at its "no target" default.
-  10. **k-NN / Kraskov mutual-information estimator** —
+  11. **k-NN / Kraskov mutual-information estimator** —
       `estimate_mutual_information_knn(df, x_column, y_column, *, k=3)` →
       `KNNMutualInformationResult`. A **continuous** MI estimate for two
       **numeric** columns using KSG estimator 1 (`I = ψ(k) + ψ(N) −
@@ -257,11 +262,30 @@ future phases are not anticipated in code.
   See [eda.md](eda.md). **Phase 4 is complete.** No Phase-4 items remain.
   Later phases (5+) are **not started**.
 
-### Phase 5 — Automated Problem Understanding
+### Phase 5 — Automated Problem Understanding — **In progress**
 - **Objective:** identify the ML task from data + objective.
 - **Components:** task-type inference (classification/regression/…), target
   identification, candidate evaluation metrics, feasibility checks.
 - **Output:** a `ProblemSpec`.
+- **Status:** **Phase 5.1 — contract + foundation only.**
+  `data_engine.problem_understanding` — a deterministic, analysis-only
+  layer. `understand_problem(request: ProblemUnderstandingRequest) ->
+  ProblemSpec`: the request carries **dataset identity** (`dataset_id` /
+  `dataset_version_id`, the convention shared by `DatasetProfile` /
+  `QualityReport` / `EDAReport`) and an **explicit** user `objective`
+  (never inferred from data). The returned `ProblemSpec` echoes those
+  fields and sets its overall `status` and all four sections — `target`,
+  `task_type`, `metrics`, `feasibility` — to `not_yet_inferred`; nothing
+  is fabricated (`None` / `[]`, never a fake `"classification"` / `0` /
+  `False`). Three-state status enum (`not_yet_inferred` / `completed` /
+  `unavailable`); `TaskType` enum defined so the contract is stable but
+  not populated. No `generated_at` (repeated calls are byte-identical).
+  No `EDAReport` field, no cross-phase coupling, no new dependency; adds
+  the `data_engine.problem_understanding` package. See
+  [problem-understanding.md](problem-understanding.md). **Not yet:**
+  target identification, task-type inference, candidate metrics,
+  feasibility checks — the four later Phase-5 increments. Phase 5 is
+  **not complete**.
 
 ### Phase 6 — Feature Engineering
 - **Objective:** build and select informative features deterministically.

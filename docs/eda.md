@@ -4,7 +4,7 @@
 dataset (a DataFrame, or a registered `DatasetVersion`) into a structured,
 JSON-serialisable `EDAReport`.
 
-Phase 4 is **complete**. It contains thirteen foundations (all
+Phase 4 is **complete**. It contains fourteen foundations (all
 deterministic, read-only):
 
 1. the **EDA foundation** — column classification, univariate analysis,
@@ -22,38 +22,44 @@ deterministic, read-only):
 6. the **EDA ↔ data-quality cross-reference** — an observational layer
    that correlates EDA signals with existing `QualityReport` findings;
 7. the **visualization foundation** — deterministic structural selection
-   of chart specs (histogram / bar chart / scatter plot / box plot),
-   in-memory rendering via **either** Matplotlib **or** Plotly, and
-   explicit chart export (HTML always; PNG/SVG/PDF with `kaleido`).
-   **Not** a dashboard, frontend, or API layer; only `export_visualization`
-   writes a file, and only where told;
+   of chart specs (histogram / bar chart / scatter plot / box plot) plus
+   `render_visualization(df, spec)` → an in-memory
+   `matplotlib.figure.Figure`. No target inference, no new chart kinds,
+   no files;
 8. the **target-aware visualization recommendation** — given an
    explicitly supplied target column, deterministically ranks the
    existing chart specs by a visualisation-usefulness heuristic (no
    target inference, no model, no new chart kinds);
-9. the **statistical-strength visualization ranking** — given an
-   explicitly supplied target column, ranks the existing chart specs by
-   the *strength of the statistical evidence* for the relationship each
-   depicts, using real effect sizes / p-values already produced by
-   foundations 2–4. Distinct from #8 (usefulness ≠ evidence strength);
-   no new statistical test, no MI estimator, no target inference;
-10. the **k-NN / Kraskov mutual-information estimator** —
+9. **Plotly rendering + chart export** —
+   `render_plotly_visualization(df, spec)` → a `plotly.graph_objects.Figure`
+   (second in-memory backend for the same spec), plus
+   `export_visualization(figure, output_path, *, format=None,
+   overwrite=False)` — the **only** file writer in the EDA layer (HTML
+   always; PNG/SVG/PDF with the optional `kaleido` extra; explicit path
+   only). **Not** a dashboard, frontend, or API layer;
+10. the **statistical-strength visualization ranking** — given an
+    explicitly supplied target column, ranks the existing chart specs by
+    the *strength of the statistical evidence* for the relationship each
+    depicts, using real effect sizes / p-values already produced by
+    foundations 2–4. Distinct from #8 (usefulness ≠ evidence strength);
+    no new statistical test, no MI estimator, no target inference;
+11. the **k-NN / Kraskov mutual-information estimator** —
     `estimate_mutual_information_knn(df, x_column, y_column, *, k=3)`, a
     **continuous** MI estimate for two numeric columns (KSG estimator 1,
     no binning). Complements — does not replace — the binning-based
     `mutual_information` in the effect-size foundation. Standalone,
     explicit columns, no target inference;
-11. **datetime mutual information** —
+12. **datetime mutual information** —
     `estimate_mutual_information_datetime(df, datetime_column,
     other_column, *, k=3)`, the same KSG estimator after a deterministic
     datetime → elapsed-seconds conversion (datetime ↔ numeric, datetime ↔
     datetime);
-12. **paired / one-sided non-parametric tests** —
+13. **paired / one-sided non-parametric tests** —
     `wilcoxon_signed_rank(x, y, *, alternative=...)`,
     `sign_test(x, y, *, alternative=...)`, `friedman_test(*samples)`, a
     related-samples complement to the independent-sample non-parametric
     foundation;
-13. **multiple-testing correction** —
+14. **multiple-testing correction** —
     `correct_multiple_testing(p_values, *, method="holm", alpha=0.05)`, a
     standalone Bonferroni / Holm / Benjamini-Hochberg layer over a family
     of already-computed p-values.

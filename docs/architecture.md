@@ -168,6 +168,21 @@ are backward-compatible defaulted fields. Read-only — no dataset, version
 record, or lineage is modified; no new version is registered.
 [eda.md](eda.md).
 
+**Phase 5 (in progress):** `data_engine.problem_understanding` — a
+deterministic, **analysis-only** layer that will turn a dataset + an
+**explicit** objective into a structured `ProblemSpec` (task type,
+target, candidate metrics, feasibility). **Phase 5.1 establishes the
+contract + foundation only:** `understand_problem(request:
+ProblemUnderstandingRequest) -> ProblemSpec` validates dataset identity +
+an explicit objective (never inferred from data) and returns a spec whose
+overall status and all four sections are `not_yet_inferred` — nothing is
+fabricated. Three-state status enum
+(`not_yet_inferred` / `completed` / `unavailable`); no `generated_at`, so
+repeated calls are byte-identical. Separate from ingestion / profiling /
+quality / cleaning / validation / lineage / EDA — it may *consume* their
+outputs in a later increment but modifies none of them and adds no
+`EDAReport` field. [problem-understanding.md](problem-understanding.md).
+
 **Future-phase components:** everything else —
 figure generation, feature engineering,
 `ml_engine`, `dl_engine`,
