@@ -11,7 +11,7 @@ future phases are not anticipated in code.
 | 3 | Validation & Data Lineage | **In progress** — `DatasetVersion` + store + lineage validation + lineage graph + opt-in auto-registration + cross-version diffing + version-integrity / family-consistency / version↔lineage-binding checks done; still filesystem-only (no database, no GC) |
 | 4 | EDA & Statistical Analysis | **Done** — deterministic analysis-only `data_engine.eda`: EDA/univariate/bivariate, parametric tests, effect sizes, non-parametric tests, distribution analysis, EDA↔quality cross-reference, visualization foundation (chart-spec selection + in-memory Matplotlib **and Plotly** rendering + explicit chart export), target-aware visualization recommendation, statistical-strength visualization ranking, k-NN / Kraskov mutual-information estimator, datetime mutual information, paired / one-sided non-parametric tests (Wilcoxon signed-rank / sign / Friedman), multiple-testing correction (Bonferroni / Holm / Benjamini-Hochberg). No dashboard/API |
 | 5 | Automated Problem Understanding | **Done** — `data_engine.problem_understanding`: the `ProblemSpec` contract + `understand_problem` foundation (5.1), **target identification** `identify_target` (5.2), **task-type inference** `infer_task_type` (5.3), **candidate metrics** `recommend_metrics` (5.4), **feasibility assessment** `assess_feasibility` (5.5). All deterministic, standalone, analysis-only; no ML/LLM |
-| 6 | Feature Engineering | **In progress** — `data_engine.feature_engineering`: the `FeatureEngineeringSpec` contract + `understand_feature_engineering` foundation (6.1 — done); infers nothing yet. 6.2+ (inventory / transformations / selection / preprocessing / feasibility) not started |
+| 6 | Feature Engineering | **In progress** — `data_engine.feature_engineering`: the `FeatureEngineeringSpec` contract + `understand_feature_engineering` foundation (6.1 — done); **structural feature inventory** `inventory_features` — deterministic column classification (candidate vs target / constant / all-missing / identifier-like), no predictive-usefulness assessment (6.2 — done). 6.3 transformations / 6.4 selection / 6.5 preprocessing / 6.6 assessment not started |
 | 7 | Classical ML | Not started |
 | 8 | Deep Learning | Not started |
 | 9 | Experiment Tracking | Not started |
@@ -424,10 +424,37 @@ future phases are not anticipated in code.
   `data_engine.feature_engineering` package — no change needed; no new
   dependency. See [feature-engineering.md](feature-engineering.md).
 
-  **Completed:** 6.1 foundation / `FeatureEngineeringSpec`. **Not
-  started:** 6.2+ (feature inventory, transformation recommendations,
-  feature selection, preprocessing requirements, feature-engineering
-  feasibility). Phase 6 is **not complete**.
+  **6.2 — structural feature inventory.** `inventory_features(df: pd.DataFrame,
+  target: str | None = None, *, objective: str | None = None) ->
+  FeatureInventory` — a **standalone**, deterministic structural column
+  classification (caller merges into `FeatureEngineeringSpec.inventory`).
+  For every column it computes structural statistics (observations,
+  missingness, cardinality, inferred `ColumnType` via the reused pure
+  `infer_column_type`, constant / all-missing / identifier-like flags) and
+  decides **structural** candidacy — it never assesses predictive
+  usefulness, infers a task type, or re-selects a target. Excluded: the
+  caller-declared `target`; entirely-missing columns; constant columns
+  (`≤ 1` distinct); identifier-like columns (name token in `id` / `idx` /
+  `index` / `key` / `uuid` / `guid` / `pk` / `rowid` / `sk` / `hash`, or
+  near-unique (`≥ 0.99`) categorical / integer — **never** a
+  high-uniqueness float). Moderate missingness stays a candidate;
+  `UNKNOWN`-type columns stay candidates but are flagged. `objective` is
+  context only (`objective_used` always `False`; no NLP / embeddings /
+  fuzzy matching). `status = unavailable` for no columns / no rows /
+  unknown target; non-DataFrame → `TypeError`. Output lists are
+  alphabetical → row- and column-order invariant, byte-identical repeated
+  calls. `FeatureInventory` gains additive defaulted `candidates:
+  list[FeatureInventoryCandidate]` + `objective_used: bool` (6.1 JSON
+  still validates). `df` never mutated; no file / figure / lineage /
+  version / external / LLM call.
+
+  No new dependency; `pyproject.toml` unchanged (the package was declared
+  in 6.1). See [feature-engineering.md](feature-engineering.md).
+
+  **Completed:** 6.1 foundation / `FeatureEngineeringSpec`, 6.2 structural
+  feature inventory. **Not started:** 6.3 transformation recommendations,
+  6.4 feature selection, 6.5 preprocessing requirements, 6.6
+  feature-engineering assessment. Phase 6 is **not complete**.
 
 ### Phase 7 — Classical ML
 - **Objective:** train and evaluate classical models.

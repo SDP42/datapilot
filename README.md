@@ -9,10 +9,11 @@ human data scientist would — and explains every step.
 > lineage, a complete deterministic EDA / statistical-analysis layer, and
 > Automated Problem Understanding — the `ProblemSpec` contract, target
 > identification, task-type inference, candidate-metric recommendation,
-> and feasibility assessment, 5.1–5.5). Phase 6 (Feature Engineering) has
-> begun with the `FeatureEngineeringSpec` contract + foundation (6.1 —
-> infers nothing yet). ML, DL, LLM, API, and UI functionality are **not
-> started**. See [docs/roadmap.md](docs/roadmap.md).
+> and feasibility assessment, 5.1–5.5). Phase 6 (Feature Engineering) is
+> in progress — the `FeatureEngineeringSpec` contract + foundation (6.1)
+> and a deterministic structural feature inventory (6.2). ML, DL, LLM,
+> API, and UI functionality are **not started**. See
+> [docs/roadmap.md](docs/roadmap.md).
 
 ---
 
@@ -120,7 +121,7 @@ continuous Testing/Benchmarking/Docs. See [docs/roadmap.md](docs/roadmap.md).
 | **Phase 3 — Validation & Data Lineage** (`data_engine.validation`) | ✅ In progress — `DatasetVersion`, version store, lineage validation, lineage graph, opt-in auto-registration, cross-version diff, version-integrity / family-consistency / lineage-binding checks (filesystem-only, no database; detects & reports, never repairs) |
 | **Phase 4 — EDA & Statistical Analysis** (`data_engine.eda`) | ✅ Done — deterministic analysis-only EDA foundation + parametric tests (Welch t-test, one-way ANOVA, chi-square) + effect sizes (Cramér's V, correlation ratio, mutual information) + non-parametric tests (Spearman, Kendall, Mann-Whitney U, Kruskal-Wallis H) + richer distribution analysis (variance, skew, excess kurtosis, full quantiles, structured histogram) + EDA↔quality cross-reference + visualization foundation (deterministic chart-spec selection + in-memory Matplotlib **and** Plotly rendering: histogram / bar / scatter / box, + explicit chart export) + target-aware visualization recommendation (structural usefulness heuristic) + statistical-strength visualization ranking (real effect sizes / p-values) + k-NN / Kraskov continuous mutual information (numeric pairs **and** datetime columns) + paired / one-sided non-parametric tests (Wilcoxon signed-rank, sign, Friedman) + multiple-testing correction (Bonferroni / Holm / Benjamini-Hochberg); no dashboard/API |
 | **Phase 5 — Automated Problem Understanding** (`data_engine.problem_understanding`) | ✅ Done — the deterministic `ProblemSpec` contract + `understand_problem` foundation (5.1); **target identification** `identify_target()` — ranks plausible target columns from structural evidence + transparent objective name-matching (5.2); **task-type inference** `infer_task_type()` — rule-based `regression` / `*_classification` / `clustering` / `time_series_forecasting` from the target dtype + a small fixed objective vocabulary (5.3); **candidate metrics** `recommend_metrics()` — a fixed per-task metric vocabulary + fixed-vocabulary objective refinement, `mape` gated on a non-zero non-negative target (5.4); **feasibility assessment** `assess_feasibility()` — a deterministic structural screen over row counts / target availability & variation / class balance / finite-value counts / timestamp availability / feature presence, producing blocking issues vs warnings (5.5). All standalone, deterministic, analysis-only; no ML/LLM, no leakage detection |
-| **Phase 6 — Feature Engineering** (`data_engine.feature_engineering`) | 🚧 In progress — the deterministic `FeatureEngineeringSpec` contract + `understand_feature_engineering()` foundation (6.1): validates an explicit `FeatureEngineeringRequest`, echoes dataset identity + verbatim objective, returns an all-`not_yet_inferred` spec. **Infers nothing yet** — no DataFrame/dtype inspection, no feature/transformation/encoder/scaler/imputer/selection/importance/leakage/feasibility. Stable `FeatureOperationType` enum defined but nothing executed. 6.2+ not started |
+| **Phase 6 — Feature Engineering** (`data_engine.feature_engineering`) | 🚧 In progress — the deterministic `FeatureEngineeringSpec` contract + `understand_feature_engineering()` foundation (6.1 — infers nothing); **structural feature inventory** `inventory_features()` (6.2) — deterministic per-column structural stats + classification into candidate features vs excluded (declared target / constant / all-missing / identifier-like, where a high-uniqueness float is **not** an identifier); reuses the shared `infer_column_type` / `ColumnType`. **Does not determine predictive usefulness.** No transformation/encoding/scaling/imputation/selection/importance/leakage/model. 6.3–6.6 not started |
 | AI-driven cleaning approval / reasoning | ⛔ Not started (Phase 11+) |
 | ML experimentation | ⛔ Not started |
 | Everything else | ⛔ Not started |

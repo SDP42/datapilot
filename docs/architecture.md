@@ -250,7 +250,22 @@ but **no operation is executed, recommended, or named**; no
 `generated_at`, so repeated calls are byte-identical. Non-model input →
 `TypeError` (a DataFrame is rejected); blank `dataset_id` → `ValueError`.
 Depends on nothing beyond the stdlib + Pydantic; does not import or
-inspect a DataFrame. [feature-engineering.md](feature-engineering.md).
+inspect a DataFrame. **6.2 — structural feature inventory:**
+`inventory_features(df, target=None, *, objective=None) -> FeatureInventory`,
+a **standalone** deterministic column classification (caller merges into
+`FeatureEngineeringSpec.inventory`). It computes structural per-column
+statistics (missingness, cardinality, inferred `ColumnType` via the
+reused pure `infer_column_type`, constant / all-missing / identifier-like
+flags) and marks each column a structural feature candidate or excludes
+it (declared target / entirely missing / constant / identifier-like —
+where a high-uniqueness *float* is never an identifier). It **never**
+determines predictive usefulness, infers a task type, re-selects a
+target, or uses correlation / MI / feature importance / a model / an LLM.
+`objective` is context only. Output lists are alphabetical → row- and
+column-order invariant; `df` never mutated; `status = unavailable` for no
+columns / no rows / unknown target. `FeatureInventory` gained additive
+defaulted `candidates` + `objective_used` fields.
+[feature-engineering.md](feature-engineering.md).
 
 **Future-phase components:** everything else —
 figure generation, later feature-engineering increments,

@@ -7,14 +7,17 @@ features, which transformations / encoders / scalers / imputers a model
 would need, which features to keep or drop, and whether feature
 engineering is feasible.
 
-> **Status.** Phase 6 is **in progress**. Only **Phase 6.1 — the
-> `FeatureEngineeringSpec` contract + `understand_feature_engineering`
-> foundation** — is implemented. It **infers nothing**: it validates an
-> explicit request and returns a spec whose overall status and every
-> nested section are `not_yet_inferred`. Feature inventory,
-> transformation recommendations, feature selection, preprocessing
-> requirements, and feature-engineering feasibility are later Phase-6
-> increments (6.2+).
+> **Status.** Phase 6 is **in progress**.
+>
+> - **6.1 — foundation** (`understand_feature_engineering`): DONE. Infers
+>   nothing; returns an all-`not_yet_inferred` spec.
+> - **6.2 — feature inventory** (`inventory_features`): DONE. A
+>   deterministic **structural** column classification — plausible input
+>   feature vs excluded (target / constant / all-missing /
+>   identifier-like). It does **not** determine predictive usefulness.
+> - **6.3 transformation recommendations / 6.4 feature selection / 6.5
+>   preprocessing requirements / 6.6 feature-engineering assessment**: NOT
+>   STARTED.
 
 ## Entrypoint
 
@@ -72,7 +75,9 @@ non-blank after `.strip()`.
 ### Nested sections
 
 - `FeatureInventory` — `status`, `reason`, `candidate_features: list[str]`,
-  `excluded_features: list[str]`, `notes`.
+  `excluded_features: list[str]`, `candidates: list[FeatureInventoryCandidate]`,
+  `objective_used: bool`, `notes`. (`candidates` / `objective_used` are
+  additive & defaulted — Phase-6.1 JSON still validates.)
 - `TransformationRecommendations` — `status`, `reason`,
   `recommended_operations: list[str]`, `notes`.
 - `FeatureSelectionRecommendations` — `status`, `reason`,
@@ -104,20 +109,115 @@ leakage score, or feasibility verdict.
 `feature_selection`. Defined now so the contract is stable — Phase 6.1
 executes, recommends, and names **none** of them.
 
+## Feature inventory (6.2) — `inventory_features`
+
+```python
+from data_engine.feature_engineering import inventory_features
+
+inventory = inventory_features(df, target="churn", objective="predict churn")
+spec = spec.model_copy(update={"inventory": inventory})
+```
+
+`inventory_features(df: pd.DataFrame, target: str | None = None, *, objective: str | None = None) -> FeatureInventory`
+
+A deterministic **structural** column classification: for every column it
+computes structural statistics and decides whether the column is a
+plausible input feature or is excluded. It **never** determines
+predictive usefulness, infers a task type, re-selects a target, or uses
+correlation / mutual information / feature importance / a model / an LLM.
+
+### Per-column structural statistics (`FeatureInventoryCandidate`)
+
+`column`, `column_type` (the shared `ColumnType` — `NUMERIC` /
+`CATEGORICAL` / `BOOLEAN` / `DATETIME` / `UNKNOWN`, via the reused pure
+`infer_column_type` helper), `n_observations`, `n_missing`,
+`missing_fraction` (rounded to 6 dp), `n_unique`, `unique_fraction`
+(rounded to 6 dp; `0.0` when there are no observations), `identifier_like`,
+`constant`, `all_missing`, `is_target`, `candidate`, and an ordered
+`reasons` list.
+
+### Exclusion rules (structural evidence only)
+
+A column is **excluded** (`candidate = False`) when, in this precedence:
+
+1. **it is the caller-declared `target`** — placed in `excluded_features`,
+   reason states it is the declared prediction target. No other target is
+   inferred; `target=None` invents none.
+2. **entirely missing** — every value is `NaN`.
+3. **constant** — `≤ 1` distinct non-null value.
+4. **identifier-like** — see below.
+
+Everything else is a **structural candidate**. A column with moderate
+missingness stays a candidate (its missingness is recorded); only
+all-missing columns are excluded for missingness. An `UNKNOWN`-type
+column stays a candidate but is flagged for conservative downstream
+handling. Nothing is imputed or transformed.
+
+### Identifier detection (transparent, deterministic)
+
+A column is `identifier_like` when **either**:
+
+- its name — whole name, or first/last token after splitting on space /
+  `_` / `-` — is one of `id`, `idx`, `index`, `key`, `uuid`, `guid`,
+  `pk`, `rowid`, `sk`, `hash` (so `customer_id`, `order_id`, … match on
+  the `id` token); **or**
+- it is **near-unique** (`unique_fraction ≥ HIGH_UNIQUE_ID_THRESHOLD =
+  0.99`) **and** it is a `CATEGORICAL` column or an **integer** `NUMERIC`
+  column.
+
+A high-uniqueness **float** column is **never** called an identifier on
+uniqueness alone — continuous measurements naturally have high
+cardinality.
+
+### Objective handling
+
+The `objective` is accepted as context and recorded in a note only.
+Phase 6.2 never uses it to fabricate predictive usefulness or to change
+an inclusion / exclusion — `objective_used` is always `False`.
+
+### Result
+
+- `status = completed` — `candidates` (alphabetical by column name),
+  `candidate_features` and `excluded_features` (both alphabetical),
+  `objective_used = False`, explanatory `notes`.
+- `status = unavailable` — `df` has no columns; `df` has no rows; or
+  `target` names a column not in `df`. `reason` is explicit; `candidates`
+  is empty. A non-DataFrame `df` raises `TypeError`.
+
+### Determinism & safety
+
+All statistics are `nunique` / `isna` / dtype based — invariant to
+DataFrame row order and column order; repeated calls are byte-identical
+(no timestamps, UUIDs, randomness, sampling, environment, or filesystem).
+`df` is never mutated; non-string column names are coerced to `str` for
+reporting only and the DataFrame's names are left unchanged. No file,
+figure, network, database, lineage, `DatasetVersion`, LLM, or model
+access.
+
+### Integration
+
+`understand_feature_engineering()` is unchanged. After
+`spec.model_copy(update={"inventory": inventory_features(...)})` the
+`inventory` section is populated and `transformations` / `selection` /
+`preprocessing` / `assessment` and the overall `FeatureEngineeringSpec.status`
+stay `not_yet_inferred`.
+
 ## No timestamp
 
 Like `ProblemSpec`, `FeatureEngineeringSpec` has **no `generated_at`**
 field — the determinism requirement is byte-identical repeated output, so
 no wall-clock value is recorded.
 
-## Boundaries (Phase 6.1)
+## Boundaries (Phase 6.1 / 6.2)
 
 - Separate from ingestion / profiling / quality / cleaning / validation /
-  lineage / EDA / problem understanding. Phase 6.1 depends on **nothing**
-  beyond the stdlib and Pydantic and does not import a DataFrame.
-- **Contract / foundation only.** No feature is engineered, transformed,
-  selected, encoded, scaled, imputed, generated, or modified. No
-  DataFrame or dtype inspection, no correlation / mutual information /
-  feature importance, no leakage detection, no model training, no
-  train/test split, no cross-validation, no statistical testing, no LLM
-  or external call. Those belong to Phase 6.2+.
+  lineage / EDA / problem understanding. 6.1 depends on nothing beyond
+  the stdlib + Pydantic; 6.2 additionally reuses only the pure
+  `infer_column_type` helper and the shared `ColumnType` enum, and is not
+  coupled to the Phase-5 target-selection engine.
+- **Contract, foundation, and structural inventory only.** No feature is
+  engineered, transformed, selected, encoded, scaled, imputed, generated,
+  or modified. No correlation / mutual information / feature importance,
+  no leakage detection, no predictive-usefulness scoring, no model
+  training, no train/test split, no cross-validation, no statistical
+  testing, no LLM or external call. Those belong to Phase 6.3+.

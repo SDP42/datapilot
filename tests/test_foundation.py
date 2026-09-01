@@ -72,6 +72,7 @@ ENGINE_PACKAGES = [
     "data_engine.feature_engineering",
     "data_engine.feature_engineering.models",
     "data_engine.feature_engineering.understanding",
+    "data_engine.feature_engineering.feature_inventory",
     "database",
     "dl_engine",
     "experimentation",

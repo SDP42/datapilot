@@ -22,6 +22,8 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
+from datapilot.contracts import ColumnType
+
 FEATURE_ENGINEERING_ENGINE_VERSION = "1"
 
 
@@ -50,11 +52,47 @@ class FeatureOperationType(str, Enum):
     FEATURE_SELECTION = "feature_selection"
 
 
+class FeatureInventoryCandidate(BaseModel):
+    """One column's structural feature-inventory evidence.
+
+    Populated by :func:`data_engine.feature_engineering.inventory_features`
+    (Phase 6.2). ``candidate`` records only **structural** plausibility —
+    Phase 6.2 never decides whether a column is *predictively* useful.
+    """
+
+    column: str
+    column_type: ColumnType
+    n_observations: int = Field(description="Non-null values.")
+    n_missing: int
+    missing_fraction: float
+    n_unique: int = Field(description="Distinct non-null values.")
+    unique_fraction: float = Field(
+        description="n_unique / n_observations; 0.0 when there are no observations."
+    )
+    identifier_like: bool = Field(
+        description="Name / behaviour looks like a row identifier (excluded from candidates)."
+    )
+    constant: bool = Field(description="<= 1 distinct non-null value.")
+    all_missing: bool = Field(description="Every value is missing.")
+    is_target: bool = Field(
+        default=False, description="True iff this is the caller-declared prediction target."
+    )
+    candidate: bool = Field(
+        description="True iff the column is a structurally plausible input feature."
+    )
+    reasons: list[str] = Field(
+        default_factory=list,
+        description="Deterministic evidence for the candidate / excluded decision, fixed order.",
+    )
+
+
 class FeatureInventory(BaseModel):
     """Candidate input features identified from the dataset.
 
-    Populated by a later Phase-6 increment. Phase 6.1 leaves it empty at
-    ``status = not_yet_inferred``.
+    Populated by :func:`data_engine.feature_engineering.inventory_features`
+    (Phase 6.2). ``candidates`` / ``objective_used`` are additive and
+    defaulted, so a ``FeatureInventory`` serialised by Phase 6.1 still
+    validates.
     """
 
     status: FeatureEngineeringStatus = FeatureEngineeringStatus.NOT_YET_INFERRED
@@ -64,11 +102,21 @@ class FeatureInventory(BaseModel):
     )
     candidate_features: list[str] = Field(
         default_factory=list,
-        description="Column names usable as input features, best-first; empty until inferred.",
+        description="Column names that are structurally plausible input features, "
+        "alphabetically ordered; empty until inferred.",
     )
     excluded_features: list[str] = Field(
         default_factory=list,
-        description="Columns deliberately excluded from feature engineering (e.g. the target).",
+        description="Columns excluded from feature consideration (target / constant / "
+        "all-missing / identifier-like), alphabetically ordered.",
+    )
+    candidates: list[FeatureInventoryCandidate] = Field(
+        default_factory=list,
+        description="Per-column structural evidence, alphabetically ordered by column name.",
+    )
+    objective_used: bool = Field(
+        default=False,
+        description="True iff the objective materially affected an inclusion / exclusion.",
     )
     notes: list[str] = Field(default_factory=list)
 

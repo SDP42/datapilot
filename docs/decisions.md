@@ -4,6 +4,54 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0066 — Phase 6.2: `inventory_features` is a standalone deterministic structural column classification
+- **Decision:** `data_engine/feature_engineering/feature_inventory.py`
+  adds `inventory_features(df: pd.DataFrame, target: str | None = None, *,
+  objective: str | None = None) -> FeatureInventory`, a **standalone**
+  function (`understand_feature_engineering` unchanged; caller merges into
+  `FeatureEngineeringSpec.inventory` via `model_copy`). It classifies each
+  column as a **structural** feature candidate or an excluded column and
+  never decides whether a column is *predictively* useful.
+- **Reason:** Prompt "Phase 6.2 — Automated Feature Inventory & Candidate
+  Feature Identification": "This is an inventory/classification-of-columns
+  step only"; "Phase 6.2 must NOT implement … feature selection … mutual
+  information ranking … feature importance … leakage detection"; "A
+  high-uniqueness FLOAT column must not automatically be classified as an
+  identifier"; "distinguish `structurally candidate` from `predictively
+  useful`"; "Reuse the project's existing pure column-type inference".
+- **Rules (documented):** per-column structural stats via the reused
+  `infer_column_type` + `ColumnType`. Exclusion precedence: (1) the
+  caller-declared `target` (no other target inferred; `target=None`
+  invents none); (2) entirely missing; (3) constant (`≤ 1` distinct
+  non-null); (4) identifier-like. Identifier detection is transparent:
+  name token (whole / first / last) in `{id, idx, index, key, uuid, guid,
+  pk, rowid, sk, hash}`, **or** near-unique (`unique_fraction ≥
+  HIGH_UNIQUE_ID_THRESHOLD = 0.99`) categorical / integer column — a
+  high-uniqueness float is never an identifier on uniqueness alone.
+  Moderate missingness stays a candidate (recorded, not excluded);
+  `UNKNOWN`-type columns stay candidates but are flagged. Fractions
+  rounded to 6 dp. Output lists alphabetical by column name → invariant to
+  DataFrame row and column order.
+- **Objective:** accepted as context, recorded in a note only;
+  `objective_used` is always `False`. No NLP / embeddings / fuzzy
+  matching / LLM.
+- **Contract change:** `FeatureInventory` gains additive defaulted
+  `candidates: list[FeatureInventoryCandidate]` and `objective_used: bool`
+  (new `FeatureInventoryCandidate` model: column / column_type /
+  n_observations / n_missing / missing_fraction / n_unique /
+  unique_fraction / identifier_like / constant / all_missing / is_target /
+  candidate / reasons). Phase-6.1 `FeatureInventory` JSON still validates.
+- **Errors / safety:** non-DataFrame `df` → `TypeError`; no columns / no
+  rows / `target` not in `df` → `status = unavailable` + explicit reason
+  (never silently ignored). Deterministic (no timestamp / UUID /
+  randomness / sampling / environment / filesystem); `df` never mutated
+  (non-string names coerced to `str` for reporting only); no file /
+  figure / network / database / lineage / `DatasetVersion` / LLM / model
+  access. Reuses only `infer_column_type` + `ColumnType`; not coupled to
+  the Phase-5.2 target-selection engine. No new dependency.
+- **Phase state:** Phase 6 **In progress** — 6.1 **Done**, 6.2 **Done**,
+  6.3 / 6.4 / 6.5 / 6.6 **Not started**. Phase 6 is **not** complete.
+
 ## 0065 — Phase 6.1: `FeatureEngineeringSpec` contract + inference-free foundation
 - **Decision:** a new first-class `data_engine/feature_engineering/`
   package (`models.py`, `understanding.py`, `__init__.py`) mirrors the
