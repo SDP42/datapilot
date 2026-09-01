@@ -4,6 +4,66 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0069 — Phase 6.5: `recommend_preprocessing` identifies preprocessing *requirements* only, deterministically
+- **Decision:** `data_engine/feature_engineering/preprocessing_requirements.py`
+  adds `recommend_preprocessing(df: pd.DataFrame, inventory:
+  FeatureInventory, transformations: TransformationRecommendations,
+  selection: FeatureSelectionRecommendations, *, objective: str | None =
+  None) -> PreprocessingRequirements`, a **standalone** function
+  (`understand_feature_engineering` unchanged; caller merges into
+  `FeatureEngineeringSpec.preprocessing` via `model_copy`). It identifies
+  which of a **fixed vocabulary** — `missing-value imputation`,
+  `categorical encoding`, `numerical scaling` — the Phase-6.4
+  retained / review feature candidates structurally require. It
+  **identifies requirements only**.
+- **Reason:** Prompt "Phase 6.5 — Automated Preprocessing Requirements":
+  "deterministic, standalone, rule-based REQUIREMENTS/RECOMMENDATION
+  engine"; "It must NOT execute preprocessing"; "It must NOT infer/re-select
+  the target"; "Target encoding is specifically prohibited"; "do NOT choose
+  a specific imputation algorithm"; "Reuse the Phase-6.3 scaling
+  recommendation rather than independently duplicating its decision logic".
+- **Rules (documented):** eligible = `inventory.candidates` with
+  `candidate` and not `is_target`, minus `selection.dropped_features`.
+  **imputation** when inventory `n_missing > 0` and not `all_missing`;
+  **encoding** when `column_type is CATEGORICAL` (boolean / numeric /
+  datetime never); **scaling** when numeric **and** the column has a
+  Phase-6.3 `numerical_scaling` recommendation (so a
+  log/sqrt/reciprocal-transformed column is not auto-scaled). Datetime
+  derivation and value-transformation recommendations from 6.3 are
+  recorded as upstream dependency notes, not executed. 6.4 review status
+  is preserved in the requirement `reason`. Very high categorical
+  cardinality stays an observation — no specialised / target-dependent
+  encoder is invented. `encoding_required` / `scaling_required` /
+  `imputation_required` are each `True` iff `≥ 1` eligible candidate needs
+  the operation and always agree with `required_operations`, which is in
+  the **fixed semantic order** imputation → encoding → scaling (not
+  alphabetical). Structured `requirements` ordered by (operation order,
+  column); no `(column, operation)` pair twice. Objective refines notes
+  only via a small fixed vocabulary (no NLP / stemmer / fuzzy / embeddings
+  / LLM) and never triggers a target-dependent step.
+- **Contract change:** `PreprocessingRequirements` gains additive
+  defaulted `requirements: list[PreprocessingRequirement]` and
+  `objective_used: bool`; new `PreprocessingRequirement` model
+  (column / operation: `FeatureOperationType` / description / reason /
+  evidence). Existing fields (`status`, `reason`, `required_operations`,
+  `encoding_required`, `scaling_required`, `imputation_required`,
+  `notes`) unchanged; Phase-6.1 JSON still validates.
+- **Errors / safety:** non-DataFrame `df`, non-`FeatureInventory`
+  `inventory`, non-`TransformationRecommendations` `transformations`, or
+  non-`FeatureSelectionRecommendations` `selection` → `TypeError`. Any
+  upstream section `status != completed` → `status = unavailable`, all
+  flags `False`, empty `required_operations`, explicit reason. Completed
+  upstream with no eligible candidate → `status = completed` + explicit
+  reason (never unavailable merely for having no requirements).
+  Deterministic (row- and column-order invariant; no timestamp / UUID /
+  randomness / filesystem); `df` and every upstream model never mutated;
+  no file / figure / lineage / version / database / network / model / LLM
+  access. Reuses only `ColumnType` and the Phase-6 models. No new
+  dependency; `pyproject.toml` unchanged.
+- **Phase state:** Phase 6 **In progress** — 6.1 **Done**, 6.2 **Done**,
+  6.3 **Done**, 6.4 **Done**, 6.5 **Done**, 6.6 **Not started**. Phase 6
+  is **not** complete.
+
 ## 0068 — Phase 6.4: `recommend_feature_selection` is a standalone deterministic structural / redundancy recommendation engine
 - **Decision:** `data_engine/feature_engineering/feature_selection.py`
   adds `recommend_feature_selection(df: pd.DataFrame, inventory:

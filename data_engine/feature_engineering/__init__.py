@@ -62,10 +62,12 @@ from .models import (
     FeatureSelectionAction,
     FeatureSelectionRecommendation,
     FeatureSelectionRecommendations,
+    PreprocessingRequirement,
     PreprocessingRequirements,
     TransformationRecommendation,
     TransformationRecommendations,
 )
+from .preprocessing_requirements import recommend_preprocessing
 from .transformation_recommendation import (
     TRANSFORMATION_ABS_SYMMETRY_RATIO,
     TRANSFORMATION_LOG_RANGE_RATIO,
@@ -101,11 +103,13 @@ __all__ = [
     "FeatureSelectionAction",
     "FeatureSelectionRecommendation",
     "FeatureSelectionRecommendations",
+    "PreprocessingRequirement",
     "PreprocessingRequirements",
     "TransformationRecommendation",
     "TransformationRecommendations",
     "inventory_features",
     "recommend_feature_selection",
+    "recommend_preprocessing",
     "recommend_transformations",
     "understand_feature_engineering",
 ]

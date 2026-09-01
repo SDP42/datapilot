@@ -30,8 +30,15 @@ engineering is feasible.
 >   cardinality). **Never** computes target correlation, mutual
 >   information, model importance, or leakage; never modifies the
 >   DataFrame; never re-selects the target or re-infers the task type.
-> - **6.5 preprocessing requirements / 6.6 feature-engineering
->   assessment**: NOT STARTED.
+> - **6.5 — preprocessing requirements** (`recommend_preprocessing`):
+>   DONE. Deterministic identification of the preprocessing operations
+>   (categorical encoding, numerical scaling, missing-value imputation)
+>   that the 6.2 inventory + 6.3 transformation recommendations + 6.4
+>   selection recommendations structurally require for the retained /
+>   review candidates. **Identifies requirements only** — never executes
+>   preprocessing, fills a value, chooses an encoder/imputer/scaler
+>   algorithm, or modifies the DataFrame. No target encoding.
+> - **6.6 feature-engineering assessment**: NOT STARTED.
 
 ## Entrypoint
 
@@ -111,7 +118,12 @@ non-blank after `.strip()`.
   `reason`, `evidence: list[str]`.
 - `PreprocessingRequirements` — `status`, `reason`,
   `required_operations: list[str]`, `encoding_required: bool`,
-  `scaling_required: bool`, `imputation_required: bool`, `notes`.
+  `scaling_required: bool`, `imputation_required: bool`,
+  `requirements: list[PreprocessingRequirement]`, `objective_used: bool`,
+  `notes`. (`requirements` / `objective_used` are additive & defaulted —
+  Phase-6.1 JSON still validates.) `PreprocessingRequirement` — `column`,
+  `operation` (`FeatureOperationType`), `description` (fixed op name),
+  `reason`, `evidence: list[str]`.
 - `FeatureEngineeringAssessment` — `status`, `reason`,
   `feasible: bool | None`, `blocking_issues: list[str]`,
   `warnings: list[str]`, `notes`.
@@ -470,13 +482,131 @@ snapshot verified). No file, figure, network, database, lineage,
 and `preprocessing` / `assessment` and the overall
 `FeatureEngineeringSpec.status` stay `not_yet_inferred`.
 
+## Preprocessing requirements (6.5) — `recommend_preprocessing`
+
+```python
+from data_engine.feature_engineering import (
+    inventory_features,
+    recommend_transformations,
+    recommend_feature_selection,
+    recommend_preprocessing,
+)
+
+inv = inventory_features(df, target="churn")
+trans = recommend_transformations(df, inv)
+sel = recommend_feature_selection(df, inv, task_type)
+pre = recommend_preprocessing(df, inv, trans, sel, objective="prepare features")
+spec = spec.model_copy(update={"preprocessing": pre})
+```
+
+`recommend_preprocessing(df: pd.DataFrame, inventory: FeatureInventory, transformations: TransformationRecommendations, selection: FeatureSelectionRecommendations, *, objective: str | None = None) -> PreprocessingRequirements`
+
+Deterministic and **rule-based**. It identifies which of a **fixed
+vocabulary** of preprocessing operations — `missing-value imputation`,
+`categorical encoding`, `numerical scaling` — the retained / review
+feature candidates structurally require. It **identifies requirements
+only**: it never executes preprocessing, fills a value, encodes / scales /
+imputes a column, chooses a specific encoder / imputer / scaler
+algorithm, selects features, re-selects the target, or re-infers the task
+type. Upstream Phase-6.3 / 6.4 results are consumed unchanged.
+
+### Type guards & upstream handling
+
+Non-DataFrame `df`, non-`FeatureInventory` `inventory`,
+non-`TransformationRecommendations` `transformations`, or
+non-`FeatureSelectionRecommendations` `selection` → `TypeError`. Any of
+`inventory.status` / `transformations.status` / `selection.status` `!=
+completed` → `status = unavailable`, all flags `False`,
+`required_operations = []`, explicit `reason` naming the section. A
+completed upstream section with **no** recommendations is valid and stays
+`completed`. No eligible feature (all candidates dropped by 6.4) →
+`status = completed`, empty payload, explicit `reason`.
+
+### Candidate population
+
+Eligible = `inventory.candidates` with `candidate is True` and
+`is_target is False`, **minus** `selection.dropped_features`. That is,
+Phase-6.4 **retained** and **review** features only. Dropped features
+(constant / identifier / duplicate / structural) never generate a
+requirement. The candidate population is never independently rediscovered.
+
+### Rules (per eligible candidate)
+
+| Operation | Condition | `FeatureOperationType` |
+| --- | --- | --- |
+| `missing-value imputation` | inventory `n_missing > 0` and not `all_missing` | `missing_value_handling` |
+| `categorical encoding` | inventory `column_type` is `CATEGORICAL` | `categorical_encoding` |
+| `numerical scaling` | `column_type` is `NUMERIC` **and** the column has a Phase-6.3 `numerical_scaling` recommendation | `numerical_scaling` |
+
+- **Boolean** candidates: no encoding, no scaling (only imputation if they
+  contain missing values). **Datetime** candidates: never generic
+  categorical encoding, never numerical scaling; an existing Phase-6.3
+  datetime-derivation recommendation is recorded as an upstream
+  dependency note only. **Numeric** candidates: no encoding.
+- Scaling **reuses the Phase-6.3 decision** rather than duplicating it — a
+  numeric column that received a log / sqrt / reciprocal / absolute-value
+  transformation from 6.3 (and therefore no 6.3 scaling recommendation)
+  does **not** automatically require scaling.
+- A Phase-6.3 value transformation on an eligible column is recorded as an
+  upstream dependency note (not executed). Review status from Phase 6.4 is
+  preserved in the requirement `reason`/`evidence`. Very high categorical
+  cardinality flagged by 6.4 is kept as an observation — **no** specialised
+  or target-dependent encoder is invented.
+- The target column is excluded by Phase 6.2 and additionally skipped —
+  it is never imputed, encoded, or scaled.
+
+### Requirement flags & ordering
+
+`encoding_required` / `scaling_required` / `imputation_required` are each
+`True` iff `≥ 1` eligible candidate requires that operation, and always
+agree with `required_operations`. `required_operations` uses the **fixed
+semantic order** `missing-value imputation → categorical encoding →
+numerical scaling` (not alphabetical). Structured `requirements` are
+ordered by `(operation order, column name)`; a `(column, operation)` pair
+never appears twice. Dropped and all-missing features never turn a flag
+`True`.
+
+### Objective handling
+
+`objective_used = objective is not None and objective.strip() != ""`. A
+small fixed vocabulary (no stemmer / NLP / fuzzy / embeddings / LLM)
+recognises data-preparation wording and adds a note only — it never
+overrides a structural rule and never triggers target encoding or any
+other target-dependent step.
+
+### Notes
+
+`notes` always state that this is a requirements stage, that no
+preprocessing was executed and the DataFrame was not modified, that no
+target/task inference or feature selection was performed, and that no
+encoder / imputer / scaler algorithm was chosen and no value was filled.
+Feature-specific evidence (missing counts / fractions, categorical
+cardinality, the Phase-6.3 scaling signal) comes only from the DataFrame
+metadata, the inventory, or the upstream structured recommendations.
+
+### Determinism & safety
+
+Row- and column-order invariant; repeated calls are byte-identical (no
+timestamps, UUIDs, randomness, or filesystem). `df`, `inventory`,
+`transformations`, and `selection` are never mutated (deep-copy / JSON
+snapshot verified). No file, figure, network, database, lineage,
+`DatasetVersion`, model, or LLM access.
+
+### Integration
+
+`understand_feature_engineering()` is unchanged. After
+`spec.model_copy(update={"preprocessing": recommend_preprocessing(...)})`,
+`inventory` / `transformations` / `selection` are unchanged,
+`preprocessing` is populated, and `assessment` and the overall
+`FeatureEngineeringSpec.status` stay `not_yet_inferred`.
+
 ## No timestamp
 
 Like `ProblemSpec`, `FeatureEngineeringSpec` has **no `generated_at`**
 field — the determinism requirement is byte-identical repeated output, so
 no wall-clock value is recorded.
 
-## Boundaries (Phase 6.1 / 6.2 / 6.3 / 6.4)
+## Boundaries (Phase 6.1 / 6.2 / 6.3 / 6.4 / 6.5)
 
 - Separate from ingestion / profiling / quality / cleaning / validation /
   lineage / EDA / problem understanding. 6.1 depends on nothing beyond
@@ -486,12 +616,14 @@ no wall-clock value is recorded.
   re-inferring it) and computes a plain in-DataFrame Pearson correlation
   for redundancy — no coupling to the Phase-5 engines' logic.
 - **Contract, foundation, structural inventory, transformation
-  *recommendations*, and feature-selection *recommendations* only.** No
-  feature is engineered, transformed, selected, encoded, scaled, imputed,
-  generated, or modified. No **target** correlation / mutual information /
-  ANOVA / chi-square feature scores, no model or permutation importance,
-  no SHAP, no leakage detection, no predictive-usefulness scoring, no
-  model training, no train/test split, no cross-validation, no
-  hyperparameter tuning, no LLM or external call. Preprocessing
-  requirements (6.5) and feature-engineering feasibility (6.6) are later
-  increments.
+  *recommendations*, feature-selection *recommendations*, and
+  preprocessing *requirements* only.** No feature is engineered,
+  transformed, selected, encoded, scaled, imputed, generated, or modified;
+  no value is filled; no encoder / imputer / scaler algorithm is chosen.
+  No target encoding or any target-dependent preprocessing. No **target**
+  correlation / mutual information / ANOVA / chi-square feature scores, no
+  model or permutation importance, no SHAP, no leakage detection, no
+  predictive-usefulness scoring, no model training, no train/test split,
+  no cross-validation, no hyperparameter tuning, no SMOTE / oversampling /
+  undersampling, no PCA, no LLM or external call. Feature-engineering
+  feasibility (6.6) is a later increment.

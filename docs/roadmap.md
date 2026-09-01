@@ -11,7 +11,7 @@ future phases are not anticipated in code.
 | 3 | Validation & Data Lineage | **In progress** — `DatasetVersion` + store + lineage validation + lineage graph + opt-in auto-registration + cross-version diffing + version-integrity / family-consistency / version↔lineage-binding checks done; still filesystem-only (no database, no GC) |
 | 4 | EDA & Statistical Analysis | **Done** — deterministic analysis-only `data_engine.eda`: EDA/univariate/bivariate, parametric tests, effect sizes, non-parametric tests, distribution analysis, EDA↔quality cross-reference, visualization foundation (chart-spec selection + in-memory Matplotlib **and Plotly** rendering + explicit chart export), target-aware visualization recommendation, statistical-strength visualization ranking, k-NN / Kraskov mutual-information estimator, datetime mutual information, paired / one-sided non-parametric tests (Wilcoxon signed-rank / sign / Friedman), multiple-testing correction (Bonferroni / Holm / Benjamini-Hochberg). No dashboard/API |
 | 5 | Automated Problem Understanding | **Done** — `data_engine.problem_understanding`: the `ProblemSpec` contract + `understand_problem` foundation (5.1), **target identification** `identify_target` (5.2), **task-type inference** `infer_task_type` (5.3), **candidate metrics** `recommend_metrics` (5.4), **feasibility assessment** `assess_feasibility` (5.5). All deterministic, standalone, analysis-only; no ML/LLM |
-| 6 | Feature Engineering | **In progress** — `data_engine.feature_engineering`: `FeatureEngineeringSpec` contract + foundation (6.1 — done); **structural feature inventory** `inventory_features` (6.2 — done); **transformation recommendations** `recommend_transformations` (6.3 — done); **feature-selection recommendations** `recommend_feature_selection` — deterministic retain / drop / review from fixed structural + redundancy rules (constant / all-missing / identifier / high-missingness / low-variance / exact-duplicate / high-`\|r\|` / high-cardinality); no target scoring, no model importance, no execution (6.4 — done). 6.5 preprocessing / 6.6 assessment not started |
+| 6 | Feature Engineering | **In progress** — `data_engine.feature_engineering`: `FeatureEngineeringSpec` contract + foundation (6.1); **structural feature inventory** `inventory_features` (6.2); **transformation recommendations** `recommend_transformations` (6.3); **feature-selection recommendations** `recommend_feature_selection` (6.4); **preprocessing requirements** `recommend_preprocessing` — deterministic identification of missing-value imputation / categorical encoding / numerical scaling requirements for the 6.4 retained/review candidates (consumes 6.2/6.3/6.4, executes nothing, no encoder/imputer/scaler chosen, no target encoding) (6.5 — done). 6.6 assessment not started |
 | 7 | Classical ML | Not started |
 | 8 | Deep Learning | Not started |
 | 9 | Experiment Tracking | Not started |
@@ -527,10 +527,43 @@ future phases are not anticipated in code.
   never mutated; no file / figure / lineage / version / model / LLM /
   network. No new dependency.
 
+  **6.5 — preprocessing requirements.** `recommend_preprocessing(df:
+  pd.DataFrame, inventory: FeatureInventory, transformations:
+  TransformationRecommendations, selection: FeatureSelectionRecommendations,
+  *, objective: str | None = None) -> PreprocessingRequirements` — a
+  **standalone**, deterministic, rule-based engine (caller merges into
+  `FeatureEngineeringSpec.preprocessing`). Eligible = 6.2 inventory
+  candidates (not target) minus 6.4 `dropped_features` (i.e. retained +
+  review). Fixed operation vocabulary: **missing-value imputation** (`n_missing
+  > 0` and not all-missing), **categorical encoding** (`ColumnType.CATEGORICAL`),
+  **numerical scaling** (numeric AND has a Phase-6.3 `numerical_scaling`
+  recommendation — the 6.3 decision is reused, not duplicated; a
+  log/sqrt/reciprocal-transformed column does not auto-require scaling).
+  Boolean → no encoding/scaling; datetime → never generic encoding or
+  scaling (6.3 derivation recorded as a dependency note). No target
+  encoding / SMOTE / PCA / specific algorithm selection; nothing executed,
+  no value filled, DataFrame not modified. `encoding_required` /
+  `scaling_required` / `imputation_required` each `True` iff `≥ 1`
+  eligible candidate needs it, always consistent with `required_operations`
+  (fixed order: imputation → encoding → scaling, not alphabetical).
+  Structured `requirements` ordered by (operation order, column); no
+  `(column, operation)` twice. Objective refines notes only via a small
+  fixed vocabulary (no NLP / stemmer / fuzzy / embeddings / LLM) and never
+  triggers a target-dependent step. Any upstream section not completed →
+  `status = unavailable`; completed with no eligible candidate →
+  `status = completed` + explicit reason. non-DataFrame /
+  non-`FeatureInventory` / non-`TransformationRecommendations` /
+  non-`FeatureSelectionRecommendations` → `TypeError`. Row- and
+  column-order invariant, byte-identical repeated calls. `df` and all
+  upstream models never mutated; no file / figure / lineage / version /
+  model / LLM / network. `PreprocessingRequirements` gains additive
+  defaulted `requirements: list[PreprocessingRequirement]` +
+  `objective_used` (6.1 JSON validates). No new dependency.
+
   **Completed:** 6.1 foundation / `FeatureEngineeringSpec`, 6.2 structural
   feature inventory, 6.3 transformation recommendations, 6.4
-  feature-selection recommendations. **Not started:** 6.5 preprocessing
-  requirements, 6.6 feature-engineering assessment. Phase 6 is **not
+  feature-selection recommendations, 6.5 preprocessing requirements.
+  **Not started:** 6.6 feature-engineering assessment. Phase 6 is **not
   complete**.
 
 ### Phase 7 — Classical ML

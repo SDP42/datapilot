@@ -237,29 +237,68 @@ class FeatureSelectionRecommendations(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class PreprocessingRequirement(BaseModel):
+    """One structurally-required preprocessing operation for a column.
+
+    Produced by
+    :func:`data_engine.feature_engineering.recommend_preprocessing`
+    (Phase 6.5). ``operation`` is a stable :class:`FeatureOperationType`
+    category; ``description`` is the fixed human-readable operation name
+    (``"missing-value imputation"`` / ``"categorical encoding"`` /
+    ``"numerical scaling"``). A requirement means only *"the observed
+    structure requires this before modelling"* — no encoder / imputer /
+    scaler algorithm is chosen and nothing is executed.
+    """
+
+    column: str
+    operation: FeatureOperationType
+    description: str = Field(description="Fixed operation name.")
+    reason: str = Field(description="The structural reason this operation is required.")
+    evidence: list[str] = Field(
+        default_factory=list, description="Deterministic supporting evidence, fixed order."
+    )
+
+
 class PreprocessingRequirements(BaseModel):
     """Preprocessing a model would require (encoding / scaling / imputation).
 
-    Populated by a later Phase-6 increment. Phase 6.1 leaves it empty.
+    Populated by
+    :func:`data_engine.feature_engineering.recommend_preprocessing`
+    (Phase 6.5). ``requirements`` / ``objective_used`` are additive and
+    defaulted, so a ``PreprocessingRequirements`` serialised by Phase 6.1
+    still validates.
     """
 
     status: FeatureEngineeringStatus = FeatureEngineeringStatus.NOT_YET_INFERRED
     reason: str | None = Field(
         default=None,
-        description="Why preprocessing requirements are unavailable; None once produced.",
+        description="Why preprocessing requirements are unavailable, or why a completed "
+        "result is empty; None otherwise.",
     )
     required_operations: list[str] = Field(
         default_factory=list,
-        description="Required preprocessing operation identifiers; empty until inferred.",
+        description="Fixed operation names in the fixed order (imputation, encoding, scaling); "
+        "empty until inferred / when none apply.",
     )
     encoding_required: bool = Field(
-        default=False, description="True once a later increment confirms encoding is needed."
+        default=False,
+        description="True iff >= 1 eligible retained/review candidate needs categorical encoding.",
     )
     scaling_required: bool = Field(
-        default=False, description="True once a later increment confirms scaling is needed."
+        default=False,
+        description="True iff >= 1 eligible retained/review candidate needs numerical scaling.",
     )
     imputation_required: bool = Field(
-        default=False, description="True once a later increment confirms imputation is needed."
+        default=False,
+        description="True iff >= 1 eligible retained/review candidate needs missing-value "
+        "imputation.",
+    )
+    requirements: list[PreprocessingRequirement] = Field(
+        default_factory=list,
+        description="Structured per-column requirements, deterministically ordered.",
+    )
+    objective_used: bool = Field(
+        default=False, description="True iff a non-blank objective string was supplied."
     )
     notes: list[str] = Field(default_factory=list)
 

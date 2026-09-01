@@ -298,7 +298,21 @@ target-based / model-based feature score. Output ordered by (category,
 column); lists alphabetical → row/column-order invariant.
 `FeatureSelectionRecommendations` gained additive defaulted
 `review_features` + `recommendations` + `objective_used`; new
-`FeatureSelectionAction` enum.
+`FeatureSelectionAction` enum. **6.5 — preprocessing requirements:**
+`recommend_preprocessing(df, inventory, transformations, selection, *,
+objective=None) -> PreprocessingRequirements`, a **standalone**,
+deterministic, rule-based engine (caller merges into
+`FeatureEngineeringSpec.preprocessing`). For the Phase-6.4 retained /
+review candidates it identifies which of a fixed vocabulary —
+missing-value imputation, categorical encoding, numerical scaling — is
+structurally required (numeric scaling reuses the Phase-6.3
+`numerical_scaling` recommendation rather than duplicating it). It
+**identifies requirements only** — never executes preprocessing, fills a
+value, chooses an encoder / imputer / scaler algorithm, re-selects the
+target (no target encoding), re-infers the task, or modifies `df`. Flags
+agree with `required_operations` (fixed order: imputation → encoding →
+scaling). `PreprocessingRequirements` gained additive defaulted
+`requirements` + `objective_used`; new `PreprocessingRequirement` model.
 [feature-engineering.md](feature-engineering.md).
 
 **Future-phase components:** everything else —
