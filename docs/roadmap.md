@@ -12,7 +12,7 @@ future phases are not anticipated in code.
 | 4 | EDA & Statistical Analysis | **Done** — deterministic analysis-only `data_engine.eda`: EDA/univariate/bivariate, parametric tests, effect sizes, non-parametric tests, distribution analysis, EDA↔quality cross-reference, visualization foundation (chart-spec selection + in-memory Matplotlib **and Plotly** rendering + explicit chart export), target-aware visualization recommendation, statistical-strength visualization ranking, k-NN / Kraskov mutual-information estimator, datetime mutual information, paired / one-sided non-parametric tests (Wilcoxon signed-rank / sign / Friedman), multiple-testing correction (Bonferroni / Holm / Benjamini-Hochberg). No dashboard/API |
 | 5 | Automated Problem Understanding | **Done** — `data_engine.problem_understanding`: the `ProblemSpec` contract + `understand_problem` foundation (5.1), **target identification** `identify_target` (5.2), **task-type inference** `infer_task_type` (5.3), **candidate metrics** `recommend_metrics` (5.4), **feasibility assessment** `assess_feasibility` (5.5). All deterministic, standalone, analysis-only; no ML/LLM |
 | 6 | Feature Engineering | **Done** — `data_engine.feature_engineering`, all deterministic, standalone, analysis-only: `FeatureEngineeringSpec` contract + foundation (6.1); **structural feature inventory** `inventory_features` (6.2); **transformation recommendations** `recommend_transformations` (6.3); **feature-selection recommendations** `recommend_feature_selection` (6.4); **preprocessing requirements** `recommend_preprocessing` (6.5); **feature-engineering assessment** `assess_feature_engineering` — structural consistency & readiness check over 6.2–6.5, `feasible` True/False from blocking structural inconsistencies (6.6). Nothing is executed; no ML/LLM |
-| 7 | Model Development / Modeling | **Done** — `data_engine.modeling`, all deterministic and standalone: `ModelingSpec` contract + foundation (7.1); **model readiness** `assess_model_readiness` + **data-split planning** `recommend_data_split` (7.2); **model candidate generation** `generate_model_candidates` (7.3); **training & evaluation** `train_and_evaluate_models` (7.4) — fits one conservative scikit-learn baseline per candidate family and reports per-candidate metrics; **model selection & recommendation** `select_model` (7.5) — deterministically ranks the successful 7.4 runs by a fixed per-task metric and recommends one family/estimator. Nothing beyond the 7.4 baselines is trained; no hyperparameter tuning, CV, feature importance, SHAP, or artifact persistence anywhere in Phase 7 |
+| 7 | Model Development / Modeling | **Done** — `data_engine.modeling`, all deterministic and standalone: `ModelingSpec` contract + foundation (7.1); **model readiness** `assess_model_readiness` + **data-split planning** `recommend_data_split` (7.2); **model candidate generation** `generate_model_candidates` (7.3); **training & evaluation** `train_and_evaluate_models` (7.4) — fits one conservative scikit-learn baseline per candidate family and reports per-candidate metrics; **model selection & recommendation** `select_model` (7.5) — deterministically ranks the successful 7.4 runs by a fixed per-task metric and recommends one family/estimator. Nothing beyond the 7.4 baselines is trained; no hyperparameter tuning, CV, feature importance, SHAP, or artifact persistence anywhere in Phase 7. **Post-Phase-7 stabilization (done):** `run_modeling_pipeline` deterministic end-to-end composition + overall `ModelingSpec.status`; `EvaluationResults` is now a status mirror of `TrainingOutcome`; explicit forecasting chronological-order precondition |
 | 8 | Deep Learning | **Not started** |
 | 9 | Experiment Tracking | Not started |
 | 10 | Explainable AI | Not started |
@@ -599,12 +599,17 @@ future phases are not anticipated in code.
   evaluated models.
 - **Components:** `data_engine.modeling` — model readiness, data-split
   planning, candidate model families, training, evaluation, model
-  selection; `ml_engine` model registry (scikit-learn, XGBoost, LightGBM)
-  for the execution stages.
-- **Output:** a `ModelingSpec` and, later, trained models + evaluation
-  reports.
-- **Status:** `data_engine.modeling` — a deterministic, analysis-only
-  layer.
+  selection, and the deterministic `run_modeling_pipeline` composition.
+  Phase 7 was implemented **inside `data_engine.modeling`**, not the
+  originally-planned separate `ml_engine` package (which remains an empty
+  stub). The only modeling dependency is **scikit-learn** (dependency-light
+  baseline estimators); XGBoost / LightGBM / a model registry / deep
+  learning are **not used** and belong to later phases.
+- **Output:** a `ModelingSpec` — including, from Phase 7.4, one fitted
+  conservative scikit-learn baseline per candidate family with
+  test-partition metrics, and a deterministic single-model recommendation.
+- **Status:** `data_engine.modeling` — a deterministic layer (only Phase
+  7.4 fits estimators).
 
   **7.1 — contract + foundation.** `understand_modeling(request:
   ModelingRequest) -> ModelingSpec` validates dataset identity + an
@@ -783,6 +788,32 @@ future phases are not anticipated in code.
   evaluation, 7.5 model selection & recommendation. **Phase 7 is
   complete.** Executing / deploying the recommended model is a later
   phase; `understand_modeling()` still composes nothing automatically.
+
+### Post-Phase-7 stabilization — **Done**
+- **Scope:** internal consistency only — no new modeling intelligence, no
+  new dependency, no Phase-8 work.
+- **`run_modeling_pipeline(df, request: ModelingRequest) -> ModelingSpec`**
+  (`data_engine.modeling.pipeline`): deterministic composition of the
+  existing Phase-5 → Phase-6 → Phase-7.1–7.5 functions into one
+  fully-populated `ModelingSpec`. It is the only producer that sets the
+  overall `ModelingSpec.status` — `completed` when a model is recommended,
+  `unavailable` (with a stage-naming `reason`) otherwise.
+  `understand_modeling()` is unchanged (still all-`not_yet_inferred`).
+- **`EvaluationResults` resolved:** `ModelingSpec.evaluation` is now an
+  explicit **status mirror** of `ModelingSpec.training` (`TrainingOutcome`
+  — the single source of truth for every metric value), produced by
+  `summarize_evaluation(training)`, which recomputes nothing. Additive
+  defaulted fields (`source`, `evaluated_run_count`, `successful_run_count`,
+  `metric_names`); legacy JSON still validates.
+- **Forecasting chronological-order precondition:** for a
+  `time_ordered_holdout` the caller must supply rows already in
+  chronological order. Phase 7.4 verifies the frame is non-decreasing on
+  one of its own datetime columns and returns `unavailable` otherwise — it
+  never infers a time column, sorts, or reorders. The
+  random / stratified vs. time-ordered row-order distinction is preserved.
+- **Docs / config** brought in line with the implemented Phase 0–7 state;
+  new decision record (see `decisions.md`).
+- **Quality gates:** `pytest` / `ruff` / `ruff format` / `mypy` all green.
 
 ### Phase 8 — Deep Learning — **Not started**
 - **Objective:** add DL where justified.

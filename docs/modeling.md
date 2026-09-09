@@ -42,13 +42,28 @@ only, and no increment tunes, cross-validates, or persists a model.
 >   **retrains nothing, recomputes no metric, and modifies no upstream
 >   object** — it only compares the values already in
 >   `TrainingOutcome.runs[*].metrics`. **Phase 7 is complete.**
+>
+> - **Post-Phase-7 stabilization** (`run_modeling_pipeline`,
+>   `summarize_evaluation`): DONE. A deterministic composition layer — no
+>   new inference, no new dependency. `run_modeling_pipeline(df, request)`
+>   chains the Phase-5 → Phase-6 → Phase-7.1–7.5 functions into one
+>   fully-populated `ModelingSpec` and is the only producer that sets the
+>   overall `ModelingSpec.status`. `ModelingSpec.evaluation`
+>   (`EvaluationResults`) became an explicit status mirror of
+>   `ModelingSpec.training` (`TrainingOutcome`, the single source of truth
+>   for every metric value). Phase 7.4 gained an explicit forecasting
+>   chronological-order precondition.
 
-## Entrypoint
+## Entrypoints
 
 ```python
-from data_engine.modeling import ModelingRequest, understand_modeling
+from data_engine.modeling import ModelingRequest, run_modeling_pipeline, understand_modeling
 
+# inference-free foundation (unchanged): an all-not_yet_inferred spec
 spec = understand_modeling(ModelingRequest(dataset_id="sales", objective="predict churn"))
+
+# deterministic end-to-end composition: a fully-populated spec
+spec = run_modeling_pipeline(df, ModelingRequest(dataset_id="sales", objective="predict churn"))
 ```
 
 `understand_modeling(request: ModelingRequest) -> ModelingSpec`
@@ -89,15 +104,15 @@ non-blank after `.strip()`.
 | `dataset_version_id` | `str \| None` | `None` | yes (echoed) |
 | `objective` | `str \| None` | `None` | yes (echoed verbatim) |
 | `objective_provided` | `bool` | — | yes (`True` iff non-blank after strip) |
-| `status` | `ModelingStatus` | `not_yet_inferred` | yes — always `not_yet_inferred` in 7.1, with a `reason` |
+| `status` | `ModelingStatus` | `not_yet_inferred` | yes — always `not_yet_inferred` in 7.1, with a `reason`; only `run_modeling_pipeline` sets `completed` / `unavailable` |
 | `reason` | `str \| None` | `None` | yes (states this is contract/foundation only) |
-| `readiness` | `ModelReadiness` | all-`not_yet_inferred` | **no** — later increment |
-| `split` | `DataSplitPlan` | all-`not_yet_inferred` | **no** — later increment |
-| `candidates` | `ModelCandidates` | all-`not_yet_inferred` | **no** — later increment |
-| `training` | `TrainingOutcome` | all-`not_yet_inferred` | **no** — later increment |
-| `evaluation` | `EvaluationResults` | all-`not_yet_inferred` | **no** — later increment |
-| `selection` | `ModelSelection` | all-`not_yet_inferred` | **no** — later increment |
-| `notes` | `list[str]` | `[]` | yes (empty in 7.1) |
+| `readiness` | `ModelReadiness` | all-`not_yet_inferred` | no — 7.2 `assess_model_readiness` |
+| `split` | `DataSplitPlan` | all-`not_yet_inferred` | no — 7.2 `recommend_data_split` |
+| `candidates` | `ModelCandidates` | all-`not_yet_inferred` | no — 7.3 `generate_model_candidates` |
+| `training` | `TrainingOutcome` | all-`not_yet_inferred` | no — 7.4 `train_and_evaluate_models` (**source of truth for every metric value**) |
+| `evaluation` | `EvaluationResults` | all-`not_yet_inferred` | no — `summarize_evaluation(training)` — a **status mirror** of `training`, recomputes nothing |
+| `selection` | `ModelSelection` | all-`not_yet_inferred` | no — 7.5 `select_model` |
+| `notes` | `list[str]` | `[]` | yes (empty in 7.1; `run_modeling_pipeline` records the composition) |
 
 `model_engine_version` intentionally reuses the `model_` prefix for
 consistency with the other engine-version fields; the model opts out of
@@ -132,8 +147,14 @@ Pydantic's protected `model_` namespace so it is a plain data field.
   `reason`, `notes`. It stores **only JSON primitives** — never a fitted
   estimator, pipeline, array, DataFrame, prediction, row index, or
   artifact path.
-- `EvaluationResults` — `status`, `reason`, `notes`. Future evaluation /
-  metric results. **7.1 calculates no metric.**
+- `EvaluationResults` — `status`, `reason`, `notes`, plus the additive
+  defaulted `source: str | None` (`"training_outcome"` once summarised),
+  `evaluated_run_count: int`, `successful_run_count: int`,
+  `metric_names: list[str]` (the sorted union of metric *names* across
+  completed runs — **names only**; every value stays in `TrainingOutcome`).
+  It is a **status mirror** of `ModelingSpec.training`, produced by
+  `summarize_evaluation(training)` — it never recomputes, re-runs, or
+  re-stores a metric. **7.1 leaves it all-`not_yet_inferred`.**
 - `ModelSelection` — `status`, `reason`, `notes`, plus the additive
   defaulted `selected_family: str | None`, `selected_estimator: str | None`,
   `selection_metric: str | None`, `selection_direction: str | None`,
@@ -593,6 +614,16 @@ The metric is **never** substituted (no switching to `accuracy` /
 `roc_auc` / `mae` because they happen to be present) and clustering
 metrics are **never** combined into a composite score.
 
+**Phase-7.5 selection metric vs. Phase-5.4 primary metric.** These are
+**deliberately independent**. Phase 5.4's `CandidateMetrics.primary_metric`
+is a *reporting* recommendation that can be nudged by the objective (e.g.
+forecasting → `mae`, an imbalanced binary task → `f1`). Phase 7.5's
+selection metric is the fixed table above and is **authoritative for
+choosing a model** — it is never overridden by the Phase-5.4 primary
+metric or the objective. When the two differ (forecasting is the common
+case: 5.4 `mae` vs. 7.5 `rmse`), `select_model` records an explicit note
+saying which one governs the choice; it changes no value and no winner.
+
 ### Eligibility & ranking
 
 A training run is **eligible** iff `status == completed`, its `family` is
@@ -659,9 +690,102 @@ created; the output holds only JSON primitives — no estimator object.
 `spec.model_copy(update={"selection": select_model(...)})`, `readiness` /
 `split` / `candidates` / `training` are unchanged, `selection` is
 populated, and the overall `ModelingSpec.status` stays as the existing
-Phase-7 contract leaves it (`not_yet_inferred` unless a caller sets it).
+Phase-7 contract leaves it (`not_yet_inferred` unless a caller sets it) —
+`run_modeling_pipeline` (below) is the composition that sets it.
 
-## Boundaries (Phase 7.1 – 7.5 — Phase 7 complete)
+## Evaluation source of truth (`summarize_evaluation`)
+
+`ModelingSpec.training` (`TrainingOutcome`) is the **single source of
+truth for evaluation** — every metric value is computed once by Phase 7.4
+on the test partition and lives in `TrainingOutcome.runs[*].metrics`.
+
+`summarize_evaluation(training: TrainingOutcome) -> EvaluationResults`
+produces `ModelingSpec.evaluation` as a deterministic *status mirror* of
+that result:
+
+- `status = unavailable` (with a reason) when `training` is not completed;
+- otherwise `status = completed`, `source = "training_outcome"`,
+  `evaluated_run_count` / `successful_run_count` mirroring the runs, and
+  `metric_names` the sorted union of metric *names* across completed runs.
+
+It **recomputes nothing, re-runs nothing, fits nothing, and stores no
+metric value**. A non-`TrainingOutcome` argument raises `TypeError`.
+`EvaluationResults`' extra fields are additive and defaulted — a spec
+serialised by Phase 7.1–7.5 still validates.
+
+## End-to-end composition (`run_modeling_pipeline`)
+
+```python
+from data_engine.modeling import ModelingRequest, run_modeling_pipeline
+
+spec = run_modeling_pipeline(df, ModelingRequest(dataset_id="sales", objective="predict churn"))
+```
+
+`run_modeling_pipeline(df: pd.DataFrame, request: ModelingRequest) ->
+ModelingSpec` chains the **existing** public functions:
+
+```
+ModelingRequest
+  → understand_problem + identify_target + infer_task_type
+      + recommend_metrics + assess_feasibility            (Phase 5 → ProblemSpec)
+  → understand_feature_engineering + inventory_features
+      + recommend_transformations + recommend_feature_selection
+      + recommend_preprocessing + assess_feature_engineering
+                                                          (Phase 6 → FeatureEngineeringSpec)
+  → understand_modeling                                   (Phase 7.1 foundation)
+  → assess_model_readiness → recommend_data_split         (Phase 7.2)
+  → generate_model_candidates                             (Phase 7.3)
+  → train_and_evaluate_models                             (Phase 7.4)
+  → summarize_evaluation                                  (evaluation mirror)
+  → select_model                                          (Phase 7.5)
+  → ModelingSpec
+```
+
+It is a **composition layer only**: no new inference rule, metric, or
+model family; no randomness beyond the fixed Phase-7.4 seed; no file, no
+network, no LLM; the input DataFrame and every upstream object are never
+mutated. Each stage's own `completed` / `unavailable` / `reason` semantics
+are preserved — a stopped stage still returns its own explicit
+`unavailable` result and the later stages report their own `unavailable`
+(they are called, but each returns immediately without fitting or
+computing anything).
+
+### Overall `ModelingSpec.status`
+
+`run_modeling_pipeline` is the **only** producer that sets it:
+
+| Value | When |
+| --- | --- |
+| `completed` | the pipeline reached a concrete recommendation — `selection.status == completed` and `selection.selected_family is not None` |
+| `unavailable` | a required stage was not completed / not ready, or training completed but no run carried the selection metric; `reason` names the stage that stopped the pipeline |
+| `not_yet_inferred` | **only** the untouched Phase-7.1 object from `understand_modeling()` — never from `run_modeling_pipeline` |
+
+`understand_modeling(request)` still returns an all-`not_yet_inferred`
+spec and inspects no DataFrame.
+
+## Forecasting chronological-order precondition
+
+For `time_series_forecasting` the split strategy is
+`time_ordered_holdout`, and **the row order is the time axis** — Phase 7.4
+slices it positionally. Phase 7.4 never infers a time column, sorts, or
+reorders rows. Instead it **verifies** the precondition: at least one of
+the frame's own datetime columns must be non-decreasing across the
+supplied rows.
+
+- verified → training proceeds; a note records which datetime column was
+  used.
+- not verified (rows not in order, or no datetime column) →
+  `TrainingOutcome.status = unavailable` with an explicit reason telling
+  the caller to sort the frame chronologically. `select_model` then
+  reports `unavailable` by its normal precedence, and
+  `run_modeling_pipeline` sets the overall status to `unavailable`.
+
+The **random / stratified holdout** contract is unchanged: those
+strategies canonicalise row order (stable sort by feature + target
+columns only) and are fully row- and column-order invariant. Only the
+time-ordered strategy treats row order as semantic.
+
+## Boundaries (Phase 7.1 – 7.5 + stabilization — Phase 7 complete)
 
 - 7.1 depends on **nothing** beyond the stdlib and Pydantic and does not
   import or inspect a DataFrame. 7.2 reads the DataFrame **shape only**

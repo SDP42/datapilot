@@ -4,6 +4,85 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0076 — Post-Phase-7 stabilization: end-to-end composition, `EvaluationResults` as a mirror, explicit forecasting order precondition
+
+- **Decision:** a targeted stabilization pass over the implemented Phase
+  0–7 system — **no new modeling intelligence, no new dependency, no
+  Phase-8 work**. Five changes:
+  1. **`run_modeling_pipeline(df, request: ModelingRequest) ->
+     ModelingSpec`** (new `data_engine/modeling/pipeline.py`): a pure
+     composition of the existing Phase-5, Phase-6, and Phase-7.1–7.5
+     public functions into one fully-populated `ModelingSpec`. It is the
+     **only** producer that sets the overall `ModelingSpec.status`
+     (`completed` iff `selection.selected_family is not None`;
+     `unavailable` with a stage-naming `reason` otherwise).
+     `understand_modeling()` is **unchanged** — still all-`not_yet_inferred`,
+     still no DataFrame parameter. `not_yet_inferred` now means "only the
+     untouched Phase-7.1 foundation object".
+  2. **`EvaluationResults` resolved as a status mirror.** `TrainingOutcome`
+     (`ModelingSpec.training`) is the single source of truth for every
+     metric value. `summarize_evaluation(training) -> EvaluationResults`
+     (new `data_engine/modeling/evaluation.py`) reports only `status`,
+     `source="training_outcome"`, run counts, and the sorted union of
+     metric *names* — it recomputes / re-runs / re-stores **nothing**.
+     `EvaluationResults` gained additive defaulted fields (`source`,
+     `evaluated_run_count`, `successful_run_count`, `metric_names`);
+     legacy JSON still validates. The competing "second evaluation
+     system" is avoided — the section now explicitly points at `training`.
+  3. **Forecasting chronological-order precondition (audit H1).** For a
+     `time_ordered_holdout` the row order is the time axis and Phase 7.4
+     slices it positionally. Phase 7.4 now **verifies** the frame is
+     non-decreasing on one of its own datetime columns
+     (`_verify_chronological_order`) and returns
+     `TrainingOutcome.status = unavailable` with an explicit reason
+     otherwise. It still never infers a time column, sorts, reorders,
+     creates lag / rolling features, or adds a forecasting model family.
+     The random / stratified (row-order invariant) vs. time-ordered (row
+     order semantic) distinction is preserved and tested.
+  4. **Row-order canonicalisation hardened (audit M9).** For
+     random / stratified holdouts, `train_and_evaluate_models` now
+     canonicalises row order by sorting on the **feature + target columns
+     only** (orderable by construction), never on excluded
+     datetime / unknown / object columns whose comparability varies
+     across supported pandas versions. Metric / column-order invariance is
+     unchanged (verified).
+  5. **`select_model` note on metric divergence.** When
+     `problem.metrics.primary_metric` (Phase 5.4) differs from the fixed
+     Phase-7.5 selection metric, `select_model` records a note stating the
+     Phase-7.5 rule governs the choice. No value or winner changes.
+- **Reason:** the post-Phase-7 audit found the Phase 0–7 system
+  functionally complete but (a) not runnable as one pipeline without
+  hand-wiring ~15 calls, (b) carrying a permanently-empty
+  `ModelingSpec.evaluation` contract section, (c) silently trusting
+  caller-sorted rows for forecasting, and (d) documentation that still
+  described the repo as "Phase 0 skeleton only". This pass closes those
+  without expanding capability.
+- **Backward compatibility:** all six Phase-7 public functions
+  (`understand_modeling`, `assess_model_readiness`, `recommend_data_split`,
+  `generate_model_candidates`, `train_and_evaluate_models`, `select_model`)
+  keep their exact signatures and semantics. Phase-5 / Phase-6 public APIs
+  are untouched. All additive model fields are defaulted; every existing
+  serialised spec still validates. New exports: `run_modeling_pipeline`,
+  `summarize_evaluation` (added to `data_engine.modeling.__all__`).
+- **No new dependency.** The only modeling dependency remains
+  `scikit-learn>=1.4`. A repo guard test (`test_no_deferred_dependencies`)
+  asserts no `mlflow` / `optuna` / `xgboost` / `lightgbm` / `catboost` /
+  `torch` / `tensorflow` / `shap` / `fastapi` / `sqlalchemy` / `duckdb` /
+  LLM-SDK import appears anywhere in `data_engine`, and that the declared
+  runtime dependency set is exactly the expected eight.
+- **Docs / config:** `docs/architecture.md` banner + as-built note,
+  `docs/eda.md` header, `docs/README.md` index, `docs/roadmap.md` Phase-7
+  naming + stabilization entry, `docs/modeling.md` (evaluation source of
+  truth, `run_modeling_pipeline`, forecasting precondition, status
+  semantics, P5.4↔P7.5 metric distinction), `README.md`,
+  `configs/default.yaml` (`project.phase: 7`), `pyproject.toml`
+  description — all brought in line with the implemented Phase 0–7 state.
+- **Phase state:** Phases 0–7 implemented; **Phase 7 complete +
+  stabilization complete**. Phase 8 (deep learning) and later **not
+  started**. `pytest` / `ruff` / `ruff format` / `mypy` all green.
+
+---
+
 ## 0075 — Phase 7.5: `select_model` recommends deterministically from the Phase-7.4 metrics; retrains nothing
 - **Decision:** `data_engine/modeling/selection.py` adds
   `select_model(problem: ProblemSpec, feature_engineering:

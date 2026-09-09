@@ -1,10 +1,13 @@
-# DataPilot default configuration (foundation stage).
+# DataPilot default configuration.
 # Values here are placeholders; nothing consumes them yet beyond
 # datapilot.config.load_config().
 
 project:
   name: DataPilot
-  phase: 0
+  # Highest fully-implemented data-engine phase. Phases 0-7 are done
+  # (Phase 7 complete + a post-Phase-7 stabilization pass); Phase 8
+  # (deep learning) and later are not started. See docs/roadmap.md.
+  phase: 7
 
 paths:
   data_raw: data/raw

@@ -269,14 +269,44 @@ class TrainingOutcome(BaseModel):
 
 
 class EvaluationResults(BaseModel):
-    """Future evaluation / metric results.
+    """Evaluation results for the modeling pipeline — a status mirror only.
 
-    Populated by a later Phase-7 increment. Phase 7.1 calculates no metric.
+    **:class:`TrainingOutcome` (``ModelingSpec.training``) is the single
+    source of truth for evaluation.** Every metric value is computed once
+    by Phase 7.4 on the test partition and lives in
+    ``TrainingOutcome.runs[*].metrics``. This section is a deterministic
+    *summary* of that result, produced by
+    :func:`data_engine.modeling.summarize_evaluation` (and by
+    :func:`data_engine.modeling.run_modeling_pipeline`); it **never
+    recomputes, re-runs, or re-stores a metric value** — it only records
+    where the authoritative results are and how many runs produced them.
+
+    Phase 7.1's :func:`understand_modeling` leaves it all-``not_yet_inferred``.
+    All fields beyond ``status`` / ``reason`` / ``notes`` are additive and
+    defaulted, so an ``EvaluationResults`` serialised by Phase 7.1–7.5
+    still validates.
     """
 
     status: ModelingStatus = ModelingStatus.NOT_YET_INFERRED
     reason: str | None = Field(
         default=None, description="Why evaluation is unavailable; None once produced."
+    )
+    source: str | None = Field(
+        default=None,
+        description="Where the authoritative evaluation lives; 'training_outcome' once summarised.",
+    )
+    evaluated_run_count: int = Field(
+        default=0,
+        description="Number of Phase-7.4 training runs reflected (mirrors len(training.runs)).",
+    )
+    successful_run_count: int = Field(
+        default=0,
+        description="Training runs with status=completed (mirrors training.successful_runs).",
+    )
+    metric_names: list[str] = Field(
+        default_factory=list,
+        description="Sorted union of metric names present across completed runs — names only; "
+        "the values stay in TrainingOutcome.",
     )
     notes: list[str] = Field(default_factory=list)
 
@@ -370,11 +400,18 @@ class ModelingRequest(BaseModel):
 class ModelingSpec(BaseModel):
     """The structured answer to 'how should this problem be modelled?'.
 
-    Phase 7.1 produces a spec whose overall ``status`` and every nested
-    section are ``not_yet_inferred``; the ``dataset_id`` /
-    ``dataset_version_id`` / ``objective`` fields echo the request. Later
-    increments fill in ``readiness`` / ``split`` / ``candidates`` /
-    ``training`` / ``evaluation`` / ``selection`` in place, additively.
+    Phase 7.1's :func:`understand_modeling` produces a spec whose overall
+    ``status`` and every nested section are ``not_yet_inferred``; the
+    ``dataset_id`` / ``dataset_version_id`` / ``objective`` fields echo the
+    request. The Phase-7.2–7.5 functions fill in ``readiness`` / ``split``
+    / ``candidates`` / ``training`` / ``evaluation`` / ``selection`` in
+    place, additively; :func:`data_engine.modeling.run_modeling_pipeline`
+    composes the whole chain and is the only producer that sets the
+    overall ``status`` to ``completed`` / ``unavailable``.
+
+    ``evaluation`` (:class:`EvaluationResults`) is a **status mirror** of
+    ``training`` (:class:`TrainingOutcome`), which is the single source of
+    truth for every metric value.
     """
 
     # ``model_engine_version`` intentionally uses the ``model_`` prefix for

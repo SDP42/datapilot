@@ -525,6 +525,22 @@ def test_column_reorder_invariant(clf):
     assert train_and_evaluate_models(reordered, problem, fe, readiness, split, candidates) == base
 
 
+def test_canonicalisation_ignores_non_model_columns(reg):
+    # audit M9: row-order canonicalisation must sort by feature + target
+    # columns only, never by an excluded mixed-type object column whose
+    # comparability varies across pandas versions.
+    df, problem, fe, readiness, split, candidates = reg
+    base = train_and_evaluate_models(df, problem, fe, readiness, split, candidates)
+
+    tagged = df.copy()
+    tagged["free_note"] = [f"row-{i}" if i % 3 else i for i in range(len(tagged))]
+    tagged = tagged.sample(frac=1.0, random_state=5).reset_index(drop=True)
+    out = train_and_evaluate_models(tagged, problem, fe, readiness, split, candidates)
+
+    assert out.status is ModelingStatus.COMPLETED
+    assert [r.metrics for r in out.runs] == [r.metrics for r in base.runs]
+
+
 def test_stable_run_ordering(clf):
     out = _run(clf)
     _, _, _, _, _, candidates = clf

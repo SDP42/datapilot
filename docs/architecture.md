@@ -1,8 +1,12 @@
 # DataPilot — System Architecture
 
-> Status: **Phase 0 (Foundation)**. This document describes the *eventual*
-> system and marks what belongs to Phase 1 vs. later phases. Only the
-> repository skeleton, contracts, and this documentation exist today.
+> Status: **Phases 0–7 implemented; Phase 7 complete** (Phase 1 and Phase 3
+> are usable with named deferrals — see [roadmap.md](roadmap.md)). This
+> document describes the *eventual* system and marks what belongs to each
+> phase; the sections below are kept current as each phase lands, and a
+> post-Phase-7 stabilization pass added the deterministic end-to-end
+> `run_modeling_pipeline` composition. Phase 8 and later are **not
+> started**.
 
 ---
 
@@ -36,13 +40,16 @@ keeps every step explicit, traceable, and reviewable, and uses an LLM as a
                                     │ in-process calls
    ┌────────────────────────────────┼─────────────────────────────────┐
    │                                │                                 │
-┌──▼───────────┐  ┌─────────────┐  ┌▼──────────────┐  ┌────────────┐  │
+┌──▼───────────┐  ┌─────────────┐  ┌───────────────┐  ┌────────────┐  │
 │ data_engine  │  │ ml_engine   │  │ dl_engine     │  │ explain-   │  │
-│ (Phase 1-6)  │  │ (Phase 7)   │  │ (Phase 8)     │  │ ability    │  │
-└──────────────┘  └─────────────┘  └───────────────┘  │ (Phase 10) │  │
-   │                    │                 │           └────────────┘  │
-   │            ┌───────▼─────────────────▼───────┐                   │
-   │            │      experimentation/ (Phase 9) │                   │
+│ (Phase 1-7,  │  │ (empty stub │  │ (Phase 8 —    │  │ ability    │  │
+│  incl.       │  │  — Phase 7  │  │  not started) │  │ (Phase 10) │  │
+│  modeling)   │  │  is in      │  │               │  │            │  │
+│              │  │  data_engine│  │               │  │            │  │
+└──────────────┘  └─────────────┘  └───────────────┘  └────────────┘  │
+   │                                                                  │
+   │            ┌────────────────────────────────┐                    │
+   │            │  experimentation/ (Phase 9)    │                    │
    │            └───────────────┬────────────────┘                    │
    │                            │                                     │
    │            ┌───────────────▼────────────────┐                    │
@@ -54,6 +61,20 @@ keeps every step explicit, traceable, and reviewable, and uses an LLM as a
                 │   database/ (Phase 3+)         │  runs, lineage, experiments
                 └────────────────────────────────┘
 ```
+
+> **Architecture note (as-built vs. original plan).**
+> - **Phase 7 (Model Development) is implemented inside `data_engine.modeling`**,
+>   not `ml_engine`. `ml_engine/` remains an empty stub; the original plan
+>   put classical ML in its own engine, but Phase 7 shipped as a
+>   deterministic layer alongside the rest of the data engine.
+> - **Dataset versioning / lineage (Phase 3) is filesystem-backed**
+>   (`DatasetVersionStore`). A `database/`-backed store (Postgres / DuckDB)
+>   remains deferred.
+> - **`data_engine.preprocessing` is an empty stub.** Its planned role is
+>   covered by the Phase-2 cleaning executors and the Phase-6.5
+>   preprocessing *requirements* identifier.
+> - `dl_engine`, `experimentation`, `explainability`, `ai_engine`
+>   (interface only), `backend`, `frontend` are genuinely future.
 
 **Phase 1 components:** `data_engine.ingestion`, `data_engine.profiling`,
 and the shared data contracts in `datapilot/`. The interface between the
@@ -418,6 +439,26 @@ eligible. `ModelSelection` gained additive defaulted `selected_family` /
 `selected_estimator` / `selection_metric` / `selection_direction` /
 `selected_score` / `ranking` / `objective_used`; new `ModelSelectionRank`
 model. **Phase 7 is complete.** [modeling.md](modeling.md).
+
+**Post-Phase-7 stabilization (composition, not new intelligence):**
+`run_modeling_pipeline(df, request: ModelingRequest) -> ModelingSpec` in
+`data_engine.modeling.pipeline` chains the existing Phase-5 → Phase-6 →
+Phase-7.1–7.5 functions into one fully-populated `ModelingSpec` and is the
+only producer that sets the overall `ModelingSpec.status` to `completed`
+(a model is recommended) / `unavailable` (`reason` names the stage that
+stopped the pipeline). It adds no inference rule, model, metric, or
+randomness beyond the fixed Phase-7.4 seed; it writes no file and never
+mutates the input DataFrame. `understand_modeling` is unchanged and still
+returns an all-`not_yet_inferred` spec. The same pass made
+`ModelingSpec.evaluation` (`EvaluationResults`) an explicit **status
+mirror** of `ModelingSpec.training` (`TrainingOutcome`) — the single
+source of truth for every metric value — via
+`summarize_evaluation(training)`, which recomputes nothing. It also added
+an explicit forecasting **chronological-order precondition**: for a
+`time_ordered_holdout` the row order *is* the time axis, so Phase 7.4
+verifies the frame is non-decreasing on one of its own datetime columns
+and returns `unavailable` otherwise (it never infers a time column,
+sorts, or reorders).
 
 **Future-phase components:** everything else —
 figure generation, executing the Phase-6 recommendations, executing /

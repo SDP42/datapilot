@@ -200,6 +200,13 @@ def select_model(
         f"task type: {task.value}",
         f"selection metric for task '{task.value}': {metric} ({direction})",
     ]
+    primary_metric = problem.metrics.primary_metric
+    if primary_metric is not None and primary_metric != metric:
+        notes.append(
+            f"the Phase-5.4 primary metric '{primary_metric}' differs from the fixed Phase-7.5 "
+            f"selection metric '{metric}'; model selection always uses the fixed Phase-7.5 rule "
+            "(the Phase-5.4 primary metric is a reporting recommendation, not the selection key)"
+        )
     if task is TaskType.TIME_SERIES_FORECASTING:
         notes.append(
             "Phase 5 supplied the time-series-forecasting task; Phase 7.5 does not infer "

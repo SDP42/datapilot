@@ -1,4 +1,4 @@
-# EDA — Exploratory Data Analysis (Phase 4, in progress)
+# EDA — Exploratory Data Analysis (Phase 4, complete)
 
 `data_engine/eda/` — a deterministic, **analysis-only** layer. It turns a
 dataset (a DataFrame, or a registered `DatasetVersion`) into a structured,

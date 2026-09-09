@@ -4,27 +4,34 @@
 analytical objective; it works through the data-science pipeline the way a
 human data scientist would — and explains every step.
 
-> ⚠️ **Under active development.** Phases 1–7 of the data engine are
-> implemented (ingestion, profiling, quality, cleaning, validation &
-> lineage, a complete deterministic EDA / statistical-analysis layer, and
-> Automated Problem Understanding — the `ProblemSpec` contract, target
-> identification, task-type inference, candidate-metric recommendation,
-> and feasibility assessment, 5.1–5.5). Phase 6 (Feature Engineering) is
-> complete — the `FeatureEngineeringSpec` contract + foundation (6.1),
-> a deterministic structural feature inventory (6.2), deterministic
-> rule-based transformation recommendations (6.3), deterministic
-> structural / redundancy feature-selection recommendations (6.4),
-> deterministic preprocessing-requirements identification (6.5), and a
-> deterministic structural consistency / readiness assessment (6.6 —
-> Phase 6 complete). Phase 7 (Model Development) is complete — the
-> `ModelingSpec` contract + foundation (7.1), deterministic model
-> readiness + data-split planning (7.2), deterministic model-candidate
-> generation (7.3), deterministic baseline model training & evaluation
-> (7.4 — fits conservative scikit-learn baselines and reports per-candidate
-> metrics), and deterministic model selection & recommendation (7.5 —
-> ranks the 7.4 runs by a fixed per-task metric and recommends one model;
-> retrains and recomputes nothing). DL, LLM, API, and UI functionality
-> are **not started**. See [docs/roadmap.md](docs/roadmap.md).
+> ⚠️ **Under active development. Phases 0–7 of the data engine are
+> implemented; Phase 7 is complete.**
+>
+> - **Phases 1–3** — CSV ingestion, dataset profiling, data-quality
+>   analysis, cleaning planning + approval-gated execution, and filesystem
+>   dataset versioning / lineage validation.
+> - **Phase 4 (complete)** — a deterministic, analysis-only EDA /
+>   statistical-analysis layer (`data_engine.eda`).
+> - **Phase 5 (done)** — Automated Problem Understanding: the `ProblemSpec`
+>   contract, target identification, task-type inference, candidate-metric
+>   recommendation, feasibility assessment.
+> - **Phase 6 (done)** — Feature Engineering: the `FeatureEngineeringSpec`
+>   contract plus structural feature inventory and transformation /
+>   selection / preprocessing recommendations and a consistency
+>   assessment. Recommendation-only — nothing is executed.
+> - **Phase 7 (complete)** — Model Development (`data_engine.modeling`):
+>   model-readiness + data-split planning, candidate generation, baseline
+>   training & evaluation (fits one conservative scikit-learn baseline per
+>   candidate family — the first phase that fits a model), and
+>   deterministic model selection. A post-Phase-7 **stabilization** pass
+>   added `run_modeling_pipeline` (deterministic end-to-end composition
+>   into one `ModelingSpec`), made `ModelingSpec.evaluation` an explicit
+>   status mirror of `ModelingSpec.training`, and added an explicit
+>   forecasting chronological-order precondition.
+>
+> No hyperparameter tuning, cross-validation, deep learning, experiment
+> tracking, explainability, LLM usage, API, or UI exists yet. Phase 8
+> onward is **not started**. See [docs/roadmap.md](docs/roadmap.md).
 
 ---
 
@@ -77,16 +84,16 @@ Raw data → deterministic engines → structured results → AI reasoning
 
 | Package | Responsibility |
 | --- | --- |
-| `datapilot/` | Shared core: version, config, future data contracts |
-| `data_engine/` | Ingestion, profiling, quality, cleaning, preprocessing, validation, feature engineering |
-| `ml_engine/` | Classical ML: training, prediction, evaluation |
-| `dl_engine/` | Deep learning (PyTorch) |
-| `experimentation/` | Experiment definition, execution, comparison, history |
-| `explainability/` | Feature importance, SHAP, explanation objects |
-| `ai_engine/` | LLM orchestration: reasoning, planning, tool selection, recommendations |
-| `backend/` | FastAPI service (future) |
-| `database/` | Runs, lineage, experiment history (future) |
-| `frontend/` | Next.js + TypeScript UI (future) |
+| `datapilot/` | Shared core: version, config, shared data contracts |
+| `data_engine/` | Ingestion, profiling, quality, cleaning, validation & lineage, EDA, problem understanding, feature engineering, **modeling** (Phase 7) |
+| `ml_engine/` | *Empty stub.* Phase 7 was implemented in `data_engine.modeling`; this package is unused. |
+| `dl_engine/` | Deep learning (PyTorch) — *stub, Phase 8, not started* |
+| `experimentation/` | Experiment definition, execution, comparison, history — *stub, Phase 9* |
+| `explainability/` | Feature importance, SHAP, explanation objects — *stub, Phase 10* |
+| `ai_engine/` | LLM orchestration — *interface only (`LLMProvider` ABC); Phase 11–12* |
+| `backend/` | FastAPI service — *stub, Phase 13* |
+| `database/` | DB-backed runs / lineage / experiment history — *stub; Phase 3 lineage is filesystem-backed today* |
+| `frontend/` | Next.js + TypeScript UI — *stub, Phase 14* |
 
 Full detail: [docs/architecture.md](docs/architecture.md),
 [docs/modules.md](docs/modules.md),
@@ -133,10 +140,12 @@ continuous Testing/Benchmarking/Docs. See [docs/roadmap.md](docs/roadmap.md).
 | **Phase 4 — EDA & Statistical Analysis** (`data_engine.eda`) | ✅ Done — deterministic analysis-only EDA foundation + parametric tests (Welch t-test, one-way ANOVA, chi-square) + effect sizes (Cramér's V, correlation ratio, mutual information) + non-parametric tests (Spearman, Kendall, Mann-Whitney U, Kruskal-Wallis H) + richer distribution analysis (variance, skew, excess kurtosis, full quantiles, structured histogram) + EDA↔quality cross-reference + visualization foundation (deterministic chart-spec selection + in-memory Matplotlib **and** Plotly rendering: histogram / bar / scatter / box, + explicit chart export) + target-aware visualization recommendation (structural usefulness heuristic) + statistical-strength visualization ranking (real effect sizes / p-values) + k-NN / Kraskov continuous mutual information (numeric pairs **and** datetime columns) + paired / one-sided non-parametric tests (Wilcoxon signed-rank, sign, Friedman) + multiple-testing correction (Bonferroni / Holm / Benjamini-Hochberg); no dashboard/API |
 | **Phase 5 — Automated Problem Understanding** (`data_engine.problem_understanding`) | ✅ Done — the deterministic `ProblemSpec` contract + `understand_problem` foundation (5.1); **target identification** `identify_target()` — ranks plausible target columns from structural evidence + transparent objective name-matching (5.2); **task-type inference** `infer_task_type()` — rule-based `regression` / `*_classification` / `clustering` / `time_series_forecasting` from the target dtype + a small fixed objective vocabulary (5.3); **candidate metrics** `recommend_metrics()` — a fixed per-task metric vocabulary + fixed-vocabulary objective refinement, `mape` gated on a non-zero non-negative target (5.4); **feasibility assessment** `assess_feasibility()` — a deterministic structural screen over row counts / target availability & variation / class balance / finite-value counts / timestamp availability / feature presence, producing blocking issues vs warnings (5.5). All standalone, deterministic, analysis-only; no ML/LLM, no leakage detection |
 | **Phase 6 — Feature Engineering** (`data_engine.feature_engineering`) | ✅ Done — the deterministic `FeatureEngineeringSpec` contract + `understand_feature_engineering()` foundation (6.1 — infers nothing); **structural feature inventory** `inventory_features()` (6.2) — deterministic per-column structural stats + classification into candidate features vs excluded (declared target / constant / all-missing / identifier-like, where a high-uniqueness float is **not** an identifier); **transformation recommendations** `recommend_transformations()` (6.3) — deterministic rule-based recommendations (log / log1p / sqrt / reciprocal / abs on sign + multiplicative range + a `pandas` skew heuristic with named thresholds; datetime year/month/…/cyclical derivations; scaling as a recommendation *category*); **feature-selection recommendations** `recommend_feature_selection()` (6.4) — deterministic retain / drop / review from fixed structural + redundancy rules (constant / all-missing / identifier / high-missingness / low-variance / exact-duplicate → drop or review; `\|Pearson r\| ≥ 0.95` and high categorical cardinality → review); **preprocessing requirements** `recommend_preprocessing()` (6.5) — deterministic identification of missing-value imputation / categorical encoding / numerical scaling requirements for the 6.4 retained/review candidates (numeric scaling reuses the 6.3 signal). **Identifies requirements only** — never executes preprocessing, fills a value, chooses an encoder/imputer/scaler algorithm, re-selects the target (no target encoding), or modifies the DataFrame; **feature-engineering assessment** `assess_feature_engineering()` (6.6) — deterministic structural consistency & readiness check over 6.2–6.5 (internal consistency, cross-section agreement, target safety), `feasible` True/False from blocking structural inconsistencies, warnings never flip it. **Nothing is executed**; no ML/LLM, no predictive performance, no leakage detection |
-| **Phase 7 — Model Development / Modeling** (`data_engine.modeling`) | ✅ Done — the deterministic `ModelingSpec` contract + `understand_modeling()` foundation (7.1): validates an explicit `ModelingRequest`, echoes dataset identity + verbatim objective, returns an all-`not_yet_inferred` spec (readiness / split / candidates / training / evaluation / selection). **Infers nothing, trains nothing, inspects no DataFrame** (no `df` parameter). Stable `ModelingStatus` / `ModelFamily` enums; no model selection anywhere in Phase 7 yet; **model readiness** `assess_model_readiness()` + **data-split planning** `recommend_data_split()` (7.2) — a deterministic structural readiness check over the Phase-5 `ProblemSpec` + Phase-6 `FeatureEngineeringSpec` + DataFrame shape (`ready` means structurally sufficient to proceed, **not** "will perform well"), and a transparent train/val/test split-strategy recommendation (stratified holdout for classification, unstratified for regression, time-ordered for forecasting); **model-candidate generation** `generate_model_candidates()` (7.3) — deterministic rule-based recommendation of candidate `ModelFamily` values (linear / tree_based / ensemble / probabilistic / distance_based / neural) from the task type + readiness + split + structural feature representation, with a structural reason + evidence per family (no performance claims); **baseline model training & evaluation** `train_and_evaluate_models()` (7.4) — the first component that fits estimators: executes the plan's physical train/val/test split (fixed seed 42), runs the Phase-6.5 preprocessing fitted only on the training partition, fits one conservative scikit-learn baseline per Phase-7.3 family (`LinearRegression` / `LogisticRegression` / `DecisionTree*` / `RandomForest*` / `GaussianNB` / `GaussianMixture` / `KNeighbors*` / `KMeans` / `MLP*` — no XGBoost / LightGBM / torch), and reports per-candidate test metrics (**tunes no hyperparameters; runs no CV; persists no artifact**); **model selection & recommendation** `select_model()` (7.5) — deterministically ranks the successful 7.4 runs by a fixed per-task metric (`rmse`↓ / macro `f1`↑ / `silhouette_score`↑, never substituted), breaks ties by the fixed family order then estimator name, and recommends `ranking[0]`. **Retrains nothing, recomputes no metric, reads no DataFrame, mutates no upstream object; no model is claimed statistically superior.** scikit-learn added as the first modeling dependency (7.4). |
+| **Phase 7 — Model Development / Modeling** (`data_engine.modeling`) | ✅ Done — the deterministic `ModelingSpec` contract + `understand_modeling()` foundation (7.1): validates an explicit `ModelingRequest`, echoes dataset identity + verbatim objective, returns an all-`not_yet_inferred` spec (readiness / split / candidates / training / evaluation / selection). **Infers nothing, trains nothing, inspects no DataFrame** (no `df` parameter). Stable `ModelingStatus` / `ModelFamily` enums. **model readiness** `assess_model_readiness()` + **data-split planning** `recommend_data_split()` (7.2) — a deterministic structural readiness check over the Phase-5 `ProblemSpec` + Phase-6 `FeatureEngineeringSpec` + DataFrame shape (`ready` means structurally sufficient to proceed, **not** "will perform well"), and a transparent train/val/test split-strategy recommendation (stratified holdout for classification, unstratified for regression, time-ordered for forecasting); **model-candidate generation** `generate_model_candidates()` (7.3) — deterministic rule-based recommendation of candidate `ModelFamily` values (linear / tree_based / ensemble / probabilistic / distance_based / neural) from the task type + readiness + split + structural feature representation, with a structural reason + evidence per family (no performance claims); **baseline model training & evaluation** `train_and_evaluate_models()` (7.4) — the first component that fits estimators: executes the plan's physical train/val/test split (fixed seed 42), runs the Phase-6.5 preprocessing fitted only on the training partition, fits one conservative scikit-learn baseline per Phase-7.3 family (`LinearRegression` / `LogisticRegression` / `DecisionTree*` / `RandomForest*` / `GaussianNB` / `GaussianMixture` / `KNeighbors*` / `KMeans` / `MLP*` — no XGBoost / LightGBM / torch), and reports per-candidate test metrics (**tunes no hyperparameters; runs no CV; persists no artifact**); **model selection & recommendation** `select_model()` (7.5) — deterministically ranks the successful 7.4 runs by a fixed per-task metric (`rmse`↓ / macro `f1`↑ / `silhouette_score`↑, never substituted), breaks ties by the fixed family order then estimator name, and recommends `ranking[0]`. **Retrains nothing, recomputes no metric, reads no DataFrame, mutates no upstream object; no model is claimed statistically superior.** scikit-learn added as the first modeling dependency (7.4). |
+| **Post-Phase-7 stabilization** (`data_engine.modeling`) | ✅ Done — `run_modeling_pipeline(df, request)` deterministically composes Phase 5 → Phase 6 → Phase 7.1–7.5 into one fully-populated `ModelingSpec` and is the only producer that sets the overall `ModelingSpec.status` (`completed` when a model is recommended, `unavailable` with a stage-naming reason otherwise; `understand_modeling()` still returns all-`not_yet_inferred`). `ModelingSpec.evaluation` (`EvaluationResults`) is now an explicit **status mirror** of `ModelingSpec.training` (`TrainingOutcome`, the single source of truth for every metric value) via `summarize_evaluation()`, which recomputes nothing. **Forecasting chronological-order precondition:** for a `time_ordered_holdout` Phase 7.4 verifies the frame is non-decreasing on one of its own datetime columns and returns `unavailable` otherwise — it never infers a time column, sorts, or reorders. No new dependency; no new modeling intelligence. |
 | AI-driven cleaning approval / reasoning | ⛔ Not started (Phase 11+) |
-| ML experimentation | ⛔ Not started |
-| Everything else | ⛔ Not started |
+| Deep learning (Phase 8) | ⛔ Not started |
+| Iterative ML experimentation, hyperparameter tuning, CV, experiment tracking (Phase 9+) | ⛔ Not started |
+| Explainability, AI Scientist / agent loop, backend API, frontend, MLOps, deployment | ⛔ Not started |
 
 Detail: [docs/data-engine-contract.md](docs/data-engine-contract.md),
 [docs/data-quality.md](docs/data-quality.md), [docs/cleaning.md](docs/cleaning.md),

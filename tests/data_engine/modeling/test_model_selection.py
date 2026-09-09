@@ -41,6 +41,7 @@ from data_engine.modeling import (
     understand_modeling,
 )
 from data_engine.problem_understanding import (
+    CandidateMetrics,
     ProblemSpec,
     ProblemUnderstandingRequest,
     ProblemUnderstandingStatus,
@@ -838,3 +839,67 @@ def test_full_phase_7_pipeline_still_works(reg_pipeline):
     assert candidates.status is COMPLETED
     assert training.status is COMPLETED
     assert select_model(problem, fe, readiness, split, candidates, training).status is COMPLETED
+
+
+# --- Phase-5.4 primary metric vs Phase-7.5 selection metric (audit) ---
+
+
+def _problem_with_primary_metric(task: TaskType, primary: str) -> ProblemSpec:
+    return _synthetic_problem(task).model_copy(
+        update={
+            "metrics": CandidateMetrics(status=PU_DONE, primary_metric=primary, metrics=[primary])
+        }
+    )
+
+
+def test_selection_metric_is_authoritative_and_divergence_is_noted():
+    # Phase 5.4 recommends `mae` for forecasting; Phase 7.5 always selects on `rmse`.
+    out = select_model(
+        _problem_with_primary_metric(TaskType.TIME_SERIES_FORECASTING, "mae"),
+        _synthetic_fe(),
+        _synthetic_readiness(),
+        _synthetic_split(),
+        _synthetic_candidates("linear", "ensemble"),
+        _training(
+            _run(
+                "linear", "LinearRegression", TrainingRunStatus.COMPLETED, {"rmse": 5.0, "mae": 1.0}
+            ),
+            _run(
+                "ensemble",
+                "RandomForestRegressor",
+                TrainingRunStatus.COMPLETED,
+                {"rmse": 4.0, "mae": 2.0},
+            ),
+        ),
+    )
+    assert out.selection_metric == "rmse"
+    assert out.selection_direction == "minimize"
+    # selection uses rmse (ensemble wins), NOT the Phase-5.4 primary metric mae (linear wins)
+    assert out.selected_family == "ensemble"
+    assert out.selected_score == 4.0
+    assert any(
+        "Phase-5.4 primary metric 'mae' differs from the fixed Phase-7.5 selection metric 'rmse'"
+        in n
+        for n in out.notes
+    )
+
+
+def test_no_divergence_note_when_metrics_align():
+    out = select_model(
+        _problem_with_primary_metric(TaskType.REGRESSION, "rmse"),
+        _synthetic_fe(),
+        _synthetic_readiness(),
+        _synthetic_split(),
+        _synthetic_candidates("linear"),
+        _training(_run("linear", "LinearRegression", TrainingRunStatus.COMPLETED, {"rmse": 1.0})),
+    )
+    assert not any("differs from the fixed Phase-7.5 selection metric" in n for n in out.notes)
+
+
+def test_no_divergence_note_when_primary_metric_absent():
+    # _synthetic_problem leaves CandidateMetrics all-not_yet_inferred (primary_metric = None)
+    out = _sel(
+        TaskType.REGRESSION,
+        _training(_run("linear", "LinearRegression", TrainingRunStatus.COMPLETED, {"rmse": 1.0})),
+    )
+    assert not any("differs from the fixed Phase-7.5 selection metric" in n for n in out.notes)

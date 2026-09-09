@@ -1,22 +1,27 @@
-"""Model Development / Modeling (Phase 7) — deterministic, analysis-only.
+"""Model Development / Modeling (Phase 7) — deterministic.
 
-Phase 7 turns a dataset + an explicit objective (and, in later
-increments, the upstream Phase-5 / Phase-6 contracts) into a structured
+Phase 7 turns a dataset + an explicit objective + the upstream Phase-5
+``ProblemSpec`` / Phase-6 ``FeatureEngineeringSpec`` into a structured
 :class:`ModelingSpec`: whether the data is ready for modeling, how to
 split it, which model families to consider, the training outcome, the
-evaluation results, and the selected model.
+evaluation summary, and the selected model. Only Phase 7.4
+(:func:`train_and_evaluate_models`) fits estimators (conservative
+scikit-learn baselines); no increment tunes, cross-validates, or persists
+a model.
 
-**Phase 7.1 (this increment) is the contract + foundation only.**
-:func:`understand_modeling` validates an explicit :class:`ModelingRequest`
-and returns a ``ModelingSpec`` whose sections are all
-``not_yet_inferred`` — no readiness verdict, split, candidate model,
-training run, metric, or selection is produced yet, and no DataFrame is
-inspected.
+:func:`understand_modeling` is the inference-free foundation: it validates
+an explicit :class:`ModelingRequest` and returns a ``ModelingSpec`` whose
+overall status and every section are ``not_yet_inferred``.
 
-    from data_engine.modeling import ModelingRequest, understand_modeling
+:func:`run_modeling_pipeline` is the deterministic end-to-end composition:
+it chains the existing Phase-5, Phase-6, and Phase-7 functions into one
+fully-populated ``ModelingSpec`` (and is the only producer that sets the
+overall ``status`` to ``completed`` / ``unavailable``).
 
-    spec = understand_modeling(
-        ModelingRequest(dataset_id="sales", objective="predict churn")
+    from data_engine.modeling import ModelingRequest, run_modeling_pipeline
+
+    spec = run_modeling_pipeline(
+        df, ModelingRequest(dataset_id="sales", objective="predict churn")
     )
     payload = spec.model_dump(mode="json")
 """
@@ -28,6 +33,7 @@ from .candidate_generation import (
     MODEL_CANDIDATE_NEURAL_MIN_ROWS,
     generate_model_candidates,
 )
+from .evaluation import summarize_evaluation
 from .models import (
     MODEL_ENGINE_VERSION,
     DataSplitPlan,
@@ -46,6 +52,7 @@ from .models import (
     TrainingRun,
     TrainingRunStatus,
 )
+from .pipeline import run_modeling_pipeline
 from .readiness import (
     MODEL_READINESS_MIN_ROWS,
     MODEL_READINESS_ROWS_WARNING,
@@ -112,7 +119,9 @@ __all__ = [
     "assess_model_readiness",
     "generate_model_candidates",
     "recommend_data_split",
+    "run_modeling_pipeline",
     "select_model",
+    "summarize_evaluation",
     "train_and_evaluate_models",
     "understand_modeling",
 ]

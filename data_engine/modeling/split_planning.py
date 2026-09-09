@@ -162,6 +162,11 @@ def recommend_data_split(
             "Phase 7.2 does not infer a forecasting task from a datetime column, create lag "
             "or rolling features, or perform any forecasting"
         )
+        notes.append(
+            "chronological-order precondition: the caller must supply the forecasting rows "
+            "already ordered by time — Phase 7.4 verifies this against a datetime column and "
+            "does not sort or reorder the rows"
+        )
     elif task is TaskType.REGRESSION:
         strategy = DataSplitStrategy.RANDOM_HOLDOUT
         notes.append(

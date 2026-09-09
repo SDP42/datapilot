@@ -33,6 +33,7 @@ import pandas as pd
 
 from data_engine.feature_engineering import FeatureEngineeringSpec, FeatureEngineeringStatus
 from data_engine.problem_understanding import ProblemSpec, ProblemUnderstandingStatus, TaskType
+from data_engine.profiling.type_inference import infer_column_type
 from datapilot.contracts import ColumnType
 
 from .models import (
@@ -97,6 +98,41 @@ except ImportError:  # pragma: no cover
 def _normalise_error(message: str) -> str:
     """Strip nondeterministic detail (memory addresses) from an exception message."""
     return _ADDR_RE.sub("0x...", message).strip()
+
+
+def _verify_chronological_order(df: pd.DataFrame) -> tuple[bool, str]:
+    """Deterministically check that a forecasting frame's rows are chronological.
+
+    For ``time_ordered_holdout`` the **row order is the time axis** — Phase
+    7.4 slices it positionally and never sorts or infers a time column. So
+    the frame must already be non-decreasing on one of its own datetime
+    columns. Returns ``(ok, detail)`` where ``detail`` is a note on success
+    or an explicit reason on failure.
+    """
+    column_names = [str(c) for c in df.columns]
+    datetime_cols = sorted(
+        name
+        for i, name in enumerate(column_names)
+        if infer_column_type(df.iloc[:, i]) is ColumnType.DATETIME
+    )
+    if not datetime_cols:
+        return False, (
+            "time_series_forecasting uses row order as the time axis, but the DataFrame has no "
+            "datetime column to verify that the rows are in chronological order; sort the rows "
+            "chronologically and keep the timestamp column in the frame"
+        )
+    for name in datetime_cols:
+        parsed = pd.to_datetime(df.iloc[:, column_names.index(name)], errors="coerce").dropna()
+        if len(parsed) >= 2 and parsed.is_monotonic_increasing:
+            return True, (
+                f"chronological-order precondition satisfied: datetime column '{name}' is "
+                "non-decreasing across the supplied rows"
+            )
+    return False, (
+        "time_series_forecasting uses row order as the time axis, but none of the datetime "
+        f"column(s) ({', '.join(datetime_cols)}) is non-decreasing across the supplied rows; "
+        "sort the DataFrame chronologically before modeling — Phase 7.4 does not reorder rows"
+    )
 
 
 def _unavailable(reason: str, *, objective_used: bool) -> TrainingOutcome:
@@ -481,6 +517,19 @@ def train_and_evaluate_models(
             objective_used=objective_used,
         )
 
+    # --- forecasting chronological-order precondition (audit H1) --------
+    # A time-ordered holdout slices row order positionally as the time
+    # axis. Phase 7.4 never infers a time column, sorts, or reorders — so
+    # the rows must already be non-decreasing on one of the frame's own
+    # datetime columns, otherwise the split (and every metric) would be
+    # silently meaningless.
+    chronological_note: str | None = None
+    if split.strategy is DataSplitStrategy.TIME_ORDERED_HOLDOUT:
+        ordered_ok, ordered_detail = _verify_chronological_order(df)
+        if not ordered_ok:
+            return _unavailable(ordered_detail, objective_used=objective_used)
+        chronological_note = ordered_detail
+
     category = _TASK_CATEGORY[task]
     is_supervised = category in {"regression", "classification"}
 
@@ -539,6 +588,12 @@ def train_and_evaluate_models(
             "features, forecasting transformations, or forecasting models; the task type "
             "came from Phase 5, never a datetime column"
         )
+    if chronological_note is not None:
+        notes.append(chronological_note)
+        notes.append(
+            "row order is the time axis for this time-ordered holdout; Phase 7.4 verified it "
+            "against a datetime column and did not sort or reorder the rows"
+        )
     if objective_used:
         notes.append("an objective was supplied and recorded; it did not change any training step")
 
@@ -577,10 +632,18 @@ def train_and_evaluate_models(
 
     # canonicalise row order for the non-temporal strategies so the split
     # (and therefore every metric) is invariant to the input row order.
+    # Sort by the model columns only (features + target) — orderable dtypes
+    # by construction — never by excluded datetime / unknown / object
+    # columns, whose comparability varies across pandas versions (audit M9).
     if split.strategy is not DataSplitStrategy.TIME_ORDERED_HOLDOUT and len(work) > 0:
-        work = work.sort_values(
-            by=sorted(work.columns), kind="stable", ignore_index=True, na_position="last"
-        )
+        _feature_set = set(feature_cols)
+        canonical_by = sorted(c for c in work.columns if c in _feature_set or c == target_column)
+        if canonical_by:
+            work = work.sort_values(
+                by=canonical_by, kind="stable", ignore_index=True, na_position="last"
+            )
+        else:
+            work = work.reset_index(drop=True)
 
     n = len(work)
     x_all = work[feature_cols] if feature_cols else work.iloc[:, :0]
