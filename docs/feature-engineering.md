@@ -42,14 +42,21 @@ engineering is feasible.
 >   review candidates. **Identifies requirements only** — never executes
 >   preprocessing, fills a value, chooses an encoder/imputer/scaler
 >   algorithm, or modifies the DataFrame. No target encoding.
+> - **forecasting foundation — temporal feature recommendations**
+>   (`recommend_temporal_features`): DONE. Deterministic lag / rolling
+>   feature recommendations for a `time_series_forecasting` problem,
+>   populating `FeatureEngineeringSpec.temporal`. `status = unavailable`
+>   for **every** non-forecasting task. **Recommendation-only** — it never
+>   computes a lag, calls `.shift` / `.rolling`, or touches the DataFrame;
+>   building the features is a later increment.
 > - **6.6 — feature-engineering assessment** (`assess_feature_engineering`):
 >   DONE. Deterministic **structural consistency & readiness check** over
->   the 6.2 / 6.3 / 6.4 / 6.5 outputs — internal consistency, cross-section
->   agreement, target safety. `feasible = False` iff `≥ 1` blocking
->   structural inconsistency, else `True`; `None` only while upstream is
->   incomplete. **Never** executes anything, measures predictive
->   performance, infers the target/task, detects leakage, or overrides an
->   upstream decision.
+>   the 6.2 / 6.3 / 6.4 / 6.5 outputs (+ the `temporal` section) — internal
+>   consistency, cross-section agreement, target safety. `feasible = False`
+>   iff `≥ 1` blocking structural inconsistency, else `True`; `None` only
+>   while upstream is incomplete. **Never** executes anything, measures
+>   predictive performance, infers the target/task, detects leakage, or
+>   overrides an upstream decision.
 
 ## Entrypoint
 
@@ -100,8 +107,9 @@ non-blank after `.strip()`.
 | `inventory` | `FeatureInventory` | all-`not_yet_inferred` | **no** — later increment |
 | `transformations` | `TransformationRecommendations` | all-`not_yet_inferred` | **no** — later increment |
 | `selection` | `FeatureSelectionRecommendations` | all-`not_yet_inferred` | **no** — later increment |
-| `preprocessing` | `PreprocessingRequirements` | all-`not_yet_inferred` | **no** — later increment |
-| `assessment` | `FeatureEngineeringAssessment` | all-`not_yet_inferred` | **no** — later increment |
+| `preprocessing` | `PreprocessingRequirements` | all-`not_yet_inferred` | no — 6.5 `recommend_preprocessing` |
+| `temporal` | `TemporalFeatureRecommendations` | all-`not_yet_inferred` | no — `recommend_temporal_features` (forecasting only; `unavailable` otherwise) |
+| `assessment` | `FeatureEngineeringAssessment` | all-`not_yet_inferred` | no — 6.6 `assess_feature_engineering` |
 | `notes` | `list[str]` | `[]` | yes (empty in 6.1) |
 
 ### Nested sections
@@ -161,7 +169,9 @@ leakage score, or feasibility verdict.
 
 `transformation`, `interaction`, `aggregation`, `datetime_derivation`,
 `categorical_encoding`, `numerical_scaling`, `missing_value_handling`,
-`feature_selection`. Defined now so the contract is stable — Phase 6.1
+`feature_selection`, `lag_feature`, `rolling_feature` (the last two added
+by the forecasting foundation). The enum grows **additively** — every
+historical value stays stable and legacy JSON validates. Phase 6.1
 executes, recommends, and names **none** of them.
 
 ## Feature inventory (6.2) — `inventory_features`
@@ -616,6 +626,66 @@ snapshot verified). No file, figure, network, database, lineage,
 `preprocessing` is populated, and `assessment` and the overall
 `FeatureEngineeringSpec.status` stay `not_yet_inferred`.
 
+## Temporal feature recommendations (forecasting foundation) — `recommend_temporal_features`
+
+```python
+temporal = recommend_temporal_features(df, inventory, problem.task_type, objective=objective)
+spec = spec.model_copy(update={"temporal": temporal})
+```
+
+`recommend_temporal_features(df, inventory: FeatureInventory, task_type:
+TaskTypeInference, *, objective=None) -> TemporalFeatureRecommendations` —
+a **standalone**, deterministic, **recommendation-only** step. It
+identifies the lag and rolling-window features a
+`time_series_forecasting` problem structurally needs. It **never** computes
+a lag, calls `.shift` / `.rolling`, modifies `df`, selects features, or
+trains a model; building the recommended features is a later increment.
+
+### Fixed `unavailable` precedence
+
+1. `task_type.status != completed`
+2. `task_type.task_type is not TIME_SERIES_FORECASTING` — the expected
+   result for every other task, **not** an error
+3. `task_type.time_column is None`
+4. `inventory.status != completed`
+
+### Rules (deterministic; documented tunables)
+
+- **Row-count gate:** `n_rows < FORECASTING_MIN_ROWS_FOR_TEMPORAL` (50) →
+  `completed` with empty lists + an explicit reason.
+- **Target autoregression** (`task_type.target_column`, unless it *is* the
+  time column): a `LAG_FEATURE` at each order in
+  `FORECASTING_LAG_ORDERS` (`1, 2, 3, 7, 14`) that fits
+  (`n_rows > order + FORECASTING_TEMPORAL_ROW_MARGIN`, margin `10`); a
+  `ROLLING_FEATURE` `mean` and `std` at each window in
+  `FORECASTING_ROLLING_WINDOWS` (`7, 30`) that fits.
+- **Exogenous numeric features** (inventory candidates, not the target,
+  not the time column): a `LAG_FEATURE` at order `1` by default; the full
+  `FORECASTING_LAG_ORDERS` set when the objective carries a lag /
+  autoregressive vocabulary (objective **refines priority only** — never
+  adds or removes a column).
+- Deterministic ordering: `(column, operation, order/window, mean<std)`;
+  `recommended_operations` is the aligned `"<column>: <description>"` list.
+- New `FeatureOperationType` values: `LAG_FEATURE`, `ROLLING_FEATURE`
+  (additive enum values — round-trips preserved, legacy JSON validates).
+
+### Target-safety carve-out
+
+The forecasting **target** is *permitted* to appear in the `temporal`
+section — its own past values are the legitimate autoregressive
+predictors. The target-safety rule that **blocks** the target in
+`transformations` / `preprocessing` / `selection` (6.6) is unchanged.
+6.6's "temporal consistency" check only allows the target in `temporal`
+when `temporal.status == completed` (i.e. a genuine forecasting result).
+
+### Integration
+
+`understand_feature_engineering()` is unchanged. `recommend_temporal_features`
+is passed to `assess_feature_engineering(..., temporal=temporal)` (a
+keyword-only, defaulted parameter — the 5-positional call is unchanged).
+For a non-forecasting task the `temporal` section is `unavailable` and 6.6
+records that in a note only, never a block or warning.
+
 ## Feature-engineering assessment (6.6) — `assess_feature_engineering`
 
 ```python
@@ -631,11 +701,21 @@ inv = inventory_features(df, target="churn")
 trans = recommend_transformations(df, inv)
 sel = recommend_feature_selection(df, inv, task_type)
 pre = recommend_preprocessing(df, inv, trans, sel)
-assessment = assess_feature_engineering(df, inv, trans, sel, pre, objective="predict churn")
+tmp = recommend_temporal_features(df, inv, task_type)  # forecasting only; else `unavailable`
+assessment = assess_feature_engineering(
+    df, inv, trans, sel, pre, temporal=tmp, objective="predict churn"
+)
 spec = spec.model_copy(update={"assessment": assessment})
 ```
 
-`assess_feature_engineering(df: pd.DataFrame, inventory: FeatureInventory, transformations: TransformationRecommendations, selection: FeatureSelectionRecommendations, preprocessing: PreprocessingRequirements, *, objective: str | None = None) -> FeatureEngineeringAssessment`
+`assess_feature_engineering(df: pd.DataFrame, inventory: FeatureInventory, transformations: TransformationRecommendations, selection: FeatureSelectionRecommendations, preprocessing: PreprocessingRequirements, *, temporal: TemporalFeatureRecommendations | None = None, objective: str | None = None) -> FeatureEngineeringAssessment`
+
+`temporal` is **keyword-only and defaulted** — the 5-positional call is
+unchanged. When `None` the temporal checks are skipped (identical to
+pre-forecasting-foundation behaviour); when `completed` its lag / rolling
+recommendations get a "temporal consistency" check and a "temporal
+features not executed" warning; when `unavailable` (the expected state for
+a non-forecasting task) it is recorded in the notes only.
 
 A deterministic **structural consistency and readiness check**. It
 answers *"are the Phase-6 recommendations internally consistent and
@@ -666,7 +746,9 @@ Blocking issues and warnings are grouped and ordered by category:
    negatives).
 3. target safety — the target column never appears in any selection list,
    selection recommendation, transformation recommendation, or
-   preprocessing requirement.
+   preprocessing requirement (the `temporal` section is the one exception
+   — the forecasting target's own lag / rolling features are allowed
+   there when `temporal.status == completed`).
 4. selection consistency — selected / dropped / review are inventory
    candidates, the three lists never overlap, and each structured
    recommendation's `action` matches the list it is in.
@@ -682,10 +764,15 @@ Blocking issues and warnings are grouped and ordered by category:
    flags agree with the requirements, encoding only on categorical,
    scaling only on numeric, no datetime encoding/scaling, no imputation
    for an entirely-missing column.
-7. cross-section consistency — a dropped or inventory-excluded feature
-   never has a transformation recommendation or a preprocessing
-   requirement.
-8. structural completeness — every downstream reference resolves to an
+7. temporal consistency (when `temporal.status == completed`) — every
+   recommendation is a `lag_feature` / `rolling_feature` on an inventory
+   candidate or the declared target, no duplicate `(column, description)`,
+   `recommended_operations` matches the structured list and is
+   column-sorted, and `temporal.time_column` is a real column.
+8. cross-section consistency — a dropped or inventory-excluded feature
+   never has a transformation recommendation, a preprocessing
+   requirement, or a temporal recommendation.
+9. structural completeness — every downstream reference resolves to an
    inventory candidate (or the target).
 
 ### Blocking vs warning semantics

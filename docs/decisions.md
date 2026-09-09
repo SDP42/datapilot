@@ -4,6 +4,91 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0077 — Forecasting Foundation: first-class `time_column` + recommendation-only lag/rolling features
+
+- **Decision:** a cross-phase (5 / 6 / 7) *foundation* increment. **No new
+  dependency, no engine-version bump, no Phase-7.4 execution change, no
+  forecasting library, no new `ModelFamily`.** Six additive sub-changes:
+  1. **`TaskTypeInference.time_column: str | None`** (additive, defaulted)
+     + **`infer_task_type(df, target, *, objective=None,
+     time_column=None)`**. The forecasting time axis is declared by the
+     caller or auto-resolved iff the frame has exactly one datetime
+     column. A forecasting objective + numeric target + **2+ datetime
+     columns + no declared `time_column` → `status = unavailable`**
+     ("declare time_column") — replaces a silent, column-order-dependent
+     guess. A datetime target sets `time_column` to the target.
+  2. **`assess_feasibility` (forecasting branch)** consumes
+     `task_type.time_column` and blocks when it is unresolved, absent, has
+     `< 2` distinct usable timestamps, or is **not monotonically
+     non-decreasing** across the rows. An unsorted forecasting frame is
+     now `feasible = False` in Phase 5 → `assess_model_readiness` sets
+     `ready = False` → candidates / training / selection cascade to
+     `unavailable` → `run_modeling_pipeline` overall `unavailable`.
+  3. **`FeatureOperationType` += `LAG_FEATURE`, `ROLLING_FEATURE`**
+     (additive `str`-enum values; round-trips and legacy JSON preserved).
+  4. **New `FeatureEngineeringSpec.temporal` section** (additive,
+     defaulted) + **`recommend_temporal_features(df, inventory,
+     task_type, *, objective=None) -> TemporalFeatureRecommendations`**.
+     Deterministic **recommendation-only** lag (orders `1, 2, 3, 7, 14`)
+     and rolling mean/std (windows `7, 30`) recommendations for the
+     forecasting target, plus lag-1 for numeric exogenous features
+     (widened by a fixed lag / autoregressive objective vocabulary —
+     priority only, never a column). Fixed tunables
+     `FORECASTING_LAG_ORDERS` / `FORECASTING_ROLLING_WINDOWS` /
+     `FORECASTING_MIN_ROWS_FOR_TEMPORAL` (50) /
+     `FORECASTING_TEMPORAL_ROW_MARGIN` (10). **`status = unavailable` for
+     every non-forecasting task — the expected state, not an error.** It
+     never computes a lag, calls `.shift` / `.rolling`, or touches `df`.
+  5. **`assess_feature_engineering`** gains a keyword-only
+     `temporal: TemporalFeatureRecommendations | None = None` param (the
+     5-positional call is unchanged) + a "temporal consistency" check
+     category (fixed order: preprocessing `5` → temporal `6` → cross `7`
+     → completeness `8`). **Target-safety carve-out:** the forecasting
+     target's own lag / rolling features are *permitted* in `temporal`
+     (when `temporal.status == completed`), while the existing rule that
+     **blocks** the target in `transformations` / `preprocessing` /
+     `selection` is unchanged.
+  6. **`ModelingRequest.time_column: str | None`** (additive, defaulted).
+     `run_modeling_pipeline` threads it to `infer_task_type` and calls
+     `recommend_temporal_features`. Phase 7.4's `_verify_chronological_order`
+     now consumes `problem.task_type.time_column` (that exact column must
+     be present + non-decreasing); the previous "first monotonic datetime
+     column" heuristic is kept as the fallback for `time_column is None`.
+     Phase 7.4 adds a note stating how many temporal features Phase 6
+     recommended and that it does **not** build them.
+- **Reason:** post-Phase-7 planning (`SPEC-forecasting-foundation.md`,
+  6 decisions confirmed) identified the heuristic datetime-column
+  selection as the one real forecasting architecture soft spot and the
+  feature-engineering output for forecasting problems as materially
+  incomplete (no lag / rolling recommendations).
+- **Explicitly OUT (the follow-up "Forecasting Execution" increment):**
+  building the lag / rolling features; forecast horizon / multi-step;
+  multi-series / panel forecasting; backtesting / rolling-origin CV;
+  frequency inference / resampling; ARIMA / ETS / Prophet or any
+  forecasting library; a new `ModelFamily`; any change to Phase 7.4's
+  "execute ONLY Phase-6.5 preprocessing" boundary; `ModelingSpec.time_column`;
+  engine-version bumps.
+- **Backward compatibility:** every new field defaulted; new enum values
+  additive; new function params keyword-only + defaulted (all existing
+  positional call sites unchanged); legacy JSON validates for
+  `TaskTypeInference` / `ProblemSpec` / `FeatureEngineeringSpec` /
+  `ModelingRequest`; byte-identical round-trips preserved. Two exact-set
+  test assertions relaxed to subset / updated signatures (`FeatureOperationType`
+  values; `assess_feature_engineering` params) — documented as legitimate
+  additive API growth, not weakened tests. New exports:
+  `recommend_temporal_features`, `TemporalFeatureRecommendation(s)`,
+  `FORECASTING_LAG_ORDERS` / `_ROLLING_WINDOWS` / `_MIN_ROWS_FOR_TEMPORAL`
+  / `_TEMPORAL_ROW_MARGIN`.
+- **Behaviour change (intended):** the 2+-datetime-column forecasting
+  ambiguity now returns `unavailable` where it previously silently picked
+  `datetime_columns[0]`; an unsorted forecasting frame is now caught at
+  Phase-5 feasibility rather than only at Phase 7.4.
+- **Phase state:** Phases 0–7 done + stabilization + Forecasting
+  Foundation. Phase 8 not started. `pytest` / `ruff` / `ruff format` /
+  `mypy` all green.
+
+---
+
 ## 0076 — Post-Phase-7 stabilization: end-to-end composition, `EvaluationResults` as a mirror, explicit forecasting order precondition
 
 - **Decision:** a targeted stabilization pass over the implemented Phase

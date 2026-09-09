@@ -282,12 +282,99 @@ def test_datetime_column_plus_forecasting_objective_plus_numeric_target(df):
 
 
 def test_datetime_target_with_forecasting_objective_is_forecasting(df):
-    assert (
-        _task(
-            infer_task_type(df, _target("signup_date"), objective="forecast the future signup date")
-        )
-        is TaskType.TIME_SERIES_FORECASTING
+    result = infer_task_type(
+        df, _target("signup_date"), objective="forecast the future signup date"
     )
+    assert _task(result) is TaskType.TIME_SERIES_FORECASTING
+    assert result.time_column == "signup_date"
+
+
+# --- forecasting: the time_column contract -----------------
+
+
+def _two_datetime_frame() -> pd.DataFrame:
+    n = 60
+    return pd.DataFrame(
+        {
+            "order_date": pd.date_range("2021-01-01", periods=n, freq="D"),
+            "ship_date": pd.date_range("2021-02-01", periods=n, freq="D"),
+            "amount": np.linspace(10.0, 90.0, n),
+        }
+    )
+
+
+def test_single_datetime_column_auto_resolves_time_column(df):
+    result = infer_task_type(df, _target("price"), objective="forecast next quarter's price")
+    assert result.task_type is TaskType.TIME_SERIES_FORECASTING
+    assert result.time_column == "signup_date"
+    assert any("auto-resolved" in n for n in result.notes)
+
+
+def test_declared_time_column_is_used(df):
+    result = infer_task_type(
+        df, _target("price"), objective="forecast the price", time_column="signup_date"
+    )
+    assert result.time_column == "signup_date"
+    assert any("declared by the caller" in n for n in result.notes)
+
+
+def test_declared_time_column_absent_is_unavailable(df):
+    result = infer_task_type(
+        df, _target("price"), objective="forecast the price", time_column="no_such_col"
+    )
+    assert result.status is ProblemUnderstandingStatus.UNAVAILABLE
+    assert "is not a column of the DataFrame" in result.reason
+
+
+def test_declared_time_column_not_datetime_is_unavailable(df):
+    result = infer_task_type(
+        df, _target("price"), objective="forecast the price", time_column="price"
+    )
+    assert result.status is ProblemUnderstandingStatus.UNAVAILABLE
+    assert "is not a datetime column" in result.reason
+
+
+def test_two_datetime_columns_no_declaration_is_unavailable():
+    frame = _two_datetime_frame()
+    result = infer_task_type(frame, _target("amount"), objective="forecast future amount")
+    assert result.status is ProblemUnderstandingStatus.UNAVAILABLE
+    assert "declare time_column" in result.reason
+
+
+def test_two_datetime_columns_with_declaration_resolves():
+    frame = _two_datetime_frame()
+    result = infer_task_type(
+        frame, _target("amount"), objective="forecast future amount", time_column="ship_date"
+    )
+    assert result.task_type is TaskType.TIME_SERIES_FORECASTING
+    assert result.time_column == "ship_date"
+
+
+def test_non_forecasting_tasks_have_no_time_column(df):
+    for target_col, objective in (
+        ("price", "predict the price"),
+        ("segment", "classify the segment"),
+    ):
+        result = infer_task_type(df, _target(target_col), objective=objective)
+        assert result.time_column is None
+
+
+def test_legacy_task_type_inference_json_validates():
+    from data_engine.problem_understanding import TaskTypeInference
+
+    legacy = '{"status": "completed", "task_type": "regression", "target_column": "y"}'
+    model = TaskTypeInference.model_validate_json(legacy)
+    assert model.time_column is None
+
+
+def test_time_column_arg_in_repeated_calls_is_byte_identical(df):
+    dumps = {
+        infer_task_type(
+            df, _target("price"), objective="forecast the price", time_column="signup_date"
+        ).model_dump_json()
+        for _ in range(4)
+    }
+    assert len(dumps) == 1
 
 
 # --- determinism ------------------------------------

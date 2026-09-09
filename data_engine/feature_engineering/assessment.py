@@ -38,6 +38,7 @@ from .models import (
     FeatureSelectionAction,
     FeatureSelectionRecommendations,
     PreprocessingRequirements,
+    TemporalFeatureRecommendations,
     TransformationRecommendations,
 )
 
@@ -49,8 +50,9 @@ _CAT_TARGET = (2, "target safety")
 _CAT_SELECTION = (3, "selection consistency")
 _CAT_TRANSFORMATION = (4, "transformation consistency")
 _CAT_PREPROCESSING = (5, "preprocessing consistency")
-_CAT_CROSS = (6, "cross-section consistency")
-_CAT_COMPLETENESS = (7, "structural completeness")
+_CAT_TEMPORAL = (6, "temporal consistency")
+_CAT_CROSS = (7, "cross-section consistency")
+_CAT_COMPLETENESS = (8, "structural completeness")
 
 _WARN_ORDER = [
     "no candidate features",
@@ -64,6 +66,7 @@ _WARN_ORDER = [
     "objective had no structural effect",
     "no transformation recommendations",
     "no preprocessing requirements",
+    "temporal features not executed",
 ]
 
 _PREPROC_OP_ORDER = ["missing-value imputation", "categorical encoding", "numerical scaling"]
@@ -124,6 +127,7 @@ def assess_feature_engineering(
     selection: FeatureSelectionRecommendations,
     preprocessing: PreprocessingRequirements,
     *,
+    temporal: TemporalFeatureRecommendations | None = None,
     objective: str | None = None,
 ) -> FeatureEngineeringAssessment:
     """Deterministically assess the structural coherence of the Phase-6 chain.
@@ -140,6 +144,13 @@ def assess_feature_engineering(
         The **Phase-6.4** :class:`FeatureSelectionRecommendations`.
     preprocessing:
         The **Phase-6.5** :class:`PreprocessingRequirements`.
+    temporal:
+        The **forecasting-foundation** :class:`TemporalFeatureRecommendations`,
+        optional. When ``None`` the temporal checks are skipped (equivalent to
+        pre-forecasting-foundation behaviour). When present and ``completed`` its
+        lag / rolling recommendations are checked for consistency; when present
+        and ``unavailable`` (the expected state for a non-forecasting task) it is
+        recorded in the notes only — never a block or warning.
     objective:
         The user's objective, **verbatim and optional** — recorded only;
         it never overrides a structural consistency rule.
@@ -175,6 +186,11 @@ def assess_feature_engineering(
         raise TypeError(
             "assess_feature_engineering expects a PreprocessingRequirements, "
             f"got {type(preprocessing).__name__}"
+        )
+    if temporal is not None and not isinstance(temporal, TemporalFeatureRecommendations):
+        raise TypeError(
+            "assess_feature_engineering expects a TemporalFeatureRecommendations or None for "
+            f"temporal, got {type(temporal).__name__}"
         )
 
     objective_used = objective is not None and objective.strip() != ""
@@ -299,6 +315,19 @@ def assess_feature_engineering(
             block(
                 _CAT_TARGET,
                 f"the target column '{target}' has a preprocessing requirement",
+            )
+        # the forecasting target IS permitted in the temporal section (its own past
+        # values are legitimate autoregressive predictors) — but only when that
+        # section actually completed as a forecasting result.
+        if (
+            (temporal is None or temporal.status is not FeatureEngineeringStatus.COMPLETED)
+            and temporal is not None
+            and any(r.column == target for r in temporal.recommendations)
+        ):
+            block(
+                _CAT_TARGET,
+                f"the target column '{target}' has a temporal recommendation but the temporal "
+                "section is not completed",
             )
 
     # --- 7. selection consistency --------------------------------
@@ -448,6 +477,59 @@ def assess_feature_engineering(
     ]
     if pp_sort_key != sorted(pp_sort_key):
         block(_CAT_PREPROCESSING, "preprocessing requirements are not in the fixed order")
+
+    # --- temporal consistency (forecasting foundation) -----------
+    temporal_notes: list[str] = []
+    if temporal is not None and temporal.status is FeatureEngineeringStatus.COMPLETED:
+        seen_t: set[tuple[str, str]] = set()
+        for tmp_rec in temporal.recommendations:
+            key_t = (tmp_rec.column, tmp_rec.description)
+            if key_t in seen_t:
+                block(_CAT_TEMPORAL, f"duplicate temporal feature recommendation {key_t}")
+            seen_t.add(key_t)
+            if tmp_rec.operation not in (
+                FeatureOperationType.LAG_FEATURE,
+                FeatureOperationType.ROLLING_FEATURE,
+            ):
+                block(
+                    _CAT_TEMPORAL,
+                    f"temporal recommendation for '{tmp_rec.column}' has non-temporal operation "
+                    f"'{tmp_rec.operation.value}'",
+                )
+            is_target_rec = tmp_rec.column in target_names
+            if tmp_rec.column not in candidate_set and not is_target_rec:
+                block(
+                    _CAT_TEMPORAL,
+                    f"temporal recommendation for '{tmp_rec.column}' is neither an inventory "
+                    "candidate nor the declared target",
+                )
+            if tmp_rec.column in dropped:
+                block(
+                    _CAT_CROSS,
+                    f"selection dropped '{tmp_rec.column}' but a temporal feature targets it",
+                )
+        expected_t = [f"{r.column}: {r.description}" for r in temporal.recommendations]
+        if temporal.recommended_operations != expected_t:
+            block(
+                _CAT_TEMPORAL,
+                "temporal.recommended_operations does not match the structured recommendations",
+            )
+        t_cols = [r.column for r in temporal.recommendations]
+        if t_cols != sorted(t_cols):
+            block(_CAT_TEMPORAL, "temporal feature recommendations are not column-sorted")
+        if temporal.time_column is not None and temporal.time_column not in df_columns:
+            block(
+                _CAT_TEMPORAL,
+                f"temporal.time_column '{temporal.time_column}' is not a column of the DataFrame",
+            )
+        if temporal.recommendations:
+            warn(
+                "temporal features not executed",
+                "lag / rolling feature recommendations exist and are not executed here "
+                "(execution is a later increment)",
+            )
+    elif temporal is not None and temporal.status is FeatureEngineeringStatus.UNAVAILABLE:
+        temporal_notes.append(f"temporal feature recommendations unavailable: {temporal.reason}")
 
     # --- 10. cross-section consistency ------------------------
     for trec in transformations.recommendations:
@@ -608,6 +690,7 @@ def assess_feature_engineering(
         )
     else:
         notes.append("no objective supplied")
+    notes.extend(temporal_notes)
 
     return FeatureEngineeringAssessment(
         status=FeatureEngineeringStatus.COMPLETED,

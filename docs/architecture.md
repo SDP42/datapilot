@@ -460,6 +460,19 @@ verifies the frame is non-decreasing on one of its own datetime columns
 and returns `unavailable` otherwise (it never infers a time column,
 sorts, or reorders).
 
+**Forecasting Foundation (cross-phase 5 / 6 / 7, additive only):** the
+forecasting time axis is now first-class — `TaskTypeInference.time_column`
+resolved by `infer_task_type` (caller-declared, or auto-resolved when the
+frame has exactly one datetime column; ambiguous otherwise → `unavailable`).
+`assess_feasibility` consumes it and blocks an unsorted forecasting frame
+in Phase 5 (Phase 7.4's guard becomes defense-in-depth). Phase 6 gains a
+`FeatureEngineeringSpec.temporal` section (`recommend_temporal_features`)
+carrying lag / rolling feature **recommendations** for a forecasting
+problem — `unavailable` for every other task, and **recommendation-only**:
+no lag is computed, `df` is untouched, and Phase 7.4 does not build them.
+Executing the temporal features (the "Forecasting Execution" increment),
+forecast horizons, multi-series, and backtesting remain future work.
+
 **Future-phase components:** everything else —
 figure generation, executing the Phase-6 recommendations, executing /
 deploying the Phase-7 recommended model,

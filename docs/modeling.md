@@ -91,6 +91,7 @@ contracts / registered data, but Phase 7.1 does not.
 | `dataset_id` | `str` | — (required) | Dataset identifier (the shared `dataset_id` convention). |
 | `dataset_version_id` | `str \| None` | `None` | Registered `DatasetVersion` id, when the caller has one. |
 | `objective` | `str \| None` | `None` | The user's plain-language goal, **verbatim**. Never inferred from column names or data. A blank string is **preserved exactly**, not replaced with `None`. |
+| `time_column` | `str \| None` | `None` | For a forecasting objective: the column defining the chronological order of the rows. Optional — auto-resolved when the frame has exactly one datetime column. Never inferred from column names or content. Additive / defaulted — legacy JSON validates. `run_modeling_pipeline` passes it to `infer_task_type`. |
 
 `objective_provided` on the spec is `True` **only** when the objective is
 non-blank after `.strip()`.
@@ -768,17 +769,34 @@ spec and inspects no DataFrame.
 For `time_series_forecasting` the split strategy is
 `time_ordered_holdout`, and **the row order is the time axis** — Phase 7.4
 slices it positionally. Phase 7.4 never infers a time column, sorts, or
-reorders rows. Instead it **verifies** the precondition: at least one of
-the frame's own datetime columns must be non-decreasing across the
-supplied rows.
+reorders rows.
 
-- verified → training proceeds; a note records which datetime column was
-  used.
-- not verified (rows not in order, or no datetime column) →
-  `TrainingOutcome.status = unavailable` with an explicit reason telling
-  the caller to sort the frame chronologically. `select_model` then
-  reports `unavailable` by its normal precedence, and
-  `run_modeling_pipeline` sets the overall status to `unavailable`.
+**Since the forecasting foundation** the primary catch is **Phase 5
+feasibility**: `assess_feasibility` reads `task_type.time_column` (the axis
+resolved by `infer_task_type` — see
+[problem-understanding.md](problem-understanding.md)) and **blocks** the
+problem when that column's timestamps are not monotonically
+non-decreasing across the rows. `feasible = False` → `assess_model_readiness`
+sets `ready = False` → the candidate / training / selection stages cascade
+to `unavailable` → `run_modeling_pipeline` sets the overall status to
+`unavailable`.
+
+Phase 7.4's `_verify_chronological_order` remains as **defense-in-depth**
+for a caller who bypasses feasibility:
+
+- `problem.task_type.time_column` given (the normal path) → that exact
+  column must be present and non-decreasing.
+- `time_column` `None` (a caller not going through Phase 5) → the
+  heuristic: the frame must be non-decreasing on one of its own datetime
+  columns.
+- either check failing → `TrainingOutcome.status = unavailable` with an
+  explicit "sort the DataFrame chronologically … Phase 7.4 does not
+  reorder rows" reason.
+
+Phase 6 recommends lag / rolling features for a forecasting problem
+(`FeatureEngineeringSpec.temporal`); **Phase 7.4 does not build them** — a
+note records how many were recommended, and forecasting is trained as
+baseline regression on the currently-eligible features.
 
 The **random / stratified holdout** contract is unchanged: those
 strategies canonicalise row order (stable sort by feature + target

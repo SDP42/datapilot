@@ -290,3 +290,49 @@ def test_understand_modeling_still_inference_free():
         spec.selection,
     ):
         assert section.status is NOT_YET
+
+
+# --- forecasting foundation: temporal recs + declared time column ------
+
+
+def test_forecasting_pipeline_recommends_temporal_features_but_does_not_build_them():
+    df, objective, _ = CASES["forecasting"]
+    spec = run_modeling_pipeline(
+        df.copy(), ModelingRequest(dataset_id="forecasting", objective=objective)
+    )
+    assert spec.status is COMPLETED
+    assert spec.split.strategy is not None and spec.split.strategy.value == "time_ordered_holdout"
+    # Phase 7.4 flags the temporal recommendations as unbuilt.
+    assert any(
+        "Phase 6 recommends" in n and "lag / rolling feature" in n for n in spec.training.notes
+    )
+
+
+def test_declared_time_column_resolves_two_datetime_column_forecasting():
+    rng = np.random.default_rng(5)
+    n = 200
+    df = pd.DataFrame(
+        {
+            "order_date": pd.date_range("2022-01-01", periods=n, freq="D"),
+            "ship_date": pd.date_range("2022-03-01", periods=n, freq="D"),
+            "exog": rng.normal(0.0, 1.0, n),
+            "demand": np.linspace(0.0, 60.0, n) + rng.normal(0.0, 3.0, n),
+        }
+    )
+    obj = "forecast future demand over time"
+    # without a declared time column: ambiguous -> unavailable
+    ambiguous = run_modeling_pipeline(df, ModelingRequest(dataset_id="a", objective=obj))
+    assert ambiguous.status is UNAVAILABLE
+
+    # with a declared time column: resolves and reaches a recommendation
+    resolved = run_modeling_pipeline(
+        df, ModelingRequest(dataset_id="a", objective=obj, time_column="order_date")
+    )
+    assert resolved.status is COMPLETED
+    assert resolved.selection.selected_family is not None
+
+
+def test_modeling_request_time_column_is_additive():
+    legacy = '{"dataset_id": "d"}'
+    req = ModelingRequest.model_validate_json(legacy)
+    assert req.time_column is None

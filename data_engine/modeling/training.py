@@ -100,16 +100,44 @@ def _normalise_error(message: str) -> str:
     return _ADDR_RE.sub("0x...", message).strip()
 
 
-def _verify_chronological_order(df: pd.DataFrame) -> tuple[bool, str]:
+def _verify_chronological_order(df: pd.DataFrame, time_column: str | None) -> tuple[bool, str]:
     """Deterministically check that a forecasting frame's rows are chronological.
 
     For ``time_ordered_holdout`` the **row order is the time axis** — Phase
-    7.4 slices it positionally and never sorts or infers a time column. So
-    the frame must already be non-decreasing on one of its own datetime
-    columns. Returns ``(ok, detail)`` where ``detail`` is a note on success
-    or an explicit reason on failure.
+    7.4 slices it positionally and never sorts or infers a time column.
+
+    * ``time_column`` given (the Phase-5.3 resolved axis) — that exact column
+      must be present and non-decreasing.
+    * ``time_column`` ``None`` (a caller not going through Phase 5) — fall back
+      to the heuristic: the frame must be non-decreasing on one of its own
+      datetime columns.
+
+    Returns ``(ok, detail)`` where ``detail`` is a note on success or an
+    explicit reason on failure.
     """
     column_names = [str(c) for c in df.columns]
+
+    if time_column is not None:
+        if time_column not in column_names:
+            return False, (f"the declared time column '{time_column}' is not in the DataFrame")
+        parsed = pd.to_datetime(
+            df.iloc[:, column_names.index(time_column)], errors="coerce"
+        ).dropna()
+        if len(parsed) < 2:
+            return False, (
+                f"the declared time column '{time_column}' has fewer than 2 usable timestamps"
+            )
+        if parsed.is_monotonic_increasing:
+            return True, (
+                f"chronological-order precondition satisfied: the declared time column "
+                f"'{time_column}' is non-decreasing across the supplied rows"
+            )
+        return False, (
+            f"the rows are not in chronological order on the declared time column "
+            f"'{time_column}'; sort the DataFrame chronologically before modeling — Phase 7.4 "
+            "does not reorder rows"
+        )
+
     datetime_cols = sorted(
         name
         for i, name in enumerate(column_names)
@@ -525,7 +553,7 @@ def train_and_evaluate_models(
     # silently meaningless.
     chronological_note: str | None = None
     if split.strategy is DataSplitStrategy.TIME_ORDERED_HOLDOUT:
-        ordered_ok, ordered_detail = _verify_chronological_order(df)
+        ordered_ok, ordered_detail = _verify_chronological_order(df, problem.task_type.time_column)
         if not ordered_ok:
             return _unavailable(ordered_detail, objective_used=objective_used)
         chronological_note = ordered_detail
@@ -593,6 +621,14 @@ def train_and_evaluate_models(
         notes.append(
             "row order is the time axis for this time-ordered holdout; Phase 7.4 verified it "
             "against a datetime column and did not sort or reorder the rows"
+        )
+    temporal = feature_engineering.temporal
+    if temporal.status is _FE_COMPLETED and temporal.recommendations:
+        notes.append(
+            f"Phase 6 recommends {len(temporal.recommendations)} lag / rolling feature(s) for "
+            "this forecasting problem (FeatureEngineeringSpec.temporal); Phase 7.4 does not "
+            "build them — forecasting is trained as baseline regression on the "
+            "currently-eligible features"
         )
     if objective_used:
         notes.append("an objective was supplied and recorded; it did not change any training step")

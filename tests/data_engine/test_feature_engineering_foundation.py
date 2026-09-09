@@ -46,7 +46,9 @@ def test_status_enum_values():
 
 
 def test_operation_type_enum_values():
-    assert {o.value for o in FeatureOperationType} == {
+    # The enum grows additively as new operation categories are introduced;
+    # every historically-defined value must remain present and stable.
+    assert {
         "transformation",
         "interaction",
         "aggregation",
@@ -55,7 +57,9 @@ def test_operation_type_enum_values():
         "numerical_scaling",
         "missing_value_handling",
         "feature_selection",
-    }
+        "lag_feature",
+        "rolling_feature",
+    } <= {o.value for o in FeatureOperationType}
 
 
 def test_engine_version_constant():
@@ -115,7 +119,21 @@ def test_nested_sections_all_not_yet_inferred():
     assert spec.transformations.status is NOT_YET
     assert spec.selection.status is NOT_YET
     assert spec.preprocessing.status is NOT_YET
+    assert spec.temporal.status is NOT_YET
     assert spec.assessment.status is NOT_YET
+
+
+def test_temporal_section_is_additive_and_defaulted():
+    spec = _spec()
+    assert spec.temporal.recommendations == []
+    assert spec.temporal.recommended_operations == []
+    assert spec.temporal.time_column is None
+    assert spec.temporal.target_column is None
+    # legacy JSON without the `temporal` key still validates
+    legacy = json.loads(spec.model_dump_json())
+    legacy.pop("temporal")
+    restored = FeatureEngineeringSpec.model_validate(legacy)
+    assert restored.temporal.status is NOT_YET
 
 
 def test_nested_sections_not_fabricated():

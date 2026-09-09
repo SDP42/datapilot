@@ -48,8 +48,17 @@ def _target(col: str | None, *, status=COMPLETED, reason=None) -> TargetIdentifi
     return TargetIdentification(status=status, target_column=col, reason=reason)
 
 
-def _task(t: TaskType | None, col: str | None = None, *, status=COMPLETED, reason=None):
-    return TaskTypeInference(status=status, task_type=t, target_column=col, reason=reason)
+def _task(
+    t: TaskType | None,
+    col: str | None = None,
+    *,
+    status=COMPLETED,
+    reason=None,
+    time_col: str | None = None,
+):
+    return TaskTypeInference(
+        status=status, task_type=t, target_column=col, time_column=time_col, reason=reason
+    )
 
 
 def _metrics(*, status=COMPLETED, primary="rmse", names=("rmse", "mae"), reason=None):
@@ -61,11 +70,11 @@ def _metrics(*, status=COMPLETED, primary="rmse", names=("rmse", "mae"), reason=
     )
 
 
-def _assess(df, task, col, *, objective=None, metrics=None):
+def _assess(df, task, col, *, objective=None, metrics=None, time_col=None):
     return assess_feasibility(
         df,
         _target(col),
-        _task(task, col),
+        _task(task, col, time_col=time_col),
         metrics or _metrics(),
         objective=objective,
     )
@@ -337,26 +346,41 @@ def test_regression_infinite_values_noted(df):
 # --- forecasting ----------------------------------------------------
 
 
-def test_forecasting_valid_datetime_feature(df):
-    result = _assess(df, TaskType.TIME_SERIES_FORECASTING, "price")
+def test_forecasting_valid_time_column(df):
+    result = _assess(df, TaskType.TIME_SERIES_FORECASTING, "price", time_col="signup_date")
     assert result.feasible is True
+    assert any("forecasting time column 'signup_date'" in n for n in result.notes)
 
 
-def test_forecasting_no_datetime_blocks(df):
-    d = df.drop(columns=["signup_date"])
-    result = _assess(d, TaskType.TIME_SERIES_FORECASTING, "price")
+def test_forecasting_unresolved_time_column_blocks(df):
+    result = _assess(df, TaskType.TIME_SERIES_FORECASTING, "price", time_col=None)
     assert result.feasible is False
-    assert any("requires at least one datetime column" in b for b in result.blocking_issues)
+    assert any("needs a single resolved time column" in b for b in result.blocking_issues)
+
+
+def test_forecasting_time_column_not_in_frame_blocks(df):
+    d = df.drop(columns=["signup_date"])
+    result = _assess(d, TaskType.TIME_SERIES_FORECASTING, "price", time_col="signup_date")
+    assert result.feasible is False
+    assert any(
+        "resolved time column 'signup_date' is not in the DataFrame" in b
+        for b in result.blocking_issues
+    )
+
+
+def test_forecasting_unsorted_time_column_blocks(df):
+    d = df.sample(frac=1.0, random_state=3).reset_index(drop=True)
+    result = _assess(d, TaskType.TIME_SERIES_FORECASTING, "price", time_col="signup_date")
+    assert result.feasible is False
+    assert any(
+        "not in chronological order on the time column 'signup_date'" in b
+        for b in result.blocking_issues
+    )
 
 
 def test_forecasting_insufficient_timestamps_blocks(df):
     d = df.iloc[:1].copy()
-    result = assess_feasibility(
-        d,
-        _target("price"),
-        _task(TaskType.TIME_SERIES_FORECASTING, "price"),
-        _metrics(primary="mae", names=("mae", "rmse")),
-    )
+    result = _assess(d, TaskType.TIME_SERIES_FORECASTING, "price", time_col="signup_date")
     assert result.feasible is False
     assert any("timestamp" in b for b in result.blocking_issues)
 
@@ -364,13 +388,27 @@ def test_forecasting_insufficient_timestamps_blocks(df):
 def test_forecasting_identical_timestamps_blocks(df):
     d = df.iloc[:30].copy()
     d["signup_date"] = pd.Timestamp("2022-01-01")
-    result = _assess(d, TaskType.TIME_SERIES_FORECASTING, "price")
+    result = _assess(d, TaskType.TIME_SERIES_FORECASTING, "price", time_col="signup_date")
     assert result.feasible is False
     assert any("single distinct timestamp" in b for b in result.blocking_issues)
 
 
+def test_forecasting_specific_declared_column_is_checked(df):
+    # col_a is sorted, col_b is shuffled — declaring col_b must block, col_a must pass.
+    d = df.copy()
+    d["ship_date"] = d["signup_date"].sample(frac=1.0, random_state=7).to_numpy()
+    assert (
+        _assess(d, TaskType.TIME_SERIES_FORECASTING, "price", time_col="signup_date").feasible
+        is True
+    )
+    assert (
+        _assess(d, TaskType.TIME_SERIES_FORECASTING, "price", time_col="ship_date").feasible
+        is False
+    )
+
+
 def test_forecasting_datetime_target(df):
-    result = _assess(df, TaskType.TIME_SERIES_FORECASTING, "signup_date")
+    result = _assess(df, TaskType.TIME_SERIES_FORECASTING, "signup_date", time_col="signup_date")
     assert result.feasible is True
     assert any("signup_date" in n for n in result.notes)
 

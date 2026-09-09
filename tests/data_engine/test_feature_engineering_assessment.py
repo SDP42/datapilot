@@ -24,12 +24,15 @@ from data_engine.feature_engineering import (
     FeatureSelectionRecommendations,
     PreprocessingRequirement,
     PreprocessingRequirements,
+    TemporalFeatureRecommendation,
+    TemporalFeatureRecommendations,
     TransformationRecommendation,
     TransformationRecommendations,
     assess_feature_engineering,
     inventory_features,
     recommend_feature_selection,
     recommend_preprocessing,
+    recommend_temporal_features,
     recommend_transformations,
     understand_feature_engineering,
 )
@@ -119,8 +122,13 @@ def test_exact_signature():
         "transformations",
         "selection",
         "preprocessing",
+        "temporal",
         "objective",
     ]
+    # temporal is keyword-only and defaulted — the 5-positional call is unchanged.
+    sig = inspect.signature(assess_feature_engineering)
+    assert sig.parameters["temporal"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert sig.parameters["temporal"].default is None
 
 
 def test_structured_output(assessment):
@@ -952,3 +960,174 @@ def test_phase_5_apis_still_work(df):
         "completed",
         "unavailable",
     }
+
+
+# --- forecasting-foundation: the `temporal` section ---------------------
+
+_LAG = FeatureOperationType.LAG_FEATURE
+_ROLL = FeatureOperationType.ROLLING_FEATURE
+
+
+def _fcast_frame():
+    n = 120
+    rng = np.random.default_rng(1)
+    return pd.DataFrame(
+        {
+            "ds": pd.date_range("2022-01-01", periods=n, freq="D"),
+            "exog": rng.normal(0.0, 1.0, n),
+            "demand": np.linspace(0.0, 40.0, n) + rng.normal(0.0, 2.0, n),
+        }
+    )
+
+
+def _fcast_task():
+    return TaskTypeInference(
+        status=ProblemUnderstandingStatus.COMPLETED,
+        task_type=TaskType.TIME_SERIES_FORECASTING,
+        target_column="demand",
+        time_column="ds",
+    )
+
+
+def _fcast_sections(frame):
+    inv = inventory_features(frame, target="demand")
+    trans = recommend_transformations(frame, inv)
+    sel = recommend_feature_selection(frame, inv, _fcast_task())
+    pre = recommend_preprocessing(frame, inv, trans, sel)
+    temporal = recommend_temporal_features(frame, inv, _fcast_task())
+    return inv, trans, sel, pre, temporal
+
+
+def _tmp(column: str, op=_LAG, description="lag 1") -> TemporalFeatureRecommendation:
+    return TemporalFeatureRecommendation(
+        column=column, operation=op, description=description, reason="x"
+    )
+
+
+def _tmp_recs(
+    *recs: TemporalFeatureRecommendation, time_column="ds"
+) -> TemporalFeatureRecommendations:
+    ordered = sorted(recs, key=lambda r: (r.column, r.description))
+    return TemporalFeatureRecommendations(
+        status=COMPLETED,
+        time_column=time_column,
+        target_column="demand",
+        recommendations=list(ordered),
+        recommended_operations=[f"{r.column}: {r.description}" for r in ordered],
+    )
+
+
+def test_valid_temporal_section_passes_and_warns_not_executed():
+    frame = _fcast_frame()
+    inv, trans, sel, pre, temporal = _fcast_sections(frame)
+    a = assess_feature_engineering(frame, inv, trans, sel, pre, temporal=temporal)
+    assert a.status is COMPLETED
+    assert a.feasible is True
+    assert "temporal consistency" not in _blocking_cats(a)
+    assert any("not executed here" in w for w in a.warnings)
+
+
+def test_target_lag_is_permitted_in_temporal_but_blocked_in_transformations():
+    frame = _fcast_frame()
+    inv, trans, sel, pre, temporal = _fcast_sections(frame)
+    # temporal has demand lags -> still feasible (carve-out).
+    a_ok = assess_feature_engineering(frame, inv, trans, sel, pre, temporal=temporal)
+    assert a_ok.feasible is True
+    # the same target column in a *transformation* recommendation -> BLOCKING (unchanged rule).
+    bad_trans = trans.model_copy(
+        update={
+            "recommendations": [
+                TransformationRecommendation(
+                    column="demand",
+                    operation=FeatureOperationType.TRANSFORMATION,
+                    description="log transform",
+                    reason="x",
+                )
+            ],
+            "recommended_operations": ["demand: log transform"],
+        }
+    )
+    a_bad = assess_feature_engineering(frame, inv, bad_trans, sel, pre, temporal=temporal)
+    assert a_bad.feasible is False
+    assert "target safety" in _blocking_cats(a_bad)
+
+
+def test_non_forecasting_temporal_unavailable_is_noted_not_blocked(df, inv, trans, sel, pre):
+    unavailable_temporal = TemporalFeatureRecommendations(
+        status=UNAVAILABLE, reason="not a forecasting task"
+    )
+    a = assess_feature_engineering(df, inv, trans, sel, pre, temporal=unavailable_temporal)
+    assert a.status is COMPLETED
+    assert a.feasible is True
+    assert any("temporal feature recommendations unavailable" in n for n in a.notes)
+    assert "temporal consistency" not in _blocking_cats(a)
+
+
+def test_temporal_omitted_matches_pre_forecasting_behaviour(df, inv, trans, sel, pre):
+    with_none = assess_feature_engineering(df, inv, trans, sel, pre)
+    with_kw_none = assess_feature_engineering(df, inv, trans, sel, pre, temporal=None)
+    assert with_none.model_dump() == with_kw_none.model_dump()
+
+
+def test_temporal_recommended_operations_mismatch_blocks():
+    frame = _fcast_frame()
+    inv, trans, sel, pre, _ = _fcast_sections(frame)
+    broken = _tmp_recs(_tmp("exog"))
+    broken = broken.model_copy(update={"recommended_operations": ["wrong: text"]})
+    a = assess_feature_engineering(frame, inv, trans, sel, pre, temporal=broken)
+    assert a.feasible is False
+    assert "temporal consistency" in _blocking_cats(a)
+
+
+def test_temporal_not_column_sorted_blocks():
+    frame = _fcast_frame()
+    inv, trans, sel, pre, _ = _fcast_sections(frame)
+    recs = [_tmp("exog", description="lag 1"), _tmp("demand", description="lag 1")]
+    unsorted = TemporalFeatureRecommendations(
+        status=COMPLETED,
+        time_column="ds",
+        target_column="demand",
+        recommendations=recs,
+        recommended_operations=[f"{r.column}: {r.description}" for r in recs],
+    )
+    a = assess_feature_engineering(frame, inv, trans, sel, pre, temporal=unsorted)
+    assert "temporal consistency" in _blocking_cats(a)
+
+
+def test_temporal_unknown_column_blocks():
+    frame = _fcast_frame()
+    inv, trans, sel, pre, _ = _fcast_sections(frame)
+    a = assess_feature_engineering(frame, inv, trans, sel, pre, temporal=_tmp_recs(_tmp("ghost")))
+    assert a.feasible is False
+    assert "temporal consistency" in _blocking_cats(a)
+
+
+def test_temporal_time_column_not_in_frame_blocks():
+    frame = _fcast_frame()
+    inv, trans, sel, pre, _ = _fcast_sections(frame)
+    a = assess_feature_engineering(
+        frame, inv, trans, sel, pre, temporal=_tmp_recs(_tmp("exog"), time_column="nope")
+    )
+    assert "temporal consistency" in _blocking_cats(a)
+
+
+def test_temporal_duplicate_recommendation_blocks():
+    frame = _fcast_frame()
+    inv, trans, sel, pre, _ = _fcast_sections(frame)
+    recs = [_tmp("exog", description="lag 1"), _tmp("exog", description="lag 1")]
+    dup = TemporalFeatureRecommendations(
+        status=COMPLETED,
+        time_column="ds",
+        target_column="demand",
+        recommendations=recs,
+        recommended_operations=[f"{r.column}: {r.description}" for r in recs],
+    )
+    a = assess_feature_engineering(frame, inv, trans, sel, pre, temporal=dup)
+    assert "temporal consistency" in _blocking_cats(a)
+
+
+def test_temporal_signature_and_category_order():
+    import inspect
+
+    params = list(inspect.signature(assess_feature_engineering).parameters)
+    assert params.index("temporal") < params.index("objective")

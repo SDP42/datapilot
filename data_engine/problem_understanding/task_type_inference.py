@@ -189,6 +189,7 @@ def _unavailable(
     *,
     objective_used: bool,
     target_column: str | None = None,
+    time_column: str | None = None,
     notes: list[str] | None = None,
 ) -> TaskTypeInference:
     return TaskTypeInference(
@@ -196,6 +197,7 @@ def _unavailable(
         reason=reason,
         task_type=None,
         target_column=target_column,
+        time_column=time_column,
         objective_used=objective_used,
         notes=notes or [],
     )
@@ -207,6 +209,7 @@ def _completed(
     *,
     objective_used: bool,
     target_column: str | None = None,
+    time_column: str | None = None,
     extra: list[str] | None = None,
 ) -> TaskTypeInference:
     return TaskTypeInference(
@@ -214,6 +217,7 @@ def _completed(
         reason=None,
         task_type=task_type,
         target_column=target_column,
+        time_column=time_column,
         objective_used=objective_used,
         notes=[primary, *(extra or [])],
     )
@@ -258,6 +262,51 @@ def _structural_task(
     return TaskType.REGRESSION, "numeric target -> regression"
 
 
+def _resolve_time_column(
+    df: pd.DataFrame,
+    column_names: list[str],
+    declared: str | None,
+) -> tuple[str | None, str | None, str]:
+    """Resolve the forecasting time axis. Returns ``(resolved, error_reason, note)``.
+
+    ``error_reason`` is non-``None`` only when a forecasting decision must be blocked:
+    a declared column that is missing / not a datetime, or 2+ datetime columns present
+    with none declared. A resolved ``None`` with no error means "no datetime column" —
+    the caller decides what that implies for the task.
+    """
+    datetime_cols = sorted(
+        name
+        for i, name in enumerate(column_names)
+        if infer_column_type(df.iloc[:, i]) is ColumnType.DATETIME
+    )
+    if declared is not None:
+        if declared not in column_names:
+            return (
+                None,
+                f"the declared time_column '{declared}' is not a column of the DataFrame",
+                "",
+            )
+        if infer_column_type(df.iloc[:, column_names.index(declared)]) is not ColumnType.DATETIME:
+            return None, f"the declared time_column '{declared}' is not a datetime column", ""
+        return declared, None, f"time column: '{declared}' (declared by the caller)"
+    if len(datetime_cols) == 1:
+        return (
+            datetime_cols[0],
+            None,
+            (f"time column: '{datetime_cols[0]}' (auto-resolved — the only datetime column)"),
+        )
+    if len(datetime_cols) == 0:
+        return None, None, "no datetime column is present"
+    return (
+        None,
+        (
+            f"{len(datetime_cols)} datetime columns are present ({', '.join(datetime_cols)}); "
+            "declare time_column explicitly to select the forecasting time axis"
+        ),
+        "",
+    )
+
+
 # --- public API ------------------------------------------------------------
 
 
@@ -266,6 +315,7 @@ def infer_task_type(
     target: TargetIdentification,
     *,
     objective: str | None = None,
+    time_column: str | None = None,
 ) -> TaskTypeInference:
     """Deterministically infer the ML task type.
 
@@ -280,6 +330,13 @@ def infer_task_type(
     objective:
         The user's objective, **verbatim and optional** — used only for the
         transparent vocabulary matching. Never parsed for meaning.
+    time_column:
+        The forecasting time axis, **verbatim and optional**. Used only for a
+        ``time_series_forecasting`` task; it is validated against the frame's
+        dtypes (must name a datetime column) and never parsed for meaning. When
+        omitted it is auto-resolved **iff** the frame has exactly one datetime
+        column; with 2+ datetime columns and a forecasting objective it must be
+        declared or the result is ``unavailable``.
 
     Returns
     -------
@@ -288,8 +345,9 @@ def infer_task_type(
         single task; otherwise ``status = unavailable`` + ``task_type =
         None`` + an explicit ``reason`` (no target pinned, target column
         missing / all-missing / constant, datetime target without
-        forecasting evidence, or an unrecognised target type). Never
-        fabricates a task type.
+        forecasting evidence, an unrecognised target type, or an ambiguous
+        forecasting time axis). Never fabricates a task type. For a
+        forecasting task ``time_column`` is populated with the resolved axis.
     """
     if not isinstance(df, pd.DataFrame):
         raise TypeError(f"infer_task_type expects a pandas DataFrame, got {type(df).__name__}")
@@ -299,6 +357,7 @@ def infer_task_type(
         )
 
     resolved_target_column = target.target_column
+    resolved_time_column: str | None = None
 
     objective_used = objective is not None and objective.strip() != ""
     signals = (
@@ -383,6 +442,7 @@ def infer_task_type(
                 "-> time_series_forecasting",
                 objective_used=objective_used,
                 target_column=resolved_target_column,
+                time_column=column,
                 extra=[signal_note],
             )
         return _unavailable(
@@ -434,15 +494,23 @@ def infer_task_type(
     task = structural
     primary = structural_reason
     if task is TaskType.REGRESSION and "forecasting" in signals:
-        has_datetime_column = any(
-            infer_column_type(df.iloc[:, i]) is ColumnType.DATETIME for i in range(df.shape[1])
-        )
-        if has_datetime_column:
-            task = TaskType.TIME_SERIES_FORECASTING
-            primary = (
-                f"numeric target '{column}' + a forecasting objective + a datetime column present "
-                "-> time_series_forecasting"
+        resolved_time, time_error, time_note = _resolve_time_column(df, column_names, time_column)
+        if time_error is not None:
+            return _unavailable(
+                f"a forecasting objective was given but the time axis is ambiguous: {time_error}",
+                objective_used=objective_used,
+                target_column=resolved_target_column,
+                notes=[signal_note],
             )
+        if resolved_time is not None:
+            task = TaskType.TIME_SERIES_FORECASTING
+            resolved_time_column = resolved_time
+            primary = (
+                f"numeric target '{column}' + a forecasting objective + time column "
+                f"'{resolved_time}' -> time_series_forecasting"
+            )
+            if time_note:
+                extra.append(time_note)
         else:
             extra.append(
                 "the objective mentions forecasting but the DataFrame has no datetime column; "
@@ -454,5 +522,6 @@ def infer_task_type(
         primary,
         objective_used=objective_used,
         target_column=resolved_target_column,
+        time_column=resolved_time_column,
         extra=extra,
     )

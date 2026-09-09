@@ -32,6 +32,7 @@ from data_engine.feature_engineering import (
     inventory_features,
     recommend_feature_selection,
     recommend_preprocessing,
+    recommend_temporal_features,
     recommend_transformations,
     understand_feature_engineering,
 )
@@ -86,7 +87,7 @@ def _build_problem_spec(df: pd.DataFrame, request: ModelingRequest) -> ProblemSp
         )
     )
     target = identify_target(df, objective=objective)
-    task_type = infer_task_type(df, target, objective=objective)
+    task_type = infer_task_type(df, target, objective=objective, time_column=request.time_column)
     metrics = recommend_metrics(df, task_type, objective=objective)
     feasibility = assess_feasibility(df, target, task_type, metrics, objective=objective)
     return spec.model_copy(
@@ -118,8 +119,15 @@ def _build_feature_engineering_spec(
     preprocessing = recommend_preprocessing(
         df, inventory, transformations, selection, objective=objective
     )
+    temporal = recommend_temporal_features(df, inventory, problem.task_type, objective=objective)
     assessment = assess_feature_engineering(
-        df, inventory, transformations, selection, preprocessing, objective=objective
+        df,
+        inventory,
+        transformations,
+        selection,
+        preprocessing,
+        temporal=temporal,
+        objective=objective,
     )
     return spec.model_copy(
         update={
@@ -127,6 +135,7 @@ def _build_feature_engineering_spec(
             "transformations": transformations,
             "selection": selection,
             "preprocessing": preprocessing,
+            "temporal": temporal,
             "assessment": assessment,
         }
     )

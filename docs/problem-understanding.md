@@ -230,9 +230,10 @@ created.
 ## Task-type inference (Phase 5.3)
 
 `infer_task_type(df, target: TargetIdentification, *, objective: str | None
-= None) -> TaskTypeInference` deterministically decides which `TaskType`
-best describes the problem. It is **standalone** — the caller merges the
-result into `ProblemSpec.task_type`:
+= None, time_column: str | None = None) -> TaskTypeInference`
+deterministically decides which `TaskType` best describes the problem. It
+is **standalone** — the caller merges the result into
+`ProblemSpec.task_type`:
 
 ```python
 target = identify_target(df, objective=request.objective)
@@ -241,6 +242,36 @@ spec = spec.model_copy(update={"target": target, "task_type": task})
 ```
 
 `metrics` / `feasibility` stay `not_yet_inferred`.
+
+### The `time_column` contract (forecasting foundation)
+
+`TaskTypeInference.time_column: str | None` is the resolved **time axis**
+for a `time_series_forecasting` task (additive / defaulted — legacy JSON
+validates; `None` for every other task). `infer_task_type` resolves it
+deterministically:
+
+| Caller passes `time_column` | Frame's datetime columns | Result |
+| --- | --- | --- |
+| `"ds"` | `ds` is a datetime column | `time_column = "ds"` |
+| `"ds"` | `ds` absent / not a datetime | forecasting → `status = unavailable` (`"the declared time_column '…' is not a … datetime column"`) |
+| `None` | exactly one datetime column | auto-resolved to it (note: *"auto-resolved — the only datetime column"*) |
+| `None` | **two or more** datetime columns + forecasting objective | `status = unavailable` (`"… datetime columns are present …; declare time_column explicitly"`) |
+| `None` | no datetime column | the existing "no datetime column → treat as regression" path is unchanged; `time_column = None` |
+
+A **datetime target** with a forecasting objective sets `time_column` to
+the target itself.
+
+**Behaviour change:** a forecasting objective with a numeric target and
+**2+ datetime columns and no declared `time_column`** is now
+`unavailable` (previously it silently picked one datetime column, which
+was column-order dependent). The fix is one keyword argument.
+
+Downstream, `assess_feasibility` (5.5), `recommend_data_split` (7.2), and
+`train_and_evaluate_models` (7.4) all consume `task_type.time_column`.
+`assess_feasibility` additionally **blocks** a forecasting problem whose
+resolved time column is not monotonically non-decreasing across the rows —
+so an unsorted forecasting frame is caught in Phase 5, not only at
+Phase 7.4.
 
 ### `target` is authoritative — no re-selection
 
@@ -314,8 +345,11 @@ A bare `predict` is **not** a signal — it distinguishes nothing.
 ### `TaskTypeInference` fields
 
 `status` (`completed` / `unavailable`), `reason` (set only when
-unavailable), `task_type: TaskType | None`, `objective_used: bool`
-(additive & defaulted — legacy JSON validates), `notes` (fixed order —
+unavailable), `task_type: TaskType | None`, `target_column: str | None`
+(echoed from `TargetIdentification`), `time_column: str | None` (the
+resolved forecasting axis — see above; additive & defaulted),
+`objective_used: bool` (additive & defaulted — legacy JSON validates),
+`notes` (fixed order —
 `notes[0]` is the primary explanation, followed by the detected objective
 signals and any conflict / refinement notes). It never fabricates a task
 type: insufficient or contradictory evidence → `status = unavailable`,

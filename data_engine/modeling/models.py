@@ -395,6 +395,15 @@ class ModelingRequest(BaseModel):
         default=None,
         description="Plain-language analytical goal, exactly as the user supplied it.",
     )
+    time_column: str | None = Field(
+        default=None,
+        description=(
+            "For a forecasting objective: the column that defines the chronological order "
+            "of the rows. Optional — auto-resolved when the frame has exactly one datetime "
+            "column. Never inferred from column names or content. Additive and defaulted — "
+            "legacy JSON validates."
+        ),
+    )
 
 
 class ModelingSpec(BaseModel):

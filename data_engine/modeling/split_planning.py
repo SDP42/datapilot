@@ -167,6 +167,12 @@ def recommend_data_split(
             "already ordered by time — Phase 7.4 verifies this against a datetime column and "
             "does not sort or reorder the rows"
         )
+        time_col = problem.task_type.time_column
+        if time_col is not None:
+            notes.append(
+                f"time axis: column '{time_col}' — the rows must be ordered by it "
+                "(Phase 7.4 verifies this and does not sort)"
+            )
     elif task is TaskType.REGRESSION:
         strategy = DataSplitStrategy.RANDOM_HOLDOUT
         notes.append(

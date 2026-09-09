@@ -1,10 +1,11 @@
-"""Post-Phase-7 stabilization (audit H1) — forecasting chronological-order guard.
+"""Forecasting chronological-order precondition (audit H1 + forecasting foundation).
 
-For ``time_ordered_holdout`` the row order *is* the time axis. Phase 7.4
-never infers a time column or sorts; it verifies that the frame is
-non-decreasing on one of its own datetime columns and returns an explicit
-``unavailable`` otherwise. It must not silently pretend arbitrary row
-order is chronological.
+For ``time_ordered_holdout`` the row order *is* the time axis. Since the
+forecasting foundation the primary catch is **Phase 5 feasibility**
+(``assess_feasibility`` checks the resolved ``time_column`` is non-decreasing),
+which cascades to ``readiness.ready is False`` and an overall ``unavailable``.
+Phase 7.4's ``_verify_chronological_order`` remains as **defense-in-depth** for a
+caller who bypasses feasibility. Neither ever sorts or reorders the rows.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from data_engine.feature_engineering import (
     inventory_features,
     recommend_feature_selection,
     recommend_preprocessing,
+    recommend_temporal_features,
     recommend_transformations,
     understand_feature_engineering,
 )
@@ -33,6 +35,7 @@ from data_engine.modeling import (
     train_and_evaluate_models,
     understand_modeling,
 )
+from data_engine.modeling.training import _verify_chronological_order
 from data_engine.problem_understanding import (
     ProblemUnderstandingRequest,
     TaskType,
@@ -58,33 +61,35 @@ def _forecasting_frame(order: str = "sorted") -> pd.DataFrame:
         df = df.sample(frac=1.0, random_state=3).reset_index(drop=True)
     elif order == "reversed":
         df = df.iloc[::-1].reset_index(drop=True)
-    elif order == "no_datetime":
-        df = df.drop(columns=["day"])
     return df
 
 
-def _build(df: pd.DataFrame):
+def _build(df: pd.DataFrame, *, time_column=None, run_feasibility: bool = True):
     t = identify_target(df, objective=_OBJECTIVE)
-    task = infer_task_type(df, t, objective=_OBJECTIVE)
+    task = infer_task_type(df, t, objective=_OBJECTIVE, time_column=time_column)
     if task.task_type is not TaskType.TIME_SERIES_FORECASTING:
         pytest.skip("task inference did not yield forecasting for this frame")
     m = recommend_metrics(df, task, objective=_OBJECTIVE)
-    feas = assess_feasibility(df, t, task, m)
+    updates = {"target": t, "task_type": task, "metrics": m}
+    if run_feasibility:
+        updates["feasibility"] = assess_feasibility(df, t, task, m)
     problem = understand_problem(
         ProblemUnderstandingRequest(dataset_id="d", objective=_OBJECTIVE)
-    ).model_copy(update={"target": t, "task_type": task, "metrics": m, "feasibility": feas})
+    ).model_copy(update=updates)
 
     inv = inventory_features(df, target=t.target_column)
     tr = recommend_transformations(df, inv)
     sel = recommend_feature_selection(df, inv, task)
     pp = recommend_preprocessing(df, inv, tr, sel)
-    asmt = assess_feature_engineering(df, inv, tr, sel, pp)
+    tmp = recommend_temporal_features(df, inv, task)
+    asmt = assess_feature_engineering(df, inv, tr, sel, pp, temporal=tmp)
     fe = understand_feature_engineering(FeatureEngineeringRequest(dataset_id="d")).model_copy(
         update={
             "inventory": inv,
             "transformations": tr,
             "selection": sel,
             "preprocessing": pp,
+            "temporal": tmp,
             "assessment": asmt,
         }
     )
@@ -94,74 +99,108 @@ def _build(df: pd.DataFrame):
     return df, problem, fe, readiness, split, candidates
 
 
-def _train(df):
-    df, problem, fe, readiness, split, candidates = _build(df)
-    assert split.strategy is DataSplitStrategy.TIME_ORDERED_HOLDOUT
-    return train_and_evaluate_models(df, problem, fe, readiness, split, candidates)
+# --- _verify_chronological_order (unit) --------------------------
 
 
-# --- 1. correctly ordered input succeeds -------------------------
+def test_verify_declared_column_sorted_ok():
+    df = _forecasting_frame("sorted")
+    ok, detail = _verify_chronological_order(df, "day")
+    assert ok is True
+    assert "declared time column 'day' is non-decreasing" in detail
 
 
-def test_sorted_forecasting_frame_trains():
-    out = _train(_forecasting_frame("sorted"))
+def test_verify_declared_column_missing():
+    df = _forecasting_frame("sorted")
+    ok, detail = _verify_chronological_order(df, "no_such")
+    assert ok is False
+    assert "not in the DataFrame" in detail
+
+
+def test_verify_declared_column_shuffled():
+    df = _forecasting_frame("shuffled")
+    ok, detail = _verify_chronological_order(df, "day")
+    assert ok is False
+    assert "not in chronological order on the declared time column 'day'" in detail
+    assert "does not reorder rows" in detail
+
+
+def test_verify_heuristic_fallback_when_no_declared_column():
+    assert _verify_chronological_order(_forecasting_frame("sorted"), None)[0] is True
+    assert _verify_chronological_order(_forecasting_frame("shuffled"), None)[0] is False
+    ok, detail = _verify_chronological_order(
+        _forecasting_frame("sorted").drop(columns=["day"]), None
+    )
+    assert ok is False and "no datetime column" in detail
+
+
+# --- primary catch: Phase 5 feasibility -> readiness -> unavailable ----
+
+
+def test_sorted_forecasting_pipeline_trains():
+    built = _build(_forecasting_frame("sorted"))
+    assert built[4].strategy is DataSplitStrategy.TIME_ORDERED_HOLDOUT
+    out = train_and_evaluate_models(*built)
     assert out.status is COMPLETED
     assert out.successful_runs
     assert any("chronological-order precondition satisfied" in n for n in out.notes)
-    assert any("row order is the time axis" in n for n in out.notes)
 
 
-# --- 2. invalid / unverifiable ordering -> explicit unavailable --
-
-
-def test_shuffled_forecasting_frame_is_unavailable():
-    out = _train(_forecasting_frame("shuffled"))
+@pytest.mark.parametrize("order", ["shuffled", "reversed"])
+def test_unordered_forecasting_blocked_at_feasibility(order):
+    df, problem, fe, readiness, split, candidates = _build(_forecasting_frame(order))
+    assert problem.feasibility.feasible is False
+    assert any("not in chronological order" in b for b in problem.feasibility.blocking_issues)
+    assert readiness.ready is False
+    out = train_and_evaluate_models(df, problem, fe, readiness, split, candidates)
     assert out.status is UNAVAILABLE
     assert out.runs == []
-    assert "chronologically" in (out.reason or "")
+
+
+# --- defense-in-depth: Phase 7.4 when feasibility is skipped ----------
+
+
+def test_unordered_forecasting_caught_by_phase_7_4_when_feasibility_skipped():
+    built = _build(_forecasting_frame("shuffled"), run_feasibility=False)
+    _, problem, _, readiness, *_ = built
+    assert problem.feasibility.status.value == "not_yet_inferred"
+    assert readiness.ready is True  # feasibility is advisory when not run
+    out = train_and_evaluate_models(*built)
+    assert out.status is UNAVAILABLE
+    assert "not in chronological order on the declared time column 'day'" in (out.reason or "")
     assert "does not reorder rows" in (out.reason or "")
-    assert "non-decreasing" in (out.reason or "")
 
 
-def test_reversed_forecasting_frame_is_unavailable():
-    out = _train(_forecasting_frame("reversed"))
+def test_declared_time_column_dropped_before_7_4_is_unavailable():
+    df, problem, fe, readiness, split, candidates = _build(
+        _forecasting_frame("sorted"), run_feasibility=False
+    )
+    out = train_and_evaluate_models(
+        df.drop(columns=["day"]), problem, fe, readiness, split, candidates
+    )
     assert out.status is UNAVAILABLE
-    assert "non-decreasing" in (out.reason or "")
+    assert "declared time column 'day' is not in the DataFrame" in (out.reason or "")
 
 
-def test_forecasting_frame_without_datetime_column_is_unavailable():
-    # Build a valid forecasting pipeline (needs a datetime column for the
-    # Phase-5 task inference), then drop the datetime column before Phase
-    # 7.4 so the chronological-order guard cannot verify anything.
-    df, problem, fe, readiness, split, candidates = _build(_forecasting_frame("sorted"))
-    assert split.strategy is DataSplitStrategy.TIME_ORDERED_HOLDOUT
-    df_no_dt = df.drop(columns=["day"])
-    out = train_and_evaluate_models(df_no_dt, problem, fe, readiness, split, candidates)
-    assert out.status is UNAVAILABLE
-    assert "no datetime column" in (out.reason or "")
-
-
-# --- 3. deterministic repeated behavior --------------------------
+# --- determinism -----------------------------------------------
 
 
 def test_deterministic_sorted():
-    df = _forecasting_frame("sorted")
-    built = _build(df)
-    a = train_and_evaluate_models(*built)
-    b = train_and_evaluate_models(*built)
-    assert a.model_dump_json() == b.model_dump_json()
+    built = _build(_forecasting_frame("sorted"))
+    assert (
+        train_and_evaluate_models(*built).model_dump_json()
+        == train_and_evaluate_models(*built).model_dump_json()
+    )
 
 
-def test_deterministic_shuffled_unavailable():
-    df = _forecasting_frame("shuffled")
-    built = _build(df)
+def test_deterministic_unordered_unavailable():
+    built = _build(_forecasting_frame("shuffled"), run_feasibility=False)
     a = train_and_evaluate_models(*built)
     b = train_and_evaluate_models(*built)
     assert a.model_dump_json() == b.model_dump_json()
     assert a.status is UNAVAILABLE
 
 
-# --- 4. the non-temporal contract is unchanged -----------------
+# --- the non-temporal contract is unchanged --------------------
 
 
 def test_random_split_still_row_order_invariant():
@@ -181,13 +220,15 @@ def test_random_split_still_row_order_invariant():
     tr = recommend_transformations(df, inv)
     sel = recommend_feature_selection(df, inv, task)
     pp = recommend_preprocessing(df, inv, tr, sel)
-    asmt = assess_feature_engineering(df, inv, tr, sel, pp)
+    tmp = recommend_temporal_features(df, inv, task)
+    asmt = assess_feature_engineering(df, inv, tr, sel, pp, temporal=tmp)
     fe = understand_feature_engineering(FeatureEngineeringRequest(dataset_id="d")).model_copy(
         update={
             "inventory": inv,
             "transformations": tr,
             "selection": sel,
             "preprocessing": pp,
+            "temporal": tmp,
             "assessment": asmt,
         }
     )
@@ -218,9 +259,10 @@ def test_pipeline_forecasting_shuffled_unavailable():
         _forecasting_frame("shuffled"), ModelingRequest(dataset_id="f", objective=_OBJECTIVE)
     )
     assert spec.status is ModelingStatus.UNAVAILABLE
+    assert spec.readiness.ready is False
     assert spec.training.status is ModelingStatus.UNAVAILABLE
     assert spec.selection.selected_family is None
-    assert "model training" in (spec.reason or "")
+    assert "chronological order" in (spec.reason or "")
 
 
 def test_understand_modeling_unaffected():

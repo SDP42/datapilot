@@ -148,6 +148,16 @@ class TaskTypeInference(BaseModel):
             "was supplied. Additive and defaulted — legacy JSON validates."
         ),
     )
+    time_column: str | None = Field(
+        default=None,
+        description=(
+            "For a time_series_forecasting task, the resolved time axis — a datetime "
+            "column present in the frame, declared by the caller or auto-resolved when "
+            "the frame has exactly one datetime column. None for every other task, or "
+            "when it could not be resolved to a single column. Additive and defaulted — "
+            "legacy JSON validates."
+        ),
+    )
     objective_used: bool = Field(
         default=False, description="True iff a non-blank objective string was supplied."
     )

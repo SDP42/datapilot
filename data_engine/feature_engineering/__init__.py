@@ -6,37 +6,26 @@ features, which transformations / encoders / scalers / imputers a model
 would need, which features to keep or drop, and whether feature
 engineering is feasible.
 
-**Implemented so far:**
+Every function is a standalone, deterministic, **recommendation-only**
+step the caller composes into a ``FeatureEngineeringSpec``. Nothing is
+executed — no column is created, encoded, scaled, imputed, or dropped.
 
-- **6.1** — the `FeatureEngineeringSpec` contract +
-  `understand_feature_engineering` foundation (infers nothing).
-- **6.2** — `inventory_features`: a deterministic **structural** feature
-  inventory classifying each column as a candidate input feature or an
-  excluded column.
-- **6.3** — `recommend_transformations`: deterministic, rule-based
-  **recommendations** of transformations (log / log1p / sqrt / reciprocal
-  / absolute-value, datetime derivations, scaling-as-a-category) that the
-  observed structure makes worth considering. It recommends only — it
-  never executes a transformation or modifies the DataFrame.
-
-Feature selection, preprocessing requirements, and feature-engineering
-feasibility are later Phase-6 increments.
-
-    from data_engine.feature_engineering import (
-        FeatureEngineeringRequest,
-        inventory_features,
-        recommend_transformations,
-        understand_feature_engineering,
-    )
-
-    spec = understand_feature_engineering(
-        FeatureEngineeringRequest(dataset_id="sales", objective="predict churn")
-    )
-    inv = inventory_features(df, target="churn")
-    spec = spec.model_copy(update={"inventory": inv})
-    spec = spec.model_copy(
-        update={"transformations": recommend_transformations(df, inv)}
-    )
+- **6.1** — `understand_feature_engineering`: the contract + foundation
+  (infers nothing).
+- **6.2** — `inventory_features`: structural feature inventory
+  (candidate vs. excluded).
+- **6.3** — `recommend_transformations`: rule-based transformation
+  recommendations (log / log1p / sqrt / reciprocal / absolute-value,
+  datetime derivations, scaling-as-a-category).
+- **6.4** — `recommend_feature_selection`: retain / drop / review from
+  fixed structural + redundancy rules.
+- **6.5** — `recommend_preprocessing`: identifies the imputation /
+  encoding / scaling operations a model would require.
+- **forecasting foundation** — `recommend_temporal_features`: lag /
+  rolling-window feature recommendations for a time-series-forecasting
+  problem (``unavailable`` for every other task).
+- **6.6** — `assess_feature_engineering`: structural consistency &
+  readiness check over 6.2–6.5 (+ the temporal section).
 """
 
 from __future__ import annotations
@@ -67,10 +56,19 @@ from .models import (
     FeatureSelectionRecommendations,
     PreprocessingRequirement,
     PreprocessingRequirements,
+    TemporalFeatureRecommendation,
+    TemporalFeatureRecommendations,
     TransformationRecommendation,
     TransformationRecommendations,
 )
 from .preprocessing_requirements import recommend_preprocessing
+from .temporal_features import (
+    FORECASTING_LAG_ORDERS,
+    FORECASTING_MIN_ROWS_FOR_TEMPORAL,
+    FORECASTING_ROLLING_WINDOWS,
+    FORECASTING_TEMPORAL_ROW_MARGIN,
+    recommend_temporal_features,
+)
 from .transformation_recommendation import (
     TRANSFORMATION_ABS_SYMMETRY_RATIO,
     TRANSFORMATION_LOG_RANGE_RATIO,
@@ -89,6 +87,10 @@ __all__ = [
     "FEATURE_SELECTION_HIGH_MISSING_THRESHOLD",
     "FEATURE_SELECTION_LOW_VARIANCE_MAX_UNIQUE",
     "FEATURE_SELECTION_MIN_CORR_OBS",
+    "FORECASTING_LAG_ORDERS",
+    "FORECASTING_MIN_ROWS_FOR_TEMPORAL",
+    "FORECASTING_ROLLING_WINDOWS",
+    "FORECASTING_TEMPORAL_ROW_MARGIN",
     "HIGH_UNIQUE_ID_THRESHOLD",
     "TRANSFORMATION_ABS_SYMMETRY_RATIO",
     "TRANSFORMATION_LOG_RANGE_RATIO",
@@ -110,12 +112,15 @@ __all__ = [
     "FeatureSelectionRecommendations",
     "PreprocessingRequirement",
     "PreprocessingRequirements",
+    "TemporalFeatureRecommendation",
+    "TemporalFeatureRecommendations",
     "TransformationRecommendation",
     "TransformationRecommendations",
     "assess_feature_engineering",
     "inventory_features",
     "recommend_feature_selection",
     "recommend_preprocessing",
+    "recommend_temporal_features",
     "recommend_transformations",
     "understand_feature_engineering",
 ]

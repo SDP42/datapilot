@@ -27,9 +27,6 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from data_engine.profiling.type_inference import infer_column_type
-from datapilot.contracts import ColumnType
-
 from .models import (
     CandidateMetrics,
     FeasibilityAssessment,
@@ -282,37 +279,39 @@ def assess_feasibility(
                                 f"{SEVERE_CLASS_IMBALANCE:.0%}); severe class imbalance"
                             )
 
-    # --- E. forecasting: datetime availability ------------------------
+    # --- E. forecasting: time-column availability & chronological order ----
     if task is TaskType.TIME_SERIES_FORECASTING:
-        datetime_columns = sorted(
-            name for name in column_names if infer_column_type(column(name)) is ColumnType.DATETIME
-        )
-        if not datetime_columns:
+        time_col = task_type.time_column
+        if time_col is None:
             blocking.append(
-                "time-series forecasting requires at least one datetime column; none is present"
+                "time-series forecasting needs a single resolved time column; none was "
+                "resolved — pass an explicit time_column to infer_task_type, or ensure the "
+                "frame has exactly one datetime column"
             )
+        elif time_col not in column_names:
+            blocking.append(f"the resolved time column '{time_col}' is not in the DataFrame")
         else:
-            dt_name = (
-                target_column
-                if target_column is not None and target_column in datetime_columns
-                else datetime_columns[0]
-            )
-            timestamps = pd.to_datetime(column(dt_name), errors="coerce").dropna()
-            n_timestamps = int(timestamps.shape[0])
-            n_distinct = int(timestamps.nunique())
+            parsed = pd.to_datetime(column(time_col), errors="coerce").dropna()
+            n_timestamps = int(parsed.shape[0])
+            n_distinct = int(parsed.nunique())
             notes.append(
-                f"forecasting datetime column '{dt_name}': {n_timestamps} usable, "
+                f"forecasting time column '{time_col}': {n_timestamps} usable, "
                 f"{n_distinct} distinct timestamp(s)"
             )
             if n_timestamps < 2:
                 blocking.append(
-                    f"the datetime column '{dt_name}' has {n_timestamps} usable timestamp(s); "
+                    f"the time column '{time_col}' has {n_timestamps} usable timestamp(s); "
                     "at least 2 are required"
                 )
             elif n_distinct <= 1:
                 blocking.append(
-                    f"the datetime column '{dt_name}' has a single distinct timestamp; "
-                    "there is no temporal variation to forecast over"
+                    f"the time column '{time_col}' has a single distinct timestamp; there is "
+                    "no temporal variation to forecast over"
+                )
+            elif not parsed.is_monotonic_increasing:
+                blocking.append(
+                    f"the rows are not in chronological order on the time column '{time_col}'; "
+                    f"sort the DataFrame by '{time_col}' before modeling"
                 )
 
     # --- feature availability (supervised) ---------------------------

@@ -50,6 +50,8 @@ class FeatureOperationType(str, Enum):
     NUMERICAL_SCALING = "numerical_scaling"
     MISSING_VALUE_HANDLING = "missing_value_handling"
     FEATURE_SELECTION = "feature_selection"
+    LAG_FEATURE = "lag_feature"
+    ROLLING_FEATURE = "rolling_feature"
 
 
 class FeatureInventoryCandidate(BaseModel):
@@ -303,6 +305,69 @@ class PreprocessingRequirements(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class TemporalFeatureRecommendation(BaseModel):
+    """One structurally-justified lag / rolling feature for a forecasting problem.
+
+    Produced by
+    :func:`data_engine.feature_engineering.recommend_temporal_features`
+    (forecasting foundation). A recommendation means only *"a
+    time-series-forecasting problem structurally needs this class of
+    feature"* — Phase 6 does **not** build it (execution is a later
+    increment), the DataFrame is never touched, and it never means *"this
+    will improve model performance"*.
+    """
+
+    column: str = Field(description="Source column: the forecasting target or a numeric feature.")
+    operation: FeatureOperationType  # LAG_FEATURE | ROLLING_FEATURE
+    description: str = Field(
+        description="'lag 7' / 'rolling mean window 30' / 'rolling std window 7'."
+    )
+    reason: str = Field(
+        description="The structural reason this temporal feature is worth building."
+    )
+    evidence: list[str] = Field(
+        default_factory=list, description="Deterministic supporting evidence, fixed order."
+    )
+
+
+class TemporalFeatureRecommendations(BaseModel):
+    """Recommended lag / rolling-window features for a forecasting problem.
+
+    Populated by
+    :func:`data_engine.feature_engineering.recommend_temporal_features`
+    (forecasting foundation). ``status = unavailable`` for **every**
+    non-forecasting task — that is the expected state, not an error. All
+    fields are additive and defaulted, so a ``FeatureEngineeringSpec``
+    serialised before the forecasting-foundation increment still validates.
+    Recommendation-only: no lag is computed and the DataFrame is unchanged.
+    """
+
+    status: FeatureEngineeringStatus = FeatureEngineeringStatus.NOT_YET_INFERRED
+    reason: str | None = Field(
+        default=None,
+        description="Why temporal recommendations are unavailable, or why a completed result "
+        "is empty; None otherwise.",
+    )
+    time_column: str | None = Field(
+        default=None, description="The forecasting time axis (echoed from TaskTypeInference)."
+    )
+    target_column: str | None = Field(
+        default=None, description="The forecasting target (echoed from TaskTypeInference)."
+    )
+    recommended_operations: list[str] = Field(
+        default_factory=list,
+        description="'<column>: <description>' per recommendation, deterministically ordered.",
+    )
+    recommendations: list[TemporalFeatureRecommendation] = Field(
+        default_factory=list,
+        description="Structured recommendations, deterministically ordered.",
+    )
+    objective_used: bool = Field(
+        default=False, description="True iff a non-blank objective string was supplied."
+    )
+    notes: list[str] = Field(default_factory=list)
+
+
 class FeatureEngineeringCheckOutcome(str, Enum):
     """Result of one structural consistency check."""
 
@@ -385,7 +450,10 @@ class FeatureEngineeringSpec(BaseModel):
     section are ``not_yet_inferred``; the ``dataset_id`` /
     ``dataset_version_id`` / ``objective`` fields echo the request. Later
     increments fill in ``inventory`` / ``transformations`` / ``selection``
-    / ``preprocessing`` / ``assessment`` in place, additively.
+    / ``preprocessing`` / ``temporal`` / ``assessment`` in place,
+    additively. ``temporal`` (:class:`TemporalFeatureRecommendations`) is
+    populated only for a time-series-forecasting problem and is
+    ``unavailable`` for every other task.
     """
 
     feature_engineering_engine_version: str = FEATURE_ENGINEERING_ENGINE_VERSION
@@ -413,6 +481,7 @@ class FeatureEngineeringSpec(BaseModel):
         default_factory=FeatureSelectionRecommendations
     )
     preprocessing: PreprocessingRequirements = Field(default_factory=PreprocessingRequirements)
+    temporal: TemporalFeatureRecommendations = Field(default_factory=TemporalFeatureRecommendations)
     assessment: FeatureEngineeringAssessment = Field(default_factory=FeatureEngineeringAssessment)
 
     notes: list[str] = Field(default_factory=list)
