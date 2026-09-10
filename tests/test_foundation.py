@@ -87,6 +87,7 @@ ENGINE_PACKAGES = [
     "data_engine.modeling.training",
     "data_engine.modeling.selection",
     "data_engine.modeling.evaluation",
+    "data_engine.modeling.temporal_execution",
     "data_engine.modeling.pipeline",
     "database",
     "dl_engine",

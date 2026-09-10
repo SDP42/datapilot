@@ -200,6 +200,66 @@ def test_deterministic_unordered_unavailable():
     assert a.status is UNAVAILABLE
 
 
+# --- forecasting execution: temporal features + contiguity -----
+
+
+def test_sorted_forecasting_run_builds_temporal_features():
+    out = train_and_evaluate_models(*_build(_forecasting_frame("sorted")))
+    assert out.status is COMPLETED
+    for run in out.runs:
+        assert run.temporal_features_built > 0
+        assert run.rows_consumed_as_history >= 30
+    assert any("leakage-safe for one-step-ahead evaluation" in n for n in out.notes)
+    assert any("consumed as lag / rolling history" in n for n in out.notes)
+
+
+def test_leading_and_trailing_missing_target_are_trimmed_contiguously():
+    df = _forecasting_frame("sorted")
+    df.loc[:3, "demand"] = np.nan
+    df.loc[_N - 3 :, "demand"] = np.nan
+    out = train_and_evaluate_models(*_build(df))
+    assert out.status is COMPLETED
+    assert any("trimmed (contiguity preserved" in n for n in out.notes)
+
+
+def test_internal_target_gap_is_blocked_at_feasibility():
+    df = _forecasting_frame("sorted")
+    df.loc[100:105, "demand"] = np.nan
+    df2, problem, fe, readiness, split, candidates = _build(df)
+    assert problem.feasibility.feasible is False
+    assert readiness.ready is False
+    out = train_and_evaluate_models(df2, problem, fe, readiness, split, candidates)
+    assert out.status is UNAVAILABLE
+
+
+def test_too_few_modelable_rows_after_history_is_unavailable():
+    # a hand-built temporal section with a large warm-up on a modest frame:
+    # 60 rows - lag 50 warm-up = 10 modelable < MODEL_TRAINING_FORECASTING_MIN_MODELABLE_ROWS.
+    from data_engine.feature_engineering import TemporalFeatureRecommendation
+    from data_engine.feature_engineering.models import FeatureOperationType
+
+    df, problem, fe, readiness, split, candidates = _build(_forecasting_frame("sorted").iloc[:60])
+    big_lag = TemporalFeatureRecommendation(
+        column="demand",
+        operation=FeatureOperationType.LAG_FEATURE,
+        description="lag 50",
+        reason="x",
+    )
+    fe_big = fe.model_copy(
+        update={
+            "temporal": fe.temporal.model_copy(
+                update={
+                    "recommendations": [big_lag],
+                    "recommended_operations": ["demand: lag 50"],
+                }
+            )
+        }
+    )
+    out = train_and_evaluate_models(df, problem, fe_big, readiness, split, candidates)
+    assert out.status is UNAVAILABLE
+    assert "modelable row(s) remain after consuming" in (out.reason or "")
+
+
 # --- the non-temporal contract is unchanged --------------------
 
 

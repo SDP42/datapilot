@@ -12,7 +12,7 @@ future phases are not anticipated in code.
 | 4 | EDA & Statistical Analysis | **Done** — deterministic analysis-only `data_engine.eda`: EDA/univariate/bivariate, parametric tests, effect sizes, non-parametric tests, distribution analysis, EDA↔quality cross-reference, visualization foundation (chart-spec selection + in-memory Matplotlib **and Plotly** rendering + explicit chart export), target-aware visualization recommendation, statistical-strength visualization ranking, k-NN / Kraskov mutual-information estimator, datetime mutual information, paired / one-sided non-parametric tests (Wilcoxon signed-rank / sign / Friedman), multiple-testing correction (Bonferroni / Holm / Benjamini-Hochberg). No dashboard/API |
 | 5 | Automated Problem Understanding | **Done** — `data_engine.problem_understanding`: the `ProblemSpec` contract + `understand_problem` foundation (5.1), **target identification** `identify_target` (5.2), **task-type inference** `infer_task_type` (5.3), **candidate metrics** `recommend_metrics` (5.4), **feasibility assessment** `assess_feasibility` (5.5). All deterministic, standalone, analysis-only; no ML/LLM. **Forecasting Foundation (done):** additive `TaskTypeInference.time_column` + `infer_task_type(..., time_column=)`; feasibility blocks an unsorted forecasting frame |
 | 6 | Feature Engineering | **Done** — `data_engine.feature_engineering`, all deterministic, standalone, analysis-only: `FeatureEngineeringSpec` contract + foundation (6.1); **structural feature inventory** `inventory_features` (6.2); **transformation recommendations** `recommend_transformations` (6.3); **feature-selection recommendations** `recommend_feature_selection` (6.4); **preprocessing requirements** `recommend_preprocessing` (6.5); **feature-engineering assessment** `assess_feature_engineering` — structural consistency & readiness check over 6.2–6.5, `feasible` True/False from blocking structural inconsistencies (6.6). Nothing is executed; no ML/LLM. **Forecasting Foundation (done):** new `FeatureEngineeringSpec.temporal` section + `recommend_temporal_features` — lag / rolling feature **recommendations** for a forecasting problem, `unavailable` for every other task; new `LAG_FEATURE` / `ROLLING_FEATURE` operation types; nothing built |
-| 7 | Model Development / Modeling | **Done** — `data_engine.modeling`, all deterministic and standalone: `ModelingSpec` contract + foundation (7.1); **model readiness** `assess_model_readiness` + **data-split planning** `recommend_data_split` (7.2); **model candidate generation** `generate_model_candidates` (7.3); **training & evaluation** `train_and_evaluate_models` (7.4) — fits one conservative scikit-learn baseline per candidate family and reports per-candidate metrics; **model selection & recommendation** `select_model` (7.5) — deterministically ranks the successful 7.4 runs by a fixed per-task metric and recommends one family/estimator. Nothing beyond the 7.4 baselines is trained; no hyperparameter tuning, CV, feature importance, SHAP, or artifact persistence anywhere in Phase 7. **Post-Phase-7 stabilization (done):** `run_modeling_pipeline` deterministic end-to-end composition + overall `ModelingSpec.status`; `EvaluationResults` is now a status mirror of `TrainingOutcome`; explicit forecasting chronological-order precondition. **Forecasting Foundation (done):** first-class `TaskTypeInference.time_column` + `infer_task_type(..., time_column=)`; unsorted-forecasting caught in Phase-5 feasibility; new `FeatureEngineeringSpec.temporal` section + `recommend_temporal_features` (lag / rolling **recommendations** only, not executed) |
+| 7 | Model Development / Modeling | **Done** — `data_engine.modeling`, all deterministic and standalone: `ModelingSpec` contract + foundation (7.1); **model readiness** `assess_model_readiness` + **data-split planning** `recommend_data_split` (7.2); **model candidate generation** `generate_model_candidates` (7.3); **training & evaluation** `train_and_evaluate_models` (7.4) — fits one conservative scikit-learn baseline per candidate family and reports per-candidate metrics; **model selection & recommendation** `select_model` (7.5) — deterministically ranks the successful 7.4 runs by a fixed per-task metric and recommends one family/estimator. Nothing beyond the 7.4 baselines is trained; no hyperparameter tuning, CV, feature importance, SHAP, or artifact persistence anywhere in Phase 7. **Post-Phase-7 stabilization (done):** `run_modeling_pipeline` deterministic end-to-end composition + overall `ModelingSpec.status`; `EvaluationResults` is now a status mirror of `TrainingOutcome`; explicit forecasting chronological-order precondition. **Forecasting Foundation (done):** first-class `TaskTypeInference.time_column` + `infer_task_type(..., time_column=)`; unsorted-forecasting caught in Phase-5 feasibility; new `FeatureEngineeringSpec.temporal` section + `recommend_temporal_features` (lag / rolling **recommendations**). **Forecasting Execution (done):** Phase 7.4 now **builds** those lag / rolling features (`build_temporal_features`, backward-looking, leakage-safe one-step-ahead) and trains the forecasting model on them; `TrainingRun.temporal_features_built` / `rows_consumed_as_history` |
 | 8 | Deep Learning | **Not started** |
 | 9 | Experiment Tracking | Not started |
 | 10 | Explainable AI | Not started |
@@ -846,6 +846,39 @@ future phases are not anticipated in code.
   (the forecasting target's own lag / rolling features are legitimate).
 - **Quality gates:** `pytest` / `ruff` / `ruff format` / `mypy` all green;
   decision 0077.
+
+### Forecasting Execution — **Done**
+- **Scope:** execute (don't just recommend) the Phase-6 lag / rolling
+  features. **No new dependency** (pandas `.shift` / `.rolling` only), no
+  engine-version bump, no new `ModelFamily`, no forecasting library.
+- **`build_temporal_features(df, recommendations)`** in a new
+  `data_engine/modeling/temporal_execution.py` — a pure, deterministic,
+  **backward-looking** transform: `lag k = shift(k)`,
+  `rolling <stat> window w = shift(1).rolling(w, min_periods=w).<stat>()`.
+  Every built feature at row `i` uses only values strictly before `i`, so
+  it is **leakage-safe for one-step-ahead evaluation** regardless of the
+  split. It is called **only** inside Phase 7.4 — Phase 6 stays
+  recommendation-only.
+- **Phase 7.4** (forecasting + `time_ordered_holdout` only): builds the
+  temporal recommendations, drops the leading warm-up rows
+  (`TrainingRun.rows_consumed_as_history`), adds the built columns to the
+  model matrix (`TrainingRun.temporal_features_built`), then splits /
+  fits / evaluates as before. `< MODEL_TRAINING_FORECASTING_MIN_MODELABLE_ROWS`
+  (20) rows after the warm-up → `unavailable`. Verified: an AR(1) demand
+  series drops from RMSE ≈ 1.5 (noise) to ≈ 0.5 (the noise floor).
+- **Contiguity fix (F1):** for a time-ordered forecasting run, Phase 7.4
+  now trims only the **leading / trailing** run of missing-target rows
+  (was a non-contiguous drop that would have broken lag semantics);
+  `assess_feasibility` blocks a forecasting target with an **internal**
+  gap.
+- **Additive contracts:** `TrainingRun.temporal_features_built` /
+  `rows_consumed_as_history` (defaulted `0` for every non-forecasting run;
+  legacy JSON validates). New exports: `build_temporal_features`,
+  `MODEL_TRAINING_FORECASTING_MIN_MODELABLE_ROWS`.
+- **OUT (future):** recursive multi-step / horizon forecasting, executing
+  the Phase-6.3 calendar / seasonal derivations, multi-series, backtesting.
+- **Quality gates:** `pytest` / `ruff` / `ruff format` / `mypy` all green;
+  decision 0078.
 
 ### Phase 8 — Deep Learning — **Not started**
 - **Objective:** add DL where justified.

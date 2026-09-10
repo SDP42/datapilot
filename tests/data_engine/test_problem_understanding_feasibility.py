@@ -413,6 +413,30 @@ def test_forecasting_datetime_target(df):
     assert any("signup_date" in n for n in result.notes)
 
 
+def test_forecasting_internal_target_gap_blocks(df):
+    d = df.copy()
+    d.loc[80:90, "price"] = np.nan
+    result = _assess(d, TaskType.TIME_SERIES_FORECASTING, "price", time_col="signup_date")
+    assert result.feasible is False
+    assert any(
+        "missing value(s) between its first and last observed point" in b
+        for b in result.blocking_issues
+    )
+
+
+def test_forecasting_leading_and_trailing_target_gaps_are_tolerated(df):
+    d = df.copy()
+    d.loc[:4, "price"] = np.nan
+    d.loc[190:, "price"] = np.nan
+    result = _assess(d, TaskType.TIME_SERIES_FORECASTING, "price", time_col="signup_date")
+    assert not any("between its first and last observed point" in b for b in result.blocking_issues)
+
+
+def test_forecasting_contiguous_target_passes(df):
+    result = _assess(df, TaskType.TIME_SERIES_FORECASTING, "price", time_col="signup_date")
+    assert result.feasible is True
+
+
 # --- clustering ---------------------------------------------------
 
 

@@ -314,6 +314,22 @@ def assess_feasibility(
                     f"sort the DataFrame by '{time_col}' before modeling"
                 )
 
+        # forecasting lag / rolling features require a contiguous target series —
+        # leading / trailing gaps are fine (trimmed downstream), internal gaps are not.
+        if target_column is not None and target_column in column_names:
+            observed = column(target_column).notna().to_numpy()
+            if observed.any():
+                first = int(observed.argmax())
+                last = len(observed) - 1 - int(observed[::-1].argmax())
+                internal_missing = int((~observed[first : last + 1]).sum())
+                if internal_missing:
+                    blocking.append(
+                        f"the forecasting target '{target_column}' has {internal_missing} "
+                        "missing value(s) between its first and last observed point; lag / "
+                        "rolling features require a contiguous series (leading / trailing "
+                        "gaps are fine)"
+                    )
+
     # --- feature availability (supervised) ---------------------------
     if is_supervised:
         non_target_columns = [name for name in column_names if name != target_column]

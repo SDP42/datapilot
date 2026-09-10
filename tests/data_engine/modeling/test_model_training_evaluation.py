@@ -17,6 +17,7 @@ from data_engine.feature_engineering import (
     inventory_features,
     recommend_feature_selection,
     recommend_preprocessing,
+    recommend_temporal_features,
     recommend_transformations,
     understand_feature_engineering,
 )
@@ -67,13 +68,15 @@ def _build(df: pd.DataFrame, objective: str):
     tr = recommend_transformations(df, inv)
     sel = recommend_feature_selection(df, inv, task)
     pp = recommend_preprocessing(df, inv, tr, sel)
-    asmt = assess_feature_engineering(df, inv, tr, sel, pp)
+    tmp = recommend_temporal_features(df, inv, task)
+    asmt = assess_feature_engineering(df, inv, tr, sel, pp, temporal=tmp)
     fe = understand_feature_engineering(FeatureEngineeringRequest(dataset_id="d")).model_copy(
         update={
             "inventory": inv,
             "transformations": tr,
             "selection": sel,
             "preprocessing": pp,
+            "temporal": tmp,
             "assessment": asmt,
         }
     )
@@ -408,16 +411,77 @@ def test_clustering_uses_unsupervised_metrics(clustering):
 # --- forecasting -------------------------------------------
 
 
-def test_forecasting_baseline_boundary(forecasting):
+def test_forecasting_builds_temporal_features(forecasting):
     out = _run(forecasting)
     joined = " ".join(out.notes)
-    assert "no lag features" in joined
-    assert "rolling features" in joined
     assert "never a datetime column" in joined
+    assert "leakage-safe for one-step-ahead evaluation" in joined
+    assert "recursive multi-step forecasting is a later increment" in joined
+    assert "consumed as lag / rolling history" in joined
     assert out.status is COMPLETED
     for r in out.runs:
         if r.status is TrainingRunStatus.COMPLETED:
             assert set(r.metrics) >= {"rmse", "mae"}
+            assert r.temporal_features_built > 0
+            assert r.rows_consumed_as_history >= 30  # max rolling window
+
+
+def test_forecasting_no_temporal_section_trains_baseline():
+    # a forecasting frame with no numeric target lags recommended (tiny) still trains
+    rng = np.random.default_rng(11)
+    n = 90
+    df = pd.DataFrame(
+        {
+            "day": pd.date_range("2021-01-01", periods=n, freq="D"),
+            "temp": rng.normal(20.0, 3.0, n),
+            "demand": rng.uniform(10.0, 90.0, n),
+        }
+    )
+    fixture = _build(df, "forecast future demand over time")
+    if fixture[1].task_type.task_type is not TaskType.TIME_SERIES_FORECASTING:
+        pytest.skip("task inference did not yield forecasting")
+    fe_no_temporal = fixture[2].model_copy(
+        update={"temporal": fixture[2].temporal.model_copy(update={"recommendations": []})}
+    )
+    out = train_and_evaluate_models(
+        fixture[0], fixture[1], fe_no_temporal, fixture[3], fixture[4], fixture[5]
+    )
+    assert out.status is COMPLETED
+    for r in out.runs:
+        assert r.temporal_features_built == 0
+
+
+def test_forecasting_lag_features_improve_a_clean_ar_series():
+    # AR(1): demand[t] = 0.9 * demand[t-1] + small noise. lag-1 should dominate.
+    rng = np.random.default_rng(3)
+    n = 400
+    demand = np.zeros(n)
+    for t in range(1, n):
+        demand[t] = 0.9 * demand[t - 1] + rng.normal(0.0, 0.1)
+    df = pd.DataFrame(
+        {
+            "day": pd.date_range("2021-01-01", periods=n, freq="D"),
+            "noise": rng.normal(0.0, 1.0, n),
+            "demand": demand + 50.0,
+        }
+    )
+    fixture = _build(df, "forecast future demand over time")
+    if fixture[1].task_type.task_type is not TaskType.TIME_SERIES_FORECASTING:
+        pytest.skip("task inference did not yield forecasting")
+    with_temporal = _run(fixture)
+    fe_no_temporal = fixture[2].model_copy(
+        update={"temporal": fixture[2].temporal.model_copy(update={"recommendations": []})}
+    )
+    without_temporal = train_and_evaluate_models(
+        fixture[0], fixture[1], fe_no_temporal, fixture[3], fixture[4], fixture[5]
+    )
+    best_with = min(
+        r.metrics["rmse"] for r in with_temporal.runs if r.status is TrainingRunStatus.COMPLETED
+    )
+    best_without = min(
+        r.metrics["rmse"] for r in without_temporal.runs if r.status is TrainingRunStatus.COMPLETED
+    )
+    assert best_with < 0.6 * best_without  # lag features materially cut RMSE
 
 
 def test_forecasting_preserves_temporal_order(forecasting):

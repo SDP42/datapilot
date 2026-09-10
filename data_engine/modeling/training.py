@@ -47,6 +47,7 @@ from .models import (
     TrainingRun,
     TrainingRunStatus,
 )
+from .temporal_execution import build_temporal_features
 
 # --- fixed, documented tunables --------------------------------------------
 
@@ -66,6 +67,9 @@ MODEL_TRAINING_MLP_MAX_ITER = 200  # modest cap for the optional neural baseline
 MODEL_TRAINING_METRIC_ROUND = 6  # decimal places for every reported metric
 MODEL_TRAINING_MIN_TRAIN_ROWS = 5  # fewer -> the run is unavailable
 MODEL_TRAINING_MIN_TEST_ROWS = 1  # fewer -> the run is unavailable
+# Forecasting-execution: after building lag / rolling features and dropping the
+# warm-up rows, fewer modelable rows than this -> the whole outcome is unavailable.
+MODEL_TRAINING_FORECASTING_MIN_MODELABLE_ROWS = 20
 
 _PU_COMPLETED = ProblemUnderstandingStatus.COMPLETED
 _FE_COMPLETED = FeatureEngineeringStatus.COMPLETED
@@ -611,10 +615,10 @@ def train_and_evaluate_models(
         )
     if task is TaskType.TIME_SERIES_FORECASTING:
         notes.append(
-            "time-series forecasting is trained here only as a baseline regression on the "
-            "currently-eligible features — Phase 7.4 creates no lag features, rolling "
-            "features, forecasting transformations, or forecasting models; the task type "
-            "came from Phase 5, never a datetime column"
+            "time-series forecasting is trained here as a baseline regression; Phase 7.4 "
+            "builds no forecasting-specific model and no forecasting transformation beyond "
+            "the Phase-6 lag / rolling recommendations; the task type came from Phase 5, "
+            "never a datetime column"
         )
     if chronological_note is not None:
         notes.append(chronological_note)
@@ -623,13 +627,6 @@ def train_and_evaluate_models(
             "against a datetime column and did not sort or reorder the rows"
         )
     temporal = feature_engineering.temporal
-    if temporal.status is _FE_COMPLETED and temporal.recommendations:
-        notes.append(
-            f"Phase 6 recommends {len(temporal.recommendations)} lag / rolling feature(s) for "
-            "this forecasting problem (FeatureEngineeringSpec.temporal); Phase 7.4 does not "
-            "build them — forecasting is trained as baseline regression on the "
-            "currently-eligible features"
-        )
     if objective_used:
         notes.append("an objective was supplied and recorded; it did not change any training step")
 
@@ -654,17 +651,85 @@ def train_and_evaluate_models(
         )
 
     # --- build the working frame (a copy; the input is never touched) ---
+    is_time_ordered = split.strategy is DataSplitStrategy.TIME_ORDERED_HOLDOUT
     work = df.copy()
     work.columns = df_columns
     if is_supervised and target_column is not None:
-        before = len(work)
-        work = work[work[target_column].notna()]
-        dropped = before - len(work)
-        if dropped:
-            notes.append(
-                f"{dropped} row(s) with a missing target were excluded from supervised training"
-            )
+        if is_time_ordered:
+            # preserve contiguity for the positional time-ordered split: trim only
+            # the leading / trailing run of missing-target rows (internal gaps are
+            # blocked at Phase-5 feasibility).
+            observed = work[target_column].notna().to_numpy()
+            if observed.any():
+                first_obs = int(observed.argmax())
+                last_obs = len(observed) - 1 - int(observed[::-1].argmax())
+                trimmed = len(work) - (last_obs - first_obs + 1)
+                work = work.iloc[first_obs : last_obs + 1]
+                if trimmed:
+                    notes.append(
+                        f"{trimmed} leading / trailing row(s) with a missing target were "
+                        "trimmed (contiguity preserved for the time-ordered split)"
+                    )
+        else:
+            before = len(work)
+            work = work[work[target_column].notna()]
+            dropped = before - len(work)
+            if dropped:
+                notes.append(
+                    f"{dropped} row(s) with a missing target were excluded from supervised training"
+                )
     work = work.reset_index(drop=True)
+
+    # --- forecasting: execute the Phase-6 lag / rolling recommendations ---
+    temporal_features_built = 0
+    rows_consumed_as_history = 0
+    if (
+        is_time_ordered
+        and task is TaskType.TIME_SERIES_FORECASTING
+        and target_column is not None
+        and temporal.status is _FE_COMPLETED
+        and temporal.recommendations
+    ):
+        try:
+            work, built_names, tf_notes = build_temporal_features(work, temporal.recommendations)
+        except ValueError as exc:
+            return _unavailable(
+                "forecasting lag / rolling features could not be built: "
+                + _normalise_error(str(exc)),
+                objective_used=objective_used,
+            )
+        if built_names:
+            before = len(work)
+            work = work.dropna(subset=built_names).reset_index(drop=True)
+            rows_consumed_as_history = before - len(work)
+            temporal_features_built = len(built_names)
+            numeric_cols = sorted(set(numeric_cols) | set(built_names))
+            feature_cols = sorted(set(feature_cols) | set(built_names))
+            notes.extend(tf_notes)
+            notes.append(
+                f"{rows_consumed_as_history} leading row(s) consumed as lag / rolling history"
+            )
+            notes.append(
+                "one-step-ahead evaluation: lag / rolling features use observed actuals; "
+                "recursive multi-step forecasting is a later increment"
+            )
+        else:
+            notes.append(
+                "Phase 6 recommended temporal features but none referenced a column of the "
+                "frame; trained as baseline regression on the eligible features"
+            )
+        if len(work) < MODEL_TRAINING_FORECASTING_MIN_MODELABLE_ROWS:
+            return _unavailable(
+                f"only {len(work)} modelable row(s) remain after consuming "
+                f"{rows_consumed_as_history} row(s) as lag / rolling history; at least "
+                f"{MODEL_TRAINING_FORECASTING_MIN_MODELABLE_ROWS} are required",
+                objective_used=objective_used,
+            )
+    elif task is TaskType.TIME_SERIES_FORECASTING:
+        notes.append(
+            "no Phase-6 lag / rolling recommendations were available; trained as baseline "
+            "regression on the currently-eligible features"
+        )
 
     # canonicalise row order for the non-temporal strategies so the split
     # (and therefore every metric) is invariant to the input row order.
@@ -708,6 +773,17 @@ def train_and_evaluate_models(
                 test_idx=test_idx,
             )
         )
+
+    if temporal_features_built or rows_consumed_as_history:
+        runs = [
+            run.model_copy(
+                update={
+                    "temporal_features_built": temporal_features_built,
+                    "rows_consumed_as_history": rows_consumed_as_history,
+                }
+            )
+            for run in runs
+        ]
 
     successful = [r.family.value for r in runs if r.status is TrainingRunStatus.COMPLETED]
     failed = [r.family.value for r in runs if r.status is not TrainingRunStatus.COMPLETED]

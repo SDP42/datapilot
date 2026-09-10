@@ -295,17 +295,27 @@ def test_understand_modeling_still_inference_free():
 # --- forecasting foundation: temporal recs + declared time column ------
 
 
-def test_forecasting_pipeline_recommends_temporal_features_but_does_not_build_them():
+def test_forecasting_pipeline_builds_temporal_features():
     df, objective, _ = CASES["forecasting"]
     spec = run_modeling_pipeline(
         df.copy(), ModelingRequest(dataset_id="forecasting", objective=objective)
     )
     assert spec.status is COMPLETED
     assert spec.split.strategy is not None and spec.split.strategy.value == "time_ordered_holdout"
-    # Phase 7.4 flags the temporal recommendations as unbuilt.
-    assert any(
-        "Phase 6 recommends" in n and "lag / rolling feature" in n for n in spec.training.notes
+    assert spec.selection.selection_metric == "rmse"
+    # Phase 7.4 executed the Phase-6 temporal recommendations.
+    assert spec.training.runs
+    for run in spec.training.runs:
+        assert run.temporal_features_built > 0
+        assert run.rows_consumed_as_history >= 30
+    assert any("leakage-safe for one-step-ahead evaluation" in n for n in spec.training.notes)
+    # deterministic + no mutation
+    before = df.copy(deep=True)
+    again = run_modeling_pipeline(
+        df.copy(), ModelingRequest(dataset_id="forecasting", objective=objective)
     )
+    assert again.model_dump_json() == spec.model_dump_json()
+    pd.testing.assert_frame_equal(df, before)
 
 
 def test_declared_time_column_resolves_two_datetime_column_forecasting():

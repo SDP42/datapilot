@@ -268,10 +268,13 @@ was column-order dependent). The fix is one keyword argument.
 
 Downstream, `assess_feasibility` (5.5), `recommend_data_split` (7.2), and
 `train_and_evaluate_models` (7.4) all consume `task_type.time_column`.
-`assess_feasibility` additionally **blocks** a forecasting problem whose
-resolved time column is not monotonically non-decreasing across the rows —
-so an unsorted forecasting frame is caught in Phase 5, not only at
-Phase 7.4.
+`assess_feasibility` additionally **blocks** a forecasting problem when
+(a) its resolved time column is not monotonically non-decreasing across
+the rows, or (b) the forecasting **target** has a missing value *between*
+its first and last observed point (an **internal gap** — the Phase-7.4
+lag / rolling features require a contiguous series; leading / trailing
+gaps are fine and are trimmed downstream). Both are caught in Phase 5,
+not only at Phase 7.4.
 
 ### `target` is authoritative — no re-selection
 

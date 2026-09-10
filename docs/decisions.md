@@ -4,6 +4,81 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0078 — Forecasting Execution: Phase 7.4 builds the lag/rolling features (backward-looking, one-step-ahead)
+
+- **Decision:** execute — no longer just recommend — the Phase-6
+  `FeatureEngineeringSpec.temporal` lag / rolling features. **No new
+  dependency** (pandas `.shift` / `.rolling` only), **no engine-version
+  bump**, no new `ModelFamily`, no forecasting library. Seven sub-changes,
+  each confirmed against the plan's D1–D7:
+  1. **D1 — new `data_engine/modeling/temporal_execution.py`** with
+     `build_temporal_features(df, recommendations) -> (frame, built_names,
+     notes)`. Keeps `data_engine.feature_engineering` **100 %
+     recommendation-only** (no Phase-6 function calls it) and keeps
+     `training.py` orchestration-thin. It copies `df`, never mutates,
+     never fits, never splits.
+  2. **D7 — the transform is backward-looking by construction:**
+     `lag k = series.shift(k)` (`k >= 1`),
+     `rolling <stat> window w = series.shift(1).rolling(w,
+     min_periods=w).<stat>()`. The `shift(1)` on rolling features is
+     **mandatory** — a feature at row `i` uses only values *strictly
+     before* `i`, so it never sees `target[i]`.
+  3. **D2 — one-step-ahead evaluation only.** Lag / rolling features are
+     computed from actuals (the standard walk-forward baseline). Recursive
+     multi-step / fixed-origin forecasting is a later increment and is
+     documented as out of scope. Because the transform is backward-looking,
+     building features on the full time-ordered frame *before* the split
+     is leakage-safe regardless of where the split falls.
+  4. **D3 — drop the warm-up rows.** Phase 7.4 builds the features on the
+     working frame, then drops the leading rows whose lag / rolling value
+     is still NaN, recorded as `TrainingRun.rows_consumed_as_history`.
+     Nothing is imputed / fabricated.
+  5. **D4 — contiguity (fixes latent bug F1).** For a time-ordered
+     forecasting run, Phase 7.4 now trims **only** the leading / trailing
+     run of missing-target rows (was a non-contiguous
+     `df[df[target].notna()]` that would have broken lag semantics across
+     the gaps). `assess_feasibility` blocks a forecasting target with a
+     missing value *between* its first and last observed point (an
+     internal gap); leading / trailing gaps are fine.
+  6. **D5 — temporal (lag / rolling) execution only.** Executing the
+     Phase-6.3 calendar / seasonal derivations for forecasting is a
+     separate "Feature Engineering Execution" increment. The datetime
+     `time_column` itself stays excluded from the model matrix.
+  7. **D6 — additive `TrainingRun` fields:** `temporal_features_built:
+     int = 0`, `rows_consumed_as_history: int = 0` (both `0` for every
+     non-forecasting run; legacy `TrainingOutcome` JSON validates).
+- **New tunable / exports:** `MODEL_TRAINING_FORECASTING_MIN_MODELABLE_ROWS
+  = 20` — fewer modelable rows than this after the warm-up →
+  `TrainingOutcome.status = unavailable`. New exports:
+  `build_temporal_features`, `MODEL_TRAINING_FORECASTING_MIN_MODELABLE_ROWS`.
+- **Scope gate:** every new code path is gated on `split.strategy is
+  TIME_ORDERED_HOLDOUT` **and** `task is TIME_SERIES_FORECASTING` **and**
+  `feature_engineering.temporal.status == completed` with recommendations.
+  **Non-forecasting and non-time-ordered runs are byte-for-byte
+  unchanged.** `train_and_evaluate_models` / `select_model` /
+  `run_modeling_pipeline` signatures are unchanged.
+- **Reason:** the Forecasting Foundation (0077) delivered the `temporal`
+  recommendations but Phase 7.4 still trained forecasting as regression on
+  exogenous noise — verified RMSE ≈ noise level with no autoregressive
+  signal. Executing the recommendations makes the metrics meaningful:
+  verified, an AR(1) demand series drops from RMSE ≈ 1.5 to ≈ 0.5 (its
+  noise floor).
+- **Determinism / safety:** `.shift` / `.rolling` are deterministic; fixed
+  column names (`<source>__lag_<k>` / `__rollmean_<w>` / `__rollstd_<w>`);
+  byte-identical repeated runs; no RNG beyond the existing seed 42; `df`
+  never mutated; the Phase-6.5 preprocessing pipeline is still fit on the
+  training partition only. A collision between a built column name and an
+  existing column, or an unrecognised recommendation description, → the
+  run is `unavailable` with a normalised reason.
+- **OUT (future):** recursive multi-step / horizon forecasting; executing
+  the Phase-6.3 calendar / seasonal derivations; multi-series / panel
+  forecasting; backtesting / rolling-origin CV; any forecasting library.
+- **Phase state:** Phases 0–7 done + stabilization + Forecasting Foundation
+  + Forecasting Execution. Phase 8 not started. `pytest` / `ruff` /
+  `ruff format` / `mypy` all green.
+
+---
+
 ## 0077 — Forecasting Foundation: first-class `time_column` + recommendation-only lag/rolling features
 
 - **Decision:** a cross-phase (5 / 6 / 7) *foundation* increment. **No new

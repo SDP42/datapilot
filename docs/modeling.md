@@ -447,11 +447,13 @@ LightGBM / Optuna / MLflow is introduced.
 
 Every randomised estimator is seeded with `MODEL_TRAINING_RANDOM_SEED = 42`
 (a named module constant). `time_series_forecasting` is trained as a
-**baseline regression on the currently-eligible features** — Phase 7.4
-creates no lag / rolling features, forecasting transformations, or
-forecasting models; the task type came from Phase 5, never a datetime
-column. A `(family, task)` cell with no mapping → that run is
-`unavailable` with a deterministic reason; the batch continues.
+**baseline regression** on the eligible features **plus the Phase-6 lag /
+rolling features** built for the run (see "Forecasting execution" below) —
+Phase 7.4 still creates no forecasting-specific model, no calendar /
+seasonal derivation, and no multi-step forecast; the task type came from
+Phase 5, never a datetime column. A `(family, task)` cell with no mapping
+→ that run is `unavailable` with a deterministic reason; the batch
+continues.
 
 ### Preprocessing execution boundary
 
@@ -793,10 +795,44 @@ for a caller who bypasses feasibility:
   explicit "sort the DataFrame chronologically … Phase 7.4 does not
   reorder rows" reason.
 
-Phase 6 recommends lag / rolling features for a forecasting problem
-(`FeatureEngineeringSpec.temporal`); **Phase 7.4 does not build them** — a
-note records how many were recommended, and forecasting is trained as
-baseline regression on the currently-eligible features.
+## Forecasting execution — lag / rolling feature construction
+
+Since the **Forecasting Execution** increment, a `time_ordered_holdout`
+run **builds** the Phase-6 `FeatureEngineeringSpec.temporal` recommendations
+into real columns via `build_temporal_features` (in
+`data_engine.modeling.temporal_execution`, called **only** from Phase 7.4):
+
+- `lag k`  →  `series.shift(k)` (`k >= 1`)
+- `rolling <stat> window w`  →  `series.shift(1).rolling(w, min_periods=w).<stat>()`
+
+The transform is **backward-looking by construction** — every built
+feature at row `i` uses only values *strictly before* `i`, so it never
+sees `target[i]` and is **leakage-safe for one-step-ahead evaluation**
+regardless of where the split falls. **Recursive multi-step forecasting
+is a later increment** — the metrics measure "given the true recent past,
+predict the next value".
+
+Flow (forecasting + time-ordered only):
+
+1. trim only the **leading / trailing** run of missing-target rows
+   (contiguity preserved for the positional split; **internal** target
+   gaps are blocked upstream at Phase-5 feasibility).
+2. `build_temporal_features(work, temporal.recommendations)` → new numeric
+   columns; drop the leading rows whose lag / rolling value is still NaN
+   (the warm-up), recorded as `TrainingRun.rows_consumed_as_history`.
+3. add the built columns to the model matrix
+   (`TrainingRun.temporal_features_built`).
+4. `< MODEL_TRAINING_FORECASTING_MIN_MODELABLE_ROWS` (20) rows remain
+   after the warm-up → `TrainingOutcome.status = unavailable`.
+5. positional time-ordered split + the usual leakage-safe Phase-6.5
+   preprocessing pipeline (fit on train only) + fit / evaluate.
+
+The datetime `time_column` itself stays **excluded** from the model
+matrix. `TrainingRun` gains additive defaulted `temporal_features_built` /
+`rows_consumed_as_history` (both `0` for every non-forecasting run;
+legacy JSON validates). Executing the Phase-6.3 calendar / seasonal
+derivations for forecasting, forecast horizons, multi-series, and
+backtesting remain future increments.
 
 The **random / stratified holdout** contract is unchanged: those
 strategies canonicalise row order (stable sort by feature + target

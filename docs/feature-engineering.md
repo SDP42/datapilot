@@ -47,8 +47,10 @@ engineering is feasible.
 >   feature recommendations for a `time_series_forecasting` problem,
 >   populating `FeatureEngineeringSpec.temporal`. `status = unavailable`
 >   for **every** non-forecasting task. **Recommendation-only** — it never
->   computes a lag, calls `.shift` / `.rolling`, or touches the DataFrame;
->   building the features is a later increment.
+>   computes a lag, calls `.shift` / `.rolling`, or touches the DataFrame.
+>   The recommendations are executed (leakage-safe, one-step-ahead) inside
+>   the Phase-7.4 training boundary by `build_temporal_features` (the
+>   **Forecasting Execution** increment).
 > - **6.6 — feature-engineering assessment** (`assess_feature_engineering`):
 >   DONE. Deterministic **structural consistency & readiness check** over
 >   the 6.2 / 6.3 / 6.4 / 6.5 outputs (+ the `temporal` section) — internal
@@ -639,7 +641,10 @@ a **standalone**, deterministic, **recommendation-only** step. It
 identifies the lag and rolling-window features a
 `time_series_forecasting` problem structurally needs. It **never** computes
 a lag, calls `.shift` / `.rolling`, modifies `df`, selects features, or
-trains a model; building the recommended features is a later increment.
+trains a model. Phase 6 stays recommendation-only; the recommendations are
+**executed** (leakage-safe, one-step-ahead) inside the Phase-7.4 training
+boundary by `build_temporal_features` — see
+[modeling.md](modeling.md) "Forecasting execution".
 
 ### Fixed `unavailable` precedence
 

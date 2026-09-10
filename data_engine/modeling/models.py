@@ -228,6 +228,17 @@ class TrainingRun(BaseModel):
         default_factory=dict,
         description="Task-appropriate evaluation metrics on the test partition, fixed order.",
     )
+    temporal_features_built: int = Field(
+        default=0,
+        description="Lag / rolling feature columns built from FeatureEngineeringSpec.temporal "
+        "for this forecasting run (one-step-ahead; 0 for every non-forecasting run). "
+        "Additive and defaulted — legacy JSON validates.",
+    )
+    rows_consumed_as_history: int = Field(
+        default=0,
+        description="Leading rows dropped because a built lag / rolling feature was still NaN "
+        "(the lag / window warm-up). Additive and defaulted.",
+    )
     reason: str | None = Field(
         default=None, description="Why the run is unavailable / failed; None when completed."
     )

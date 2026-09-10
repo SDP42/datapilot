@@ -460,18 +460,25 @@ verifies the frame is non-decreasing on one of its own datetime columns
 and returns `unavailable` otherwise (it never infers a time column,
 sorts, or reorders).
 
-**Forecasting Foundation (cross-phase 5 / 6 / 7, additive only):** the
-forecasting time axis is now first-class — `TaskTypeInference.time_column`
-resolved by `infer_task_type` (caller-declared, or auto-resolved when the
-frame has exactly one datetime column; ambiguous otherwise → `unavailable`).
-`assess_feasibility` consumes it and blocks an unsorted forecasting frame
-in Phase 5 (Phase 7.4's guard becomes defense-in-depth). Phase 6 gains a
-`FeatureEngineeringSpec.temporal` section (`recommend_temporal_features`)
-carrying lag / rolling feature **recommendations** for a forecasting
-problem — `unavailable` for every other task, and **recommendation-only**:
-no lag is computed, `df` is untouched, and Phase 7.4 does not build them.
-Executing the temporal features (the "Forecasting Execution" increment),
-forecast horizons, multi-series, and backtesting remain future work.
+**Forecasting Foundation + Execution (cross-phase 5 / 6 / 7, additive
+only):** the forecasting time axis is first-class —
+`TaskTypeInference.time_column` resolved by `infer_task_type`
+(caller-declared, or auto-resolved when the frame has exactly one datetime
+column; ambiguous otherwise → `unavailable`). `assess_feasibility`
+consumes it and blocks an unsorted forecasting frame or an internal
+target gap in Phase 5. Phase 6 carries lag / rolling feature
+**recommendations** (`recommend_temporal_features` →
+`FeatureEngineeringSpec.temporal`) — `unavailable` for every other task,
+recommendation-only. **Phase 7.4 executes** those recommendations via
+`build_temporal_features` (a pure backward-looking transform: `lag k =
+shift(k)`, `rolling w = shift(1).rolling(w)` — leakage-safe for
+one-step-ahead evaluation) and trains the forecasting model on the built
+features; the datetime column itself stays excluded. This is the first
+place feature *construction* happens — it is inside the Phase-7.4 training
+boundary (which already executed the Phase-6.5 preprocessing), so
+`data_engine.feature_engineering` stays recommendation-only. Recursive
+multi-step / horizon forecasting, calendar / seasonal derivation
+execution, multi-series, and backtesting remain future work.
 
 **Future-phase components:** everything else —
 figure generation, executing the Phase-6 recommendations, executing /
