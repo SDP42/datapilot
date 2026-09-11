@@ -4,6 +4,130 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0083 — Phase 8.4: Deep Learning Evaluation Foundation — `DLEvaluationResult`, `evaluate_model`, exact Phase-7 metric reuse
+
+- **Decision:** implement a small, explicit evaluation layer for an
+  already-trained Phase-8 model against explicitly supplied evaluation
+  data — clearly separated from architecture construction (8.3),
+  training (8.2), model selection, and experiment tracking (neither
+  implemented anywhere in this repository yet):
+  1. **`dl_engine/contracts.py` — `DLEvaluationResult`.** A new, additive
+     Pydantic contract: `status` (reuses `TrainingRunStatus`, matching
+     `DLTrainingResult`'s own precedent for the same reason), `task_type`,
+     `architecture_name` (`str | None`, purely descriptive), `sample_count`,
+     `metrics` (`dict[str, float]`), `primary_metric` (`str | None` —
+     `'rmse'` for regression, `'f1'` for classification; descriptive only,
+     **never** consumed by any selection logic, since Phase 8.4 performs
+     none), `reason`, `notes`. Deliberately distinct from two existing
+     contracts rather than reusing either: `EvaluationResults` (Phase 7)
+     is a status mirror of a *set* of classical `TrainingRun`s against a
+     held-out test partition inside the full modeling pipeline —
+     `DLEvaluationResult` evaluates *one* already-trained model the
+     caller supplies directly, with no pipeline involvement at all.
+     `DLTrainingResult` (Phase 8.2) is raw training-loop execution and
+     computes no metric whatsoever — `DLEvaluationResult` is the first
+     Phase-8 contract that actually reports a metric.
+  2. **`dl_engine/evaluation.py` — `evaluate_model(model, batch, *,
+     architecture_name=None)`.** Accepts an **already-trained**
+     `torch.nn.Module` and a `TensorBatch` the caller built the normal
+     way via the existing `to_tensors()` — evaluation data is never
+     sourced from anywhere implicitly and never shuffled (row order from
+     `to_tensors()` is preserved exactly, as it already was). Switches
+     the model to `eval()` mode, runs the forward pass inside
+     `torch.no_grad()` (no computation graph retained, no gradient
+     computed), and restores the model's **original** `training`/`eval`
+     mode afterward via `try`/`finally` — so evaluation never leaves a
+     caller's model in a different mode than it found it in, whether the
+     caller had it in `train()` or `eval()` mode beforehand, and even
+     when evaluation itself fails partway through. Model parameters are
+     never written to (verified directly — see tests below). Device
+     handling respects what Phase 8.2's `train_model` already
+     established: the evaluation batch is moved to `next(model.
+     parameters()).device` (the device the model already lives on from
+     training), rather than requiring a fresh device-resolution step.
+  3. **Metric reuse (the required inspection, performed).** Phase 7's
+     `data_engine.modeling.training._regression_metrics` /
+     `_classification_metrics` were inspected first. They are **private**
+     functions internal to that module (not exported from
+     `data_engine.modeling.__init__`), so they cannot be imported
+     directly without violating the module's own privacy boundary,
+     but their metric definitions, parameters, and rounding are
+     **reproduced exactly** rather than reinvented: the same sklearn
+     functions (`mean_squared_error`, `mean_absolute_error`, `r2_score`
+     for regression; `accuracy_score`, `precision_score`, `recall_score`,
+     `f1_score`, `roc_auc_score` for classification), the same
+     `average="macro", zero_division=0` classification parameters, the
+     same `r2` gating on `var(y_true) > 0`, the same `roc_auc` gating
+     (only for a binary task, only when both classes are present in the
+     evaluation data), and the same rounding via the **exported**
+     `MODEL_TRAINING_METRIC_ROUND` constant. No second metric framework,
+     no divergent averaging semantics, no changed Phase-7 metric
+     behavior — `data_engine/modeling/*` has zero diffs in this
+     increment.
+  4. **Task-specific prediction handling.** Regression: model output
+     `(n, 1)` compared directly against the `(n, 1)` target
+     `to_tensors()` already produces (Phase 8.2's convention, unchanged).
+     Binary / multiclass classification: predicted class indices are
+     `argmax(logits, dim=1)`; **no softmax is applied before the
+     argmax** for the prediction itself (argmax of logits and argmax of
+     softmax(logits) are identical — softmax is monotonic — so applying
+     it there would be redundant, not incorrect, but the unnecessary
+     op is skipped). `softmax(logits)` **is** computed once for the
+     `roc_auc` probability input (binary only,
+     `softmax(logits)[:, 1]`) — reusing the MLP's existing two-logit
+     `CrossEntropyLoss` convention (Phase 8.3) rather than inventing a
+     BCE/sigmoid convention that convention was never built for.
+- **A real, minimal correction was needed — none.** Unlike Phase 8.3
+  (which needed the `IndexError` widening in `train_model`), Phase 8.4
+  required **no correction** to any existing Phase-8.1–8.3 contract or
+  function: `to_tensors()`'s binary/multiclass target convention
+  (`int64` class indices) and the MLP's two-logit output convention were
+  already exactly what a `CrossEntropyLoss`-compatible evaluator needs.
+  `evaluate_model` does perform its own explicit pre-checks (model type,
+  output shape, target class range, finite predictions) before computing
+  a metric, matching the existing fail-fast convention rather than
+  letting sklearn raise a less legible error deep inside a metric call.
+- **Verified deterministic and non-mutating** (through the public API
+  only, with real PyTorch installed): two `evaluate_model` calls on the
+  same trained model and evaluation batch produce byte-identical
+  `metrics`, `primary_metric`, and `model_dump_json()`; model parameters
+  are bit-identical before and after evaluation; `.grad` is bit-identical
+  before and after (the correct invariant — training leaves whatever
+  `.grad` its last backward pass produced, which evaluation must not
+  *change*, not a false assumption that `.grad` is zero/None after
+  training); a spied `forward()` call confirms `torch.is_grad_enabled()`
+  is `False` during the model's forward pass inside `evaluate_model`,
+  directly proving `no_grad()` is active rather than inferring it from
+  side effects; the model's `training` flag after the call always
+  matches what it was immediately before, in both starting-mode cases,
+  and even when evaluation fails partway through (e.g. an incompatible
+  feature dimension).
+- **New export:** `evaluate_model` (plus the `DLEvaluationResult`
+  contract). No internal metric helper (`_regression_metrics`,
+  `_classification_metrics`, `_round`) is exported — they stay module-
+  private, matching Phase 7's own convention for the identical
+  functions.
+- **OUT (this increment, and every later increment until explicitly
+  implemented):** integration into the complete Phase-7 modeling
+  pipeline, DL model selection, automatic model comparison, any
+  architecture beyond the MLP, Phase 9 `ExperimentRecord`, MLflow,
+  hyperparameter optimization, SHAP, deployment, general
+  Feature-Engineering execution, multi-series forecasting, backtesting.
+  Phase-7 classical modeling behavior, Phase-7 metric semantics, and
+  forecasting behavior are unchanged — `data_engine/modeling/*` has zero
+  diffs in this increment.
+- **Phase state:** Phases 0-7 done (+ stabilization + forecasting
+  increments). Phase 8 in progress (8.1 + 8.2 + 8.3 + 8.4 done); 8.5+ and
+  Phase 9 not started. `pytest` full suite 1735 passed / 65 skipped by
+  default (PyTorch not installed); separately verified with PyTorch
+  installed: 1799 passed / 1 skipped (all 173 `dl_engine` tests passing,
+  64 new this increment). `ruff` / `ruff format` / `mypy` (`data_engine`,
+  `datapilot`, `dl_engine`) all green; the same 5 pre-existing `mypy`
+  errors in `tests/data_engine/{conftest.py,test_validation_lineage.py}`
+  remain, confirmed unrelated to this increment.
+
+---
+
 ## 0082 — Phase 8.3: Neural Architecture Foundation — `MLPArchitectureConfig`, `build_mlp`, and an `IndexError` correction to `train_model`
 
 - **Decision:** implement the first Phase-8 neural architecture — a

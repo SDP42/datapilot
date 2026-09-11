@@ -552,11 +552,35 @@ a **separate implementation from the Phase-7 scikit-learn MLP baseline**
 Still no DL evaluation against a test set, no model selection, no
 CNN / LSTM / Transformer.
 
+**Phase 8.4 — Deep Learning Evaluation Foundation (done, still no
+modeling-pipeline integration / model selection):** `dl_engine` gains a
+small, explicit evaluation layer, clearly separated from architecture
+construction, training, model selection, and experiment tracking.
+`dl_engine.evaluation.evaluate_model()` takes an **already-trained**
+model and an evaluation `TensorBatch` the caller explicitly built with
+`to_tensors()` — never a partition it sources itself — switches the
+model to `eval()` mode, runs inference inside `torch.no_grad()`, and
+restores the model's original training/eval mode afterward (via
+`try`/`finally`, even on failure); model parameters are never written
+to. Metrics reuse the **exact** Phase-7 vocabulary, semantics, and
+rounding already computed by `data_engine.modeling.training` — the same
+sklearn functions, the same macro-averaging / `zero_division=0` /
+`roc_auc` gating — rather than a second metric framework.
+`dl_engine.contracts.DLEvaluationResult` is a new, additive contract
+(distinct from `EvaluationResults`, Phase 7's mirror of a *set* of
+classical candidate runs, and from `DLTrainingResult`, which computes no
+metric); a mathematically undefined metric (`roc_auc` with only one
+class present) is omitted, never a fabricated `NaN`. There is
+deliberately no `fit_and_evaluate()` convenience function —
+`evaluate_model` never calls `train_model`. Still no evaluation wired
+into the Phase-7 modeling pipeline, no model selection, no
+CNN / LSTM / Transformer.
+
 **Future-phase components:** everything else —
 figure generation, executing the Phase-6 recommendations, executing /
-deploying the Phase-7 recommended model, DL evaluation / model selection
-(Phase 8.4+), `experimentation`, `explainability`, `ai_engine`,
-`database`, `backend`, `frontend`, MLOps.
+deploying the Phase-7 recommended model, DL modeling-pipeline
+integration / model selection (Phase 8.5+), `experimentation`,
+`explainability`, `ai_engine`, `database`, `backend`, `frontend`, MLOps.
 
 ## C. Data flow
 

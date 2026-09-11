@@ -62,6 +62,18 @@ Responsible for everything that touches the dataset directly.
   (raised by `CrossEntropyLoss` for an out-of-range class index) —
   additive, backward-compatible. No CNN / LSTM / Transformer, no DL
   evaluation, no model selection.
+- **Phase 8.4 (done, still no modeling-pipeline integration / model
+  selection):** `evaluation.py` — `evaluate_model()`, evaluating an
+  **already-trained** model on explicitly supplied evaluation data
+  (`model.eval()` + `no_grad()`; original mode restored afterward;
+  parameters never written to). Reuses the exact Phase-7 metric
+  vocabulary/rounding (`rmse`/`mae`/`r2` for regression;
+  `accuracy`/`precision`/`recall`/`f1`/`roc_auc` — macro, binary-only
+  `roc_auc` — for classification). `contracts.py` gains
+  `DLEvaluationResult` (new, additive; a mathematically undefined metric
+  is omitted, never `NaN`). No `fit_and_evaluate()` — evaluation and
+  training stay two separate calls. No modeling-pipeline integration, no
+  model selection.
 
 ## `experimentation/`
 - Experiment definitions (config → pipeline).

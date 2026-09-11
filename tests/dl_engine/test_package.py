@@ -1,5 +1,6 @@
-"""Phase 8.1 / 8.2 / 8.3 — package-level sanity: imports, exports, no
-circular imports, and the PyTorch-optional boundary at the process level.
+"""Phase 8.1 / 8.2 / 8.3 / 8.4 — package-level sanity: imports, exports,
+no circular imports, and the PyTorch-optional boundary at the process
+level.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ def test_public_exports_are_intentional():
     expected = {
         "DL_ENGINE_VERSION",
         "DLDevice",
+        "DLEvaluationResult",
         "DLLoss",
         "DLOptimizer",
         "DLTrainingConfig",
@@ -31,6 +33,7 @@ def test_public_exports_are_intentional():
         "TensorBatch",
         "TorchAvailability",
         "build_mlp",
+        "evaluate_model",
         "is_torch_available",
         "resolve_device",
         "seed_everything",
@@ -42,12 +45,16 @@ def test_public_exports_are_intentional():
     # every declared export is actually resolvable as an attribute
     for name in dl_engine.__all__:
         assert hasattr(dl_engine, name)
-    # still no reuse-breaking parallel evaluation contract — DLTrainingResult
-    # is additive (see dl_engine.contracts), not a second TrainingOutcome
+    # still no reuse-breaking parallel evaluation contract — DLTrainingResult /
+    # DLEvaluationResult are additive (see dl_engine.contracts), not a second
+    # TrainingOutcome / EvaluationResults
     assert not any("outcome" in name.lower() for name in dl_engine.__all__)
     assert not any("trainingrun" in name.lower() for name in dl_engine.__all__)
-    # Phase 8.4+ (CNN / LSTM / Transformer) is not implemented — MLP is the
-    # only architecture exported
+    # Phase 8.5+ (model selection, pipeline integration) is not implemented —
+    # no ranking / selection / experiment-tracking exports
+    for forbidden in ("select", "rank", "experiment", "mlflow"):
+        assert not any(forbidden in name.lower() for name in dl_engine.__all__)
+    # no architecture beyond the MLP is implemented — MLP is the only one exported
     for arch_hint in ("cnn", "lstm", "transformer", "attention"):
         assert not any(arch_hint in name.lower() for name in dl_engine.__all__)
 

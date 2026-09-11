@@ -29,6 +29,22 @@ than inventing a fourth status enum.
 
 ``DLTrainingConfig.status`` defaults to ``not_yet_started`` — constructing
 a config is a declaration of intent, never a claim that training ran.
+
+**Phase 8.4** adds :class:`DLEvaluationResult` — the structured result of
+evaluating an *already-trained* model on explicitly supplied evaluation
+data, produced by :func:`dl_engine.evaluation.evaluate_model`. It reuses
+the Phase-7 metric vocabulary and semantics
+(:mod:`data_engine.modeling.training`'s ``rmse`` / ``mae`` / ``r2`` for
+regression and ``accuracy`` / ``precision`` / ``recall`` / ``f1`` /
+``roc_auc`` — macro-averaged, ``zero_division=0``, ``roc_auc`` only for a
+binary task with both classes present — for classification) rather than
+a competing metric framework. A **new, additive** contract: distinct from
+:class:`~data_engine.modeling.EvaluationResults` (Phase 7's status
+mirror of a *set* of classical candidate runs) and from
+:class:`DLTrainingResult` (raw training-loop execution — no metric is
+computed there at all). ``status`` reuses
+:class:`~data_engine.modeling.TrainingRunStatus` for the same reason
+``DLTrainingResult.status`` does.
 """
 
 from __future__ import annotations
@@ -198,9 +214,66 @@ class DLTrainingResult(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class DLEvaluationResult(BaseModel):
+    """The structured result of evaluating an already-trained model.
+
+    Produced by :func:`dl_engine.evaluation.evaluate_model` against
+    explicitly supplied evaluation data — never a held-out partition the
+    evaluator sources itself. Contains **only** information Phase 8.4
+    actually produces: no timestamp, UUID, experiment id, artifact path,
+    tensor, fitted model object, optimizer object, gradient, or
+    explainability information.
+
+    ``metrics`` uses the Phase-7 metric vocabulary and rounding
+    (:mod:`data_engine.modeling.training`); a mathematically undefined
+    metric (e.g. ``roc_auc`` when the evaluation data contains only one
+    class) is **omitted** from ``metrics``, matching the existing Phase-7
+    convention — never a fabricated ``NaN`` masquerading as a valid
+    score. ``primary_metric`` names — but does not compute a ranking
+    from — the metric most representative of the task; it is purely
+    descriptive and is never consumed by model selection (Phase 8.4
+    performs none).
+    """
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    status: TrainingRunStatus = Field(
+        description="completed (metrics computed), unavailable (PyTorch was not available — "
+        "nothing was attempted), or failed (evaluation raised an error, or the model/data were "
+        "incompatible)."
+    )
+    task_type: TaskType = Field(
+        description="regression, binary_classification, or multiclass_classification."
+    )
+    architecture_name: str | None = Field(
+        default=None,
+        description="Caller-supplied architecture label (e.g. 'mlp'), purely descriptive; None "
+        "if not supplied.",
+    )
+    sample_count: int = Field(
+        default=0, description="Rows evaluated; 0 when evaluation did not run."
+    )
+    metrics: dict[str, float] = Field(
+        default_factory=dict,
+        description="Task-appropriate metric values in the Phase-7 vocabulary and rounding; "
+        "empty when status is not completed. A mathematically undefined metric is omitted, "
+        "never NaN.",
+    )
+    primary_metric: str | None = Field(
+        default=None,
+        description="'rmse' for regression, 'f1' for binary/multiclass classification — "
+        "descriptive only, never used for model selection.",
+    )
+    reason: str | None = Field(
+        default=None, description="Why status is unavailable / failed; None when completed."
+    )
+    notes: list[str] = Field(default_factory=list)
+
+
 __all__ = [
     "DL_ENGINE_VERSION",
     "DLDevice",
+    "DLEvaluationResult",
     "DLLoss",
     "DLOptimizer",
     "DLTrainingConfig",

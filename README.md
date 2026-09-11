@@ -65,14 +65,31 @@ human data scientist would — and explains every step.
 >   `IndexError` (raised by `CrossEntropyLoss` for an out-of-range class
 >   index) — additive, backward-compatible. **A separate implementation
 >   from the Phase-7 scikit-learn MLP baseline** — Phase 7 untouched.
->   **Still no DL evaluation against a test set, no model selection, no
->   CNN/LSTM/Transformer.**
+>   **A separate implementation from the Phase-7 scikit-learn MLP
+>   baseline** — Phase 7 untouched.
+> - **Phase 8.4 — Deep Learning Evaluation Foundation (done)** — a small,
+>   explicit evaluation layer, clearly separated from architecture
+>   construction, training, model selection, and experiment tracking.
+>   `dl_engine.evaluation.evaluate_model()` evaluates an
+>   **already-trained** model on explicitly supplied evaluation data
+>   (`model.eval()` + `torch.no_grad()`; the model's original
+>   training/eval mode is restored afterward; parameters are never
+>   written to). Reuses the **exact** Phase-7 metric vocabulary/rounding
+>   (`rmse`/`mae`/`r2` for regression; `accuracy`/`precision`/`recall`/
+>   `f1`/`roc_auc` — macro-averaged, binary-only `roc_auc` — for
+>   classification) rather than a second metric framework.
+>   `dl_engine.contracts.DLEvaluationResult` (new, additive) reports the
+>   result; a mathematically undefined metric (e.g. `roc_auc` with only
+>   one class present) is omitted, never a fabricated `NaN`. **No
+>   `fit_and_evaluate()`** — evaluation and training stay two separate
+>   calls. **Still no modeling-pipeline integration, no model
+>   selection, no CNN/LSTM/Transformer.**
 >
-> No hyperparameter tuning, cross-validation, DL evaluation, model
-> selection, a CNN/LSTM/Transformer architecture, experiment tracking,
-> explainability, LLM usage, API, or UI exists yet. Phase 8 is **in
-> progress (8.3 neural architecture foundation)**; Phase 9
-> onward is **not started**. See [docs/roadmap.md](docs/roadmap.md).
+> No hyperparameter tuning, cross-validation, modeling-pipeline
+> integration, model selection, a CNN/LSTM/Transformer architecture,
+> experiment tracking, explainability, LLM usage, API, or UI exists yet.
+> Phase 8 is **in progress (8.4 deep learning evaluation foundation)**;
+> Phase 9 onward is **not started**. See [docs/roadmap.md](docs/roadmap.md).
 
 ---
 
@@ -128,7 +145,7 @@ Raw data → deterministic engines → structured results → AI reasoning
 | `datapilot/` | Shared core: version, config, shared data contracts |
 | `data_engine/` | Ingestion, profiling, quality, cleaning, validation & lineage, EDA, problem understanding, feature engineering, **modeling** (Phase 7) |
 | `ml_engine/` | *Empty stub.* Phase 7 was implemented in `data_engine.modeling`; this package is unused. |
-| `dl_engine/` | Deep learning (PyTorch) — *Phase 8.3 neural architecture foundation done: PyTorch optional-dependency boundary + `DLTrainingConfig` (8.1); deterministic seeding/device resolution + dataset-to-tensor boundary + training loop + `DLTrainingResult` (8.2); the first architecture — `MLPArchitectureConfig` + `build_mlp()`, a small feed-forward MLP for regression/binary/multiclass classification (8.3). No DL evaluation or model selection yet* |
+| `dl_engine/` | Deep learning (PyTorch) — *Phase 8.4 deep learning evaluation foundation done: PyTorch optional-dependency boundary + `DLTrainingConfig` (8.1); deterministic seeding/device resolution + dataset-to-tensor boundary + training loop + `DLTrainingResult` (8.2); the first architecture — `MLPArchitectureConfig` + `build_mlp()` (8.3); `evaluate_model()` + `DLEvaluationResult`, reusing Phase-7 metric semantics (8.4). No modeling-pipeline integration or model selection yet* |
 | `experimentation/` | Experiment definition, execution, comparison, history — *stub, Phase 9* |
 | `explainability/` | Feature importance, SHAP, explanation objects — *stub, Phase 10* |
 | `ai_engine/` | LLM orchestration — *interface only (`LLMProvider` ABC); Phase 11–12* |
@@ -189,8 +206,9 @@ continuous Testing/Benchmarking/Docs. See [docs/roadmap.md](docs/roadmap.md).
 | AI-driven cleaning approval / reasoning | ⛔ Not started (Phase 11+) |
 | **Phase 8.1 — Deep Learning Foundation** (`dl_engine`) | ✅ Done — `dl_engine.availability`: a deterministic, lazily-imported PyTorch probe (`torch_availability()` / `is_torch_available()`; `torch` is an optional `dl` extra, imported only when the probe is called, never at package import time — every Phase 0-7 capability works without it). `dl_engine.contracts.DLTrainingConfig`: a deterministic, JSON-serialisable configuration contract (architecture name, task type, seed, epochs, batch size, learning rate, optimizer, loss, device, deterministic mode, status, reason); `status` defaults to `not_yet_started`, and it reuses the existing `ModelFamily.NEURAL` / `TaskType` vocabularies rather than a parallel one. |
 | **Phase 8.2 — Deterministic PyTorch Training Foundation** (`dl_engine`) | ✅ Done — `dl_engine.runtime`: `seed_everything()` (Python / NumPy / PyTorch CPU+CUDA seeding, deterministic-algorithms mode) + `resolve_device()` (a requested, unavailable CUDA/MPS returns a structured failure, never a silent CPU fallback). `dl_engine.tensors.to_tensors()`: the narrow already-prepared-numeric-data → tensor boundary (regression / binary / multiclass classification; validates shape/dtype/finiteness in pure NumPy before PyTorch is required; never mutates source data or reorders rows; **not** a preprocessing engine — no imputation/scaling/encoding/feature construction). `dl_engine.training_loop.train_model()`: a minimal deterministic loop that trains an **already-constructed** `torch.nn.Module` for the configured epochs/batch-size/optimizer/loss/learning-rate, returning the additive `DLTrainingResult` contract (`status` reuses `TrainingRunStatus`; loss history, final loss, device used, reason — no evaluation metric). **`TrainingRun` / `TrainingOutcome` were not modified.** |
-| **Phase 8.3 — Neural Architecture Foundation** (`dl_engine`) | ✅ Done — the first Phase-8 architecture: a small feed-forward MLP for `regression` / `binary_classification` / `multiclass_classification`. `dl_engine.architectures.MLPArchitectureConfig`: a new, additive contract (input/output dims, hidden layer sizes, activation, dropout) — separate from `DLTrainingConfig`, which stays "how to train"; validates `output_dim` against `task_type` (regression `== 1`, binary `== 2` — two-logit `CrossEntropyLoss` convention, multiclass `>= 2`). `dl_engine.mlp.build_mlp()`: the only architecture builder — `Linear` + activation (+ optional `Dropout`) blocks ending in a raw (no softmax/sigmoid) output layer; deterministic construction when seeded first; trains through the **unchanged** `to_tensors()` → `train_model()` pipeline. One correction: `train_model`'s `except` clause now also catches `IndexError` (raised by `CrossEntropyLoss` for an out-of-range class index) — additive, backward-compatible, found while testing an invalid-class-count boundary case. **A separate implementation from the Phase-7 scikit-learn MLP baseline** (`ModelFamily.NEURAL`) — Phase 7 untouched. **No DL evaluation against a test set, no model selection, no persistence, no CNN/LSTM/Transformer exists yet** — Phase 8 remains **in progress**, not done. |
-| Deep learning — DL evaluation, model selection, architectures beyond the MLP (CNN/LSTM/Transformer/etc.) (Phase 8.4+) | ⛔ Not started |
+| **Phase 8.3 — Neural Architecture Foundation** (`dl_engine`) | ✅ Done — the first Phase-8 architecture: a small feed-forward MLP for `regression` / `binary_classification` / `multiclass_classification`. `dl_engine.architectures.MLPArchitectureConfig`: a new, additive contract (input/output dims, hidden layer sizes, activation, dropout) — separate from `DLTrainingConfig`, which stays "how to train"; validates `output_dim` against `task_type` (regression `== 1`, binary `== 2` — two-logit `CrossEntropyLoss` convention, multiclass `>= 2`). `dl_engine.mlp.build_mlp()`: the only architecture builder — `Linear` + activation (+ optional `Dropout`) blocks ending in a raw (no softmax/sigmoid) output layer; deterministic construction when seeded first; trains through the **unchanged** `to_tensors()` → `train_model()` pipeline. One correction: `train_model`'s `except` clause now also catches `IndexError` (raised by `CrossEntropyLoss` for an out-of-range class index) — additive, backward-compatible, found while testing an invalid-class-count boundary case. **A separate implementation from the Phase-7 scikit-learn MLP baseline** (`ModelFamily.NEURAL`) — Phase 7 untouched. |
+| **Phase 8.4 — Deep Learning Evaluation Foundation** (`dl_engine`) | ✅ Done — a small, explicit evaluation layer for an **already-trained** model, clearly separated from architecture construction, training, model selection, and experiment tracking. `dl_engine.evaluation.evaluate_model(model, batch, *, architecture_name=None)`: `model.eval()` + `torch.no_grad()`; the model's original training/eval mode is restored afterward (even on failure); parameters are never written to; evaluation data is never shuffled, never sourced implicitly. Reuses the **exact** Phase-7 metric vocabulary/semantics/rounding (`data_engine.modeling.training`'s sklearn functions) rather than a competing metric framework: regression → `rmse`/`mae`/`r2`; binary classification → `accuracy`/`precision`/`recall`/`f1`/`roc_auc` (from `softmax(logits)[:, 1]`, matching the MLP's existing two-logit `CrossEntropyLoss` convention); multiclass → `accuracy`/macro `precision`/macro `recall`/macro `f1` (no `roc_auc`, matching Phase 7's own gating). `dl_engine.contracts.DLEvaluationResult`: a new, additive contract (distinct from `EvaluationResults` and from `DLTrainingResult`); a mathematically undefined metric (`roc_auc` with one class present) is **omitted**, never a fabricated `NaN`, with a `notes` entry explaining why. **No `fit_and_evaluate()`** — evaluation never calls `train_model`. Verified deterministic (byte-identical repeated results) and non-mutating (parameters and `.grad` bit-identical before/after; mode restored exactly). **No modeling-pipeline integration, no model selection, no CNN/LSTM/Transformer exists yet** — Phase 8 remains **in progress**, not done. |
+| Deep learning — modeling-pipeline integration, model selection, architectures beyond the MLP (CNN/LSTM/Transformer/etc.) (Phase 8.5+) | ⛔ Not started |
 | Iterative ML experimentation, hyperparameter tuning, CV, experiment tracking (Phase 9+) | ⛔ Not started |
 | Explainability, AI Scientist / agent loop, backend API, frontend, MLOps, deployment | ⛔ Not started |
 
