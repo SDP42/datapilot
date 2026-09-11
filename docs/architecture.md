@@ -528,11 +528,35 @@ timestamp, no experiment id). `TrainingRun` / `TrainingOutcome` were not
 modified. No evaluation against a test set, no model selection, no
 persistence, no experiment tracking exists yet.
 
+**Phase 8.3 — Neural Architecture Foundation (done, still no
+evaluation / model selection):** `dl_engine` gains its first actual
+architecture. `dl_engine.architectures.MLPArchitectureConfig` is a new,
+additive Pydantic contract distinct from `DLTrainingConfig` — this one
+describes *what* to build (input/output dimensions, hidden layer sizes,
+activation, dropout), reusing `TaskType` and validating `output_dim`
+against it (regression `== 1`; binary classification `== 2`, the
+two-logit `CrossEntropyLoss` convention; multiclass `>= 2`).
+`dl_engine.mlp.build_mlp()` builds a small `Linear` + activation
+(+ optional `Dropout`) stack ending in a raw (no softmax/sigmoid) output
+layer, and plugs directly into the unchanged `to_tensors()` →
+`train_model()` pipeline — no infrastructure change was needed to train
+it, beyond one correction: `train_model`'s exception handling was
+widened from `(RuntimeError, ValueError)` to also catch `IndexError`,
+because `CrossEntropyLoss` raises `IndexError` (not `RuntimeError`) for
+an out-of-range class index; without the widened `except`, an
+invalid-class-count run crashed uncaught instead of returning a
+structured `failed` result. This is a minimal, additive,
+backward-compatible correction (strictly widens what is caught). This is
+a **separate implementation from the Phase-7 scikit-learn MLP baseline**
+(`data_engine.modeling`, `ModelFamily.NEURAL`) — Phase 7 is untouched.
+Still no DL evaluation against a test set, no model selection, no
+CNN / LSTM / Transformer.
+
 **Future-phase components:** everything else —
 figure generation, executing the Phase-6 recommendations, executing /
-deploying the Phase-7 recommended model, DL model training (Phase 8.2+),
-`experimentation`, `explainability`, `ai_engine`, `database`, `backend`,
-`frontend`, MLOps.
+deploying the Phase-7 recommended model, DL evaluation / model selection
+(Phase 8.4+), `experimentation`, `explainability`, `ai_engine`,
+`database`, `backend`, `frontend`, MLOps.
 
 ## C. Data flow
 

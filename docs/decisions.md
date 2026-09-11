@@ -4,6 +4,123 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0082 — Phase 8.3: Neural Architecture Foundation — `MLPArchitectureConfig`, `build_mlp`, and an `IndexError` correction to `train_model`
+
+- **Decision:** implement the first Phase-8 neural architecture — a
+  small feed-forward MLP supporting exactly `regression` /
+  `binary_classification` / `multiclass_classification` — and wire it
+  end-to-end through the existing, **unmodified** Phase-8.2
+  `to_tensors()` → `train_model()` pipeline:
+  1. **`dl_engine/architectures.py` — `MLPArchitectureConfig`.** A new,
+     additive Pydantic contract, deliberately separate from
+     `DLTrainingConfig` rather than folded into it: `DLTrainingConfig`
+     answers "how do I train" (optimizer, learning rate, epochs, batch
+     size, device, seed) and already existed; `MLPArchitectureConfig`
+     answers "what do I build" (input/output dimensionality, hidden
+     layer sizes, activation, dropout) and did not. Fields:
+     `architecture_name` (`Literal["mlp"]` — a fixed discriminator, not
+     a competing free-text field with `DLTrainingConfig.architecture_
+     name`, which remains descriptive metadata on a training run),
+     `task_type` (reuses `TaskType`, restricted via a field validator to
+     the three supported tasks — `CLUSTERING` / `TIME_SERIES_
+     FORECASTING` / `OTHER` are rejected), `input_features` (`gt=0`),
+     `output_dim` (`gt=0`), `hidden_layer_sizes` (`min_length=1`, every
+     entry validated `> 0`), `activation` (`relu` / `tanh` / `gelu`),
+     `dropout` (`ge=0.0, lt=1.0`; `0.0` — the default — adds no
+     `Dropout` layer at all rather than a no-op one). A model-level
+     validator (`mode="after"`) enforces the task/output_dim consistency
+     the tensor and loss conventions already require: regression
+     `output_dim == 1`, binary classification `output_dim == 2` (the
+     two-logit `CrossEntropyLoss` convention), multiclass `output_dim >=
+     2`. Every invalid shape documented in the plan (zero/negative
+     input features, zero/negative output dimension, an empty or
+     non-positive hidden-layer list, an out-of-range dropout, an
+     unsupported task type, an inconsistent task/output_dim pairing)
+     raises `pydantic.ValidationError` at construction — verified by
+     the test suite (see below).
+  2. **`dl_engine/mlp.py` — `build_mlp(config)`.** The **only**
+     architecture builder in `dl_engine`. A `torch.nn.Module` built as
+     `Linear(input_features, hidden[0])` → activation → (`Dropout` if
+     `dropout > 0`) → ... → `Linear(hidden[-1], output_dim)`, with the
+     final `Linear` carrying **no** activation — raw regression output /
+     raw classification logits, matching `MSELoss` / `L1Loss` /
+     `CrossEntropyLoss`'s expectations exactly (`CrossEntropyLoss`
+     applies its own log-softmax internally; applying one in the model
+     would double it). The class is defined **inside** `build_mlp`
+     (constructed only after confirming PyTorch is importable) so the
+     module never imports `torch` at load time, consistent with every
+     other `dl_engine` module. Contains no optimizer, no loss, no epoch
+     loop, no accuracy/F1/RMSE computation — training and evaluation
+     logic stay entirely in `dl_engine.training_loop` (which this module
+     does not modify) and outside `dl_engine` respectively. **A separate
+     implementation from the Phase-7 scikit-learn MLP baseline**
+     (`data_engine.modeling.training`'s `MLPRegressor` / `MLPClassifier`
+     under `ModelFamily.NEURAL`) — that code path is untouched by this
+     increment; the two remain distinct, non-interacting execution
+     paths.
+  3. **Integration — no infrastructure changes required, one correction
+     made.** `MLPArchitectureConfig` → `build_mlp` → `to_tensors` →
+     `train_model` → `DLTrainingResult` works with **zero** signature or
+     behavior changes to `to_tensors` / `train_model` / any Phase-8.1/8.2
+     contract, **except** one real, minimal, backward-compatible
+     correction: `train_model`'s exception handling
+     (`except (RuntimeError, ValueError)`) did not catch `IndexError`.
+     `nn.CrossEntropyLoss` raises `IndexError` — not `RuntimeError` — when
+     a target class index is out of range for the model's `output_dim`.
+     This surfaced while writing the required "invalid class count"
+     boundary test (a 4-class target trained against an `output_dim=2`
+     model): with real PyTorch installed, the exception propagated
+     uncaught out of `train_model` instead of producing the structured
+     `failed` `DLTrainingResult` every other training failure produces.
+     Fixed by widening the `except` clause to `(RuntimeError, ValueError,
+     IndexError)` — this is strictly additive (it only catches a
+     previously-uncaught exception type; no existing passing test or
+     behavior changes) and is exactly the kind of "smallest
+     backward-compatible additive correction" the plan anticipated might
+     be needed after reviewing the Phase-8.1/8.2 loss/tensor conventions.
+- **Loss / tensor-convention review (performed, as required):** binary
+  classification's tensor convention (`to_tensors`, Phase 8.2) already
+  used `int64` class-index targets shape `(n,)` paired with
+  `CrossEntropyLoss` — i.e. binary classification was already modeled as
+  2-class multiclass, not as single-logit `BCEWithLogitsLoss`. This is
+  exactly the two-logit convention `MLPArchitectureConfig` /
+  `build_mlp` now implement, so **no correction to the tensor or loss
+  conventions themselves was needed** — only the `IndexError` handling
+  gap above, which is a robustness fix, not a convention change.
+- **Verified end-to-end** (through the public API only): regression,
+  binary classification, and multiclass classification each reach
+  `TrainingRunStatus.COMPLETED` with correct output shapes (`(n, 1)` /
+  `(n, 2)` / `(n, num_classes)`); two independently-`seed_everything`-
+  seeded `build_mlp` calls with the same `MLPArchitectureConfig` produce
+  bit-identical initial parameters; two full pipeline runs (build → tensors
+  → train) with the same seed/config/data produce identical
+  `loss_history`, identical `final_loss`, and byte-identical
+  `DLTrainingResult.model_dump_json()`.
+- **Public API additions:** `dl_engine.__all__` gains `MLPActivation`,
+  `MLPArchitectureConfig`, `build_mlp` — no duplicate contract, no second
+  training API; `MLPArchitectureConfig` and `build_mlp` are consumed by
+  the **existing** `train_model`.
+- **OUT (this increment, and every later increment until explicitly
+  implemented):** DL evaluation against a test set, model selection, any
+  architecture beyond the MLP (CNN / LSTM / Transformer / attention /
+  sequence models), Phase 9 `ExperimentRecord`, MLflow, hyperparameter
+  optimization, SHAP, deployment, general Feature-Engineering execution,
+  multi-series forecasting, backtesting. Phase-7 classical modeling
+  (including its own scikit-learn MLP) and forecasting behavior are
+  unchanged — `data_engine/modeling/*` has zero diffs in this increment.
+- **Phase state:** Phases 0-7 done (+ stabilization + forecasting
+  increments). Phase 8 in progress (8.1 + 8.2 + 8.3 done); 8.4+ and Phase
+  9 not started. `pytest` full suite 1723 passed / 47 skipped by default
+  (PyTorch not installed); separately verified with PyTorch installed:
+  1769 passed / 1 skipped (all 143 `dl_engine` tests passing, 46 new this
+  increment, including the `IndexError` regression test). `ruff` /
+  `ruff format` / `mypy` (`data_engine`, `datapilot`, `dl_engine`) all
+  green; the same 5 pre-existing `mypy` errors in
+  `tests/data_engine/{conftest.py,test_validation_lineage.py}` remain,
+  confirmed unrelated to this increment.
+
+---
+
 ## 0081 — Phase 8.2: Deterministic PyTorch Training Foundation — runtime, tensor boundary, training loop, `DLTrainingResult`
 
 - **Decision:** implement the training *infrastructure* only — the

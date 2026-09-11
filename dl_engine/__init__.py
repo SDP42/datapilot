@@ -11,8 +11,7 @@
   deterministic, JSON-serialisable configuration contract a training run
   consumes.
 
-**Phase 8.2 (this increment)** adds the deterministic training
-*foundation* — still no model architecture is defined here:
+**Phase 8.2** added the deterministic training *foundation*:
 
 * :mod:`dl_engine.runtime` — :func:`seed_everything` (Python / NumPy /
   PyTorch seeding, CPU + CUDA-if-present, deterministic-algorithms mode)
@@ -27,9 +26,30 @@
 * :mod:`dl_engine.training_loop` — :func:`train_model`, the minimal
   training loop for an **already-constructed** ``torch.nn.Module``. No
   evaluation, no model selection, no persistence, no experiment tracking.
-* :mod:`dl_engine.contracts` also gains :class:`DLTrainingResult` — the
+* :mod:`dl_engine.contracts` also gained :class:`DLTrainingResult` — the
   structured, JSON-serialisable, deterministic result of one
   :func:`~dl_engine.training_loop.train_model` call.
+
+**Phase 8.3 (this increment)** adds the first Phase-8 neural
+*architecture* — still no evaluation, no model selection:
+
+* :mod:`dl_engine.architectures` — :class:`MLPArchitectureConfig`, the
+  deterministic, JSON-serialisable configuration for a small feed-forward
+  MLP (input / output dimensions, hidden layer sizes, activation,
+  dropout). A separate, additive contract from ``DLTrainingConfig``: this
+  one says *what* to build, ``DLTrainingConfig`` says *how* to train it.
+* :mod:`dl_engine.mlp` — :func:`build_mlp`, the **only** architecture
+  builder in ``dl_engine`` so far: a fixed ``Linear`` + activation
+  (+ optional ``Dropout``) stack, ending in a raw (no softmax/sigmoid)
+  output layer sized for regression (``(n, 1)``), binary classification
+  (``(n, 2)`` logits), or multiclass classification (``(n, num_classes)``
+  logits) — matching the target conventions ``to_tensors`` already
+  produces and the losses ``train_model`` already supports. A model built
+  here plugs directly into the existing ``to_tensors`` → ``train_model``
+  pipeline with **no infrastructure changes**. This is a separate
+  implementation from the Phase-7 scikit-learn MLP baseline
+  (``data_engine.modeling``, ``ModelFamily.NEURAL``) — Phase 7 is
+  untouched.
 
 ``dl_engine`` integrates with the existing Phase-7
 :class:`~data_engine.modeling.ModelFamily` (``NEURAL``) and Phase-5
@@ -40,22 +60,32 @@ DL run into the existing modeling pipeline is expected to populate the
 :class:`~data_engine.modeling.TrainingOutcome` contracts, not a second
 modeling pipeline or evaluation contract.
 
-    from dl_engine import is_torch_available, DLTrainingConfig, to_tensors, train_model
+    from dl_engine import (
+        is_torch_available, DLTrainingConfig, MLPArchitectureConfig,
+        build_mlp, to_tensors, train_model,
+    )
 
     if is_torch_available():
+        arch = MLPArchitectureConfig(
+            task_type=TaskType.REGRESSION, input_features=4, output_dim=1,
+            hidden_layer_sizes=[16],
+        )
+        model = build_mlp(arch)
         config = DLTrainingConfig(architecture_name="mlp", task_type=TaskType.REGRESSION)
         batch = to_tensors(X, y, TaskType.REGRESSION)
-        result = train_model(my_module, batch, config)
+        result = train_model(model, batch, config)
 
-Out of scope for Phase 8.2 (and every later increment in this package
-until explicitly implemented): any DL architecture (MLP / CNN / LSTM /
-etc.), DL evaluation against a test set, model selection, experiment
-tracking / ``ExperimentRecord`` (Phase 9), hyperparameter optimization,
-SHAP, deployment, and general feature-engineering execution.
+Out of scope for Phase 8.3 (and every later increment in this package
+until explicitly implemented): DL evaluation against a test set, model
+selection, any architecture beyond the MLP (CNN / LSTM / Transformer /
+attention / sequence models), experiment tracking / ``ExperimentRecord``
+(Phase 9), hyperparameter optimization, SHAP, deployment, and general
+feature-engineering execution.
 """
 
 from __future__ import annotations
 
+from .architectures import MLPActivation, MLPArchitectureConfig
 from .availability import TorchAvailability, is_torch_available, torch_availability
 from .contracts import (
     DL_ENGINE_VERSION,
@@ -66,6 +96,7 @@ from .contracts import (
     DLTrainingResult,
     DLTrainingStatus,
 )
+from .mlp import build_mlp
 from .runtime import DeviceResolution, resolve_device, seed_everything
 from .tensors import TensorBatch, to_tensors
 from .training_loop import train_model
@@ -79,8 +110,11 @@ __all__ = [
     "DLTrainingResult",
     "DLTrainingStatus",
     "DeviceResolution",
+    "MLPActivation",
+    "MLPArchitectureConfig",
     "TensorBatch",
     "TorchAvailability",
+    "build_mlp",
     "is_torch_available",
     "resolve_device",
     "seed_everything",

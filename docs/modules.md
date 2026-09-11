@@ -46,6 +46,22 @@ Responsible for everything that touches the dataset directly.
   execution only, no evaluation, no model selection, no persistence.
   `TrainingRun` / `TrainingOutcome` were not modified. No model
   architecture exists yet.
+- **Phase 8.3 (done, still no evaluation / model selection):**
+  `architectures.py` — `MLPArchitectureConfig`, a new additive contract
+  (separate from `DLTrainingConfig`) describing an MLP's shape (input /
+  output dims, hidden layers, activation, dropout); validates
+  `output_dim` against `task_type` (regression `== 1`, binary `== 2` —
+  the two-logit `CrossEntropyLoss` convention, multiclass `>= 2`).
+  `mlp.py` — `build_mlp()`, the first (and only) Phase-8 architecture
+  builder: a small `Linear` + activation stack with a raw (no
+  softmax/sigmoid) output layer, plugging directly into the unchanged
+  `to_tensors()` → `train_model()` pipeline. A separate implementation
+  from the Phase-7 scikit-learn MLP baseline (`data_engine.modeling`,
+  `ModelFamily.NEURAL`) — Phase 7 untouched. One correction to
+  `training_loop.py`: its `except` clause now also catches `IndexError`
+  (raised by `CrossEntropyLoss` for an out-of-range class index) —
+  additive, backward-compatible. No CNN / LSTM / Transformer, no DL
+  evaluation, no model selection.
 
 ## `experimentation/`
 - Experiment definitions (config → pipeline).

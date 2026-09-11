@@ -104,9 +104,12 @@ def train_model(
     unavailable, a task-type mismatch) — those are reported as a
     structured ``unavailable`` / ``failed`` result instead. A training
     failure partway through (e.g. the model's output shape is
-    incompatible with ``batch.targets`` for the configured loss) is
-    caught and reported as ``failed`` with the underlying error message
-    as ``reason`` — never swallowed, never generalised away.
+    incompatible with ``batch.targets`` for the configured loss, or —
+    found while testing the Phase-8.3 MLP against a target with more
+    classes than the model's output dimension — ``CrossEntropyLoss``
+    raising ``IndexError`` for an out-of-range class index) is caught and
+    reported as ``failed`` with the underlying error message as
+    ``reason`` — never swallowed, never generalised away.
     """
     if config.task_type != batch.task_type:
         return _incomplete_result(
@@ -177,7 +180,7 @@ def train_model(
                 epoch_loss_total += float(loss.item()) * (end - start)
 
             loss_history.append(epoch_loss_total / n_rows)
-    except (RuntimeError, ValueError) as exc:
+    except (RuntimeError, ValueError, IndexError) as exc:
         return _incomplete_result(
             TrainingRunStatus.FAILED,
             config,

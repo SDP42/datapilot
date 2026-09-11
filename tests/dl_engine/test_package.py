@@ -1,5 +1,5 @@
-"""Phase 8.1 / 8.2 — package-level sanity: imports, exports, no circular
-imports, and the PyTorch-optional boundary at the process level.
+"""Phase 8.1 / 8.2 / 8.3 — package-level sanity: imports, exports, no
+circular imports, and the PyTorch-optional boundary at the process level.
 """
 
 from __future__ import annotations
@@ -26,8 +26,11 @@ def test_public_exports_are_intentional():
         "DLTrainingResult",
         "DLTrainingStatus",
         "DeviceResolution",
+        "MLPActivation",
+        "MLPArchitectureConfig",
         "TensorBatch",
         "TorchAvailability",
+        "build_mlp",
         "is_torch_available",
         "resolve_device",
         "seed_everything",
@@ -43,8 +46,9 @@ def test_public_exports_are_intentional():
     # is additive (see dl_engine.contracts), not a second TrainingOutcome
     assert not any("outcome" in name.lower() for name in dl_engine.__all__)
     assert not any("trainingrun" in name.lower() for name in dl_engine.__all__)
-    # Phase 8.3+ (architectures) is not implemented — no MLP / CNN / LSTM export
-    for arch_hint in ("mlp", "cnn", "lstm", "transformer"):
+    # Phase 8.4+ (CNN / LSTM / Transformer) is not implemented — MLP is the
+    # only architecture exported
+    for arch_hint in ("cnn", "lstm", "transformer", "attention"):
         assert not any(arch_hint in name.lower() for name in dl_engine.__all__)
 
 
