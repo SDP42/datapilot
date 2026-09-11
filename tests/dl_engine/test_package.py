@@ -1,6 +1,6 @@
-"""Phase 8.1 / 8.2 / 8.3 / 8.4 — package-level sanity: imports, exports,
-no circular imports, and the PyTorch-optional boundary at the process
-level.
+"""Phase 8.1 / 8.2 / 8.3 / 8.4 / 8.5 — package-level sanity: imports,
+exports, no circular imports, and the PyTorch-optional boundary at the
+process level.
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ def test_public_exports_are_intentional():
         "DLDevice",
         "DLEvaluationResult",
         "DLLoss",
+        "DLModelingResult",
         "DLOptimizer",
         "DLTrainingConfig",
         "DLTrainingResult",
@@ -36,6 +37,7 @@ def test_public_exports_are_intentional():
         "evaluate_model",
         "is_torch_available",
         "resolve_device",
+        "run_mlp_modeling",
         "seed_everything",
         "to_tensors",
         "torch_availability",
@@ -45,13 +47,14 @@ def test_public_exports_are_intentional():
     # every declared export is actually resolvable as an attribute
     for name in dl_engine.__all__:
         assert hasattr(dl_engine, name)
-    # still no reuse-breaking parallel evaluation contract — DLTrainingResult /
-    # DLEvaluationResult are additive (see dl_engine.contracts), not a second
-    # TrainingOutcome / EvaluationResults
+    # still no reuse-breaking parallel evaluation/outcome contract —
+    # DLTrainingResult / DLEvaluationResult / DLModelingResult are additive
+    # (see dl_engine.contracts), not a second TrainingOutcome / EvaluationResults
     assert not any("outcome" in name.lower() for name in dl_engine.__all__)
     assert not any("trainingrun" in name.lower() for name in dl_engine.__all__)
-    # Phase 8.5+ (model selection, pipeline integration) is not implemented —
-    # no ranking / selection / experiment-tracking exports
+    # Phase 8.6+ (model selection, classical-vs-DL comparison, experiment
+    # tracking) is not implemented — no ranking / selection / experiment
+    # exports beyond the single run_mlp_modeling entry point
     for forbidden in ("select", "rank", "experiment", "mlflow"):
         assert not any(forbidden in name.lower() for name in dl_engine.__all__)
     # no architecture beyond the MLP is implemented — MLP is the only one exported

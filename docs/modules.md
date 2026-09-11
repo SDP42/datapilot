@@ -74,6 +74,18 @@ Responsible for everything that touches the dataset directly.
   is omitted, never `NaN`). No `fit_and_evaluate()` — evaluation and
   training stay two separate calls. No modeling-pipeline integration, no
   model selection.
+- **Phase 8.5 (done, still no model selection / classical-vs-DL
+  comparison):** `execution.py` — `run_mlp_modeling()`, chaining
+  `build_mlp` → `to_tensors` (training data) → `train_model` →
+  `to_tensors` (evaluation data) → `evaluate_model` into one
+  deterministic single-model run. Training/evaluation data are always
+  two caller-supplied separate arrays — no splitting logic lives in
+  `dl_engine`. `contracts.py` gains `DLModelingResult` (new, additive;
+  nests `DLTrainingResult`/`DLEvaluationResult` rather than duplicating
+  their fields). Deliberately **not** wired into
+  `data_engine.modeling.run_modeling_pipeline` — a separate, opt-in
+  Phase-8 entry point; `data_engine/modeling/*` has zero diffs from this
+  increment. No model selection, no classical-vs-DL comparison.
 
 ## `experimentation/`
 - Experiment definitions (config → pipeline).

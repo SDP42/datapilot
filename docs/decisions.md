@@ -4,6 +4,135 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0084 — Phase 8.5: Deep Learning Modeling Pipeline Integration — `DLModelingResult`, `run_mlp_modeling`, and the deliberate choice not to wire into `run_modeling_pipeline`
+
+- **Decision:** connect the existing Phase-8 components
+  (`MLPArchitectureConfig` → `build_mlp` → `to_tensors` → `train_model` →
+  `evaluate_model`) into one coherent, single-model, deterministic
+  workflow, and make it available as its **own** opt-in entry point
+  rather than as a change to the Phase-7 modeling pipeline:
+  1. **`dl_engine/contracts.py` — `DLModelingResult`.** A new, small,
+     additive aggregate contract. Every existing Phase-7/Phase-8
+     contract was inspected first (`ModelingRequest`, `ModelingSpec`,
+     `ModelFamily`, `TrainingRun`, `TrainingOutcome`,
+     `EvaluationResults`, `TrainingRunStatus`, `DLTrainingConfig`,
+     `DLTrainingResult`, `MLPArchitectureConfig`, `DLEvaluationResult`)
+     to determine the smallest contract genuinely needed. Rather than
+     flattening training/evaluation fields into one wide contract (which
+     would duplicate `DLTrainingResult` / `DLEvaluationResult`'s
+     fields), `DLModelingResult` **nests** both existing contracts
+     unchanged: `status` (reuses `TrainingRunStatus`, resolved from the
+     two nested statuses — `completed` only when both completed),
+     `task_type`, `family` (`= NEURAL`, reused, not a parallel
+     vocabulary), `architecture_name`, `training: DLTrainingResult |
+     None`, `evaluation: DLEvaluationResult | None` (either `None` when
+     that stage never ran), `reason`, `notes`. This mirrors
+     `ModelingSpec`'s own established pattern of nesting `training:
+     TrainingOutcome` / `evaluation: EvaluationResults` as separate
+     sections rather than merging their fields — the same "reference,
+     don't flatten" precedent already in this codebase. No model
+     object, tensor, optimizer, gradient, timestamp, UUID, or
+     MLflow/experiment identifier — experiment identity is explicitly
+     Phase 9's concern.
+  2. **`dl_engine/execution.py` — `run_mlp_modeling(X_train, y_train,
+     X_eval, y_eval, architecture, training_config)`.** A single,
+     explicit composition function — seed (`training_config.seed`; no
+     separate seed parameter, since `MLPArchitectureConfig` was
+     deliberately designed in Phase 8.3 to carry no seed of its own) →
+     `build_mlp` → `to_tensors` (training data) → `train_model` →
+     `to_tensors` (evaluation data) → `evaluate_model` → one
+     `DLModelingResult`. It duplicates none of the underlying
+     functions' logic — every step is a direct call to the existing
+     Phase-8.2/8.3/8.4 function. Evaluation is **never** attempted after
+     a training stage that did not complete (verified by a dedicated
+     test: an intentionally incompatible `input_features` config
+     produces a `training.status = failed` result with
+     `evaluation = None`, not an attempted-and-also-failed evaluation).
+  3. **Split-utility inspection (required by the plan, performed).**
+     `data_engine.modeling.recommend_data_split` (Phase 7.2) was
+     inspected first — it only *recommends* a strategy and fractions
+     (`DataSplitPlan`); it never executes a split. The actual
+     split-execution logic, `training._split_indices`, was inspected
+     next — it is **private** to `data_engine.modeling.training`,
+     tightly coupled to `DataSplitPlan` and stratification, and not
+     exported from `data_engine.modeling.__init__`. Reusing it directly
+     would mean reaching across that module's own privacy boundary (the
+     same situation Phase 8.4 hit with the private `_regression_metrics`
+     / `_classification_metrics`, resolved there by reproducing the
+     computation rather than importing privately); duplicating its
+     splitting *strategy* here would violate the plan's own explicit
+     instruction not to invent a new splitting strategy when Phase 7
+     already has the semantics. Per the plan's own fallback clause — "a
+     split supplied by the caller **or** an explicit deterministic split
+     utility if the existing architecture already has a *suitable* one"
+     — since no suitable **public** one exists, `run_mlp_modeling`
+     requires the caller to supply two already-separate arrays. This
+     exactly mirrors `evaluate_model`'s own Phase-8.4 requirement that
+     evaluation data is always explicit and never sourced implicitly, so
+     the two functions now share one consistent data-provenance
+     convention rather than two different ones.
+  4. **Integration point (Task 3) — deliberately not added to
+     `data_engine.modeling`.** The plan explicitly cautioned against
+     auto-running PyTorch whenever `ModelFamily.NEURAL` appears in the
+     Phase-7.3 candidate list, and against modifying
+     `run_modeling_pipeline()` without a compelling reason; neither
+     compelling reason existed here. `run_mlp_modeling` **is** the
+     integration surface — a coherent, modeling-facing Phase-8 API a
+     caller reaches by explicitly importing `dl_engine`, not something
+     the Phase-7 API triggers on its own. `data_engine/modeling/*` has
+     **zero diffs** in this increment; the Phase-7.3 `ModelFamily.NEURAL`
+     candidate is still exactly the scikit-learn `MLPRegressor` /
+     `MLPClassifier` baseline it always was. The import direction is
+     unchanged (`dl_engine` → `data_engine.modeling`, for the same
+     stable `TaskType` / `ModelFamily` / `TrainingRunStatus` contracts
+     every other Phase-8 module already imports); `data_engine.modeling`
+     still has no dependency on `dl_engine` or PyTorch, so it still never
+     requires PyTorch to import — verified by the same process-level
+     subprocess tests already established in Phase 8.1, extended to
+     cover `execution.py`.
+- **Failure handling:** every environment-level or data condition
+  (PyTorch missing, requested device unavailable, invalid/incompatible
+  data, a training or evaluation failure) is reported as a structured
+  `DLModelingResult` naming the stage that stopped the run, inherited
+  directly from `train_model` / `evaluate_model`'s own established
+  guarantees (no silent retry, no silent GPU/MPS → CPU fallback).
+  `run_mlp_modeling` adds exactly one check of its own, upstream of
+  every torch-dependent step: an `architecture.task_type` /
+  `training_config.task_type` mismatch is caught immediately (no tensor
+  is ever built) and reported as `failed`.
+- **Verified deterministic:** two full `run_mlp_modeling` calls with
+  identical data / architecture / training config produce byte-identical
+  `training.loss_history`, `training.final_loss`, `evaluation.metrics`,
+  and `model_dump_json()` — for both regression and multiclass
+  classification. **Verified train/evaluation separation directly** (not
+  merely asserted): a monkeypatch on the exact name `run_mlp_modeling`
+  calls (`dl_engine.execution.evaluate_model` — patching
+  `dl_engine.evaluation.evaluate_model` instead does *not* affect an
+  already-bound `from .evaluation import evaluate_model` reference, a
+  mistake caught and fixed while writing this test) captures the actual
+  tensor contents passed to `evaluate_model` and confirms they are
+  bit-identical to the caller-supplied `X_eval`, never `X_train`.
+- **OUT (this increment, and every later increment until explicitly
+  implemented):** automatic model selection, DL candidate ranking,
+  comparison between classical and DL models, Phase 9
+  `ExperimentRecord`, MLflow, hyperparameter optimization, any
+  architecture beyond the MLP, cross-validation, backtesting,
+  forecasting-specific DL behavior. Phase-7 model selection / estimator
+  behavior, Phase-7 metric semantics, and forecasting behavior are
+  unchanged — `data_engine/modeling/*` has zero diffs in this increment.
+- **Phase state:** Phases 0-7 done (+ stabilization + forecasting
+  increments). Phase 8 in progress (8.1 + 8.2 + 8.3 + 8.4 + 8.5 done);
+  8.6+ and Phase 9 not started. `pytest` full suite 1747 passed / 74
+  skipped by default (PyTorch not installed); separately verified with
+  PyTorch installed: 1820 passed / 1 skipped (all 194 `dl_engine` tests
+  passing, 21 new this increment). `ruff` / `ruff format` / `mypy`
+  (`data_engine`, `datapilot`, `dl_engine`) all green; the same 5
+  pre-existing `mypy` errors in
+  `tests/data_engine/{conftest.py,test_validation_lineage.py}` remain,
+  confirmed unrelated to this increment.
+
+---
+
 ## 0083 — Phase 8.4: Deep Learning Evaluation Foundation — `DLEvaluationResult`, `evaluate_model`, exact Phase-7 metric reuse
 
 - **Decision:** implement a small, explicit evaluation layer for an

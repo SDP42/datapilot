@@ -45,6 +45,20 @@ mirror of a *set* of classical candidate runs) and from
 computed there at all). ``status`` reuses
 :class:`~data_engine.modeling.TrainingRunStatus` for the same reason
 ``DLTrainingResult.status`` does.
+
+**Phase 8.5** adds :class:`DLModelingResult` — the small aggregate result
+of one complete single-model DL run
+(:func:`dl_engine.execution.run_mlp_modeling`: build → train →
+evaluate). It **nests** the existing :class:`DLTrainingResult` /
+:class:`DLEvaluationResult` rather than duplicating any of their fields —
+the same "reference, don't flatten" pattern
+:class:`~data_engine.modeling.ModelingSpec` already uses for its own
+``training`` / ``evaluation`` sections. Its own ``status`` is resolved
+from the two nested statuses (``completed`` only when both training and
+evaluation completed), mirroring
+:func:`data_engine.modeling.pipeline._resolve_overall_status`'s
+stage-naming-the-failure convention without importing that private
+function across the package boundary.
 """
 
 from __future__ import annotations
@@ -270,11 +284,63 @@ class DLEvaluationResult(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class DLModelingResult(BaseModel):
+    """The aggregate result of one complete single-model DL run.
+
+    Produced by :func:`dl_engine.execution.run_mlp_modeling`: build the
+    configured MLP, train it on the supplied training data, evaluate it
+    on the supplied (**separate**) evaluation data. Contains no runtime
+    object (no fitted model, tensor, optimizer, or gradient) and no
+    timestamp, UUID, or MLflow / experiment identifier — experiment
+    identity is explicitly Phase 9's concern, out of scope here.
+
+    ``training`` / ``evaluation`` **nest** the existing
+    :class:`DLTrainingResult` / :class:`DLEvaluationResult` rather than
+    duplicating their fields; either is ``None`` when that stage never
+    ran (e.g. evaluation never runs after a failed training stage).
+    ``status`` is resolved from the two nested statuses — ``completed``
+    only when both training and evaluation completed; otherwise
+    ``unavailable`` / ``failed`` with ``reason`` naming which stage
+    stopped the run.
+    """
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    status: TrainingRunStatus = Field(
+        description="completed only when both training and evaluation completed; otherwise "
+        "mirrors whichever stage first reported unavailable / failed."
+    )
+    task_type: TaskType = Field(
+        description="regression, binary_classification, or multiclass_classification."
+    )
+    family: ModelFamily = Field(
+        default=ModelFamily.NEURAL,
+        description="Always NEURAL — reuses the existing Phase-7 ModelFamily vocabulary.",
+    )
+    architecture_name: str | None = Field(
+        default=None, description="Caller-supplied architecture label (e.g. 'mlp'); descriptive."
+    )
+    training: DLTrainingResult | None = Field(
+        default=None, description="The training-stage result; None if training never ran."
+    )
+    evaluation: DLEvaluationResult | None = Field(
+        default=None,
+        description="The evaluation-stage result; None if evaluation never ran (e.g. training "
+        "did not complete).",
+    )
+    reason: str | None = Field(
+        default=None,
+        description="Which stage stopped the run and why; None when status is completed.",
+    )
+    notes: list[str] = Field(default_factory=list)
+
+
 __all__ = [
     "DL_ENGINE_VERSION",
     "DLDevice",
     "DLEvaluationResult",
     "DLLoss",
+    "DLModelingResult",
     "DLOptimizer",
     "DLTrainingConfig",
     "DLTrainingResult",

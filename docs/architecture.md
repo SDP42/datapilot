@@ -576,10 +576,39 @@ deliberately no `fit_and_evaluate()` convenience function —
 into the Phase-7 modeling pipeline, no model selection, no
 CNN / LSTM / Transformer.
 
+**Phase 8.5 — Deep Learning Modeling Pipeline Integration (done, still
+no model selection / classical-vs-DL comparison):** `dl_engine` connects
+its own components into one coherent, single-model workflow.
+`dl_engine.execution.run_mlp_modeling()` is pure composition — seed →
+`build_mlp` → `to_tensors` (training data) → `train_model` →
+`to_tensors` (evaluation data) → `evaluate_model` → one
+`DLModelingResult` — duplicating none of the underlying functions'
+logic. Training and evaluation data are always two separate arrays the
+caller supplies explicitly (this function never splits data itself,
+mirroring `evaluate_model`'s own requirement that evaluation data is
+never sourced implicitly); evaluation is never attempted after a
+training stage that did not complete.
+`dl_engine.contracts.DLModelingResult` is a new, small, additive
+aggregate contract that **nests** the existing `DLTrainingResult` /
+`DLEvaluationResult` rather than duplicating their fields — the same
+"reference, don't flatten" pattern `ModelingSpec` already uses for its
+own `training` / `evaluation` sections. Deliberately **not** wired into
+`data_engine.modeling`: `run_modeling_pipeline()` and Phase-7.3's
+existing `ModelFamily.NEURAL` candidate (still the scikit-learn
+baseline) are untouched — `data_engine/modeling/*` has zero diffs. The
+integration surface *is* `run_mlp_modeling` itself: a separate, opt-in
+entry point a caller reaches only by explicitly importing `dl_engine`,
+never something the Phase-7 API triggers automatically. `dl_engine`
+continues to import only stable Phase-7 contracts (`TaskType`,
+`ModelFamily`, `TrainingRunStatus`); the dependency direction remains
+one-way (`dl_engine` → `data_engine.modeling`), so `data_engine.modeling`
+still never requires PyTorch to import. Still no model selection, no
+classical-vs-DL comparison, no CNN / LSTM / Transformer.
+
 **Future-phase components:** everything else —
 figure generation, executing the Phase-6 recommendations, executing /
-deploying the Phase-7 recommended model, DL modeling-pipeline
-integration / model selection (Phase 8.5+), `experimentation`,
+deploying the Phase-7 recommended model, DL model selection /
+classical-vs-DL comparison (Phase 8.6+), `experimentation`,
 `explainability`, `ai_engine`, `database`, `backend`, `frontend`, MLOps.
 
 ## C. Data flow
