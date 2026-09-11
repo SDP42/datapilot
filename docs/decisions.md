@@ -4,6 +4,78 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0080 — Phase 8.1: Deep Learning Foundation — `dl_engine` package, PyTorch optional-dependency boundary, `DLTrainingConfig` contract
+
+- **Decision:** begin Phase 8 (Deep Learning) with a foundation-only
+  increment (8.1) — no model is trained, no architecture is implemented,
+  no training loop exists. Establishes exactly three things:
+  1. **The `dl_engine` package**, replacing the docstring-only stub with
+     real modules: `availability.py` (the PyTorch optional-dependency
+     boundary) and `contracts.py` (the deterministic DL training
+     configuration contract), re-exported from `dl_engine/__init__.py`.
+  2. **A PyTorch optional-dependency boundary.** `torch` is added as the
+     `dl` optional-dependency extra in `pyproject.toml`
+     (`pip install 'datapilot[dl]'`), never as a core dependency —
+     matching the project's existing pattern of adding a stack only in
+     the phase that first needs it (scikit-learn in 7.4). `torch` is
+     imported **only** inside `dl_engine.availability.torch_availability()`
+     (with an injectable `_import` seam for tests), and only when that
+     function is called — never at `dl_engine` package-import time, and
+     never anywhere in Phase 0-7. Verified by subprocess-level tests that
+     `import data_engine.modeling` and `import dl_engine` each leave
+     `torch` absent from `sys.modules`.
+  3. **`DLTrainingConfig`** (`dl_engine/contracts.py`) — the deterministic,
+     JSON-serialisable configuration a future training-execution
+     increment will consume: `architecture_name`, `task_type` (reuses
+     Phase-5 `TaskType`), `family` (reuses Phase-7 `ModelFamily.NEURAL`
+     rather than a parallel vocabulary), `seed`, `epochs`, `batch_size`,
+     `learning_rate`, `optimizer`, `loss`, `device`, `deterministic_mode`,
+     `status`, `reason`. `status: DLTrainingStatus` defaults to
+     `not_yet_started` — constructing a config is a declaration of intent,
+     never a claim that training ran; `completed` / `failed` are declared
+     in the enum ahead of use (mirroring the Phase-7 `TrainingRunStatus`
+     pattern) so a future training increment is additive.
+- **Reason:** Phase 0–7 (classical, deterministic, scikit-learn-based
+  modeling) is complete; the roadmap's Phase 8 is next, and it explicitly
+  scopes to "add DL where justified" via `dl_engine`. Starting with a
+  foundation increment — package structure, dependency boundary, and
+  config contract, before any training code — follows the project's
+  established practice of separating contract-definition increments from
+  execution increments (mirrored by Phase 7.1 vs. 7.2–7.5, and by the
+  Forecasting Foundation vs. Forecasting Execution increments).
+- **Integrates with Phase 7, does not duplicate it:** `dl_engine` imports
+  and reuses `ModelFamily` / `TaskType` rather than inventing a parallel
+  classification. A future increment that actually trains a network is
+  expected to populate the **existing** `TrainingRun` / `TrainingOutcome`
+  contracts (`family=NEURAL`) — not a second modeling pipeline or a
+  second evaluation contract. `data_engine.modeling` was not modified;
+  Phase 7 / forecasting behavior is unchanged.
+- **No circular imports:** `dl_engine` depends on `data_engine.modeling`
+  and `data_engine.problem_understanding` (for `ModelFamily` / `TaskType`);
+  neither of those depends on `dl_engine`. Verified by subprocess tests
+  importing in both orders.
+- **Determinism / safety:** every public contract (`TorchAvailability`,
+  `DLTrainingConfig`) is JSON-primitive / enum only — no tensor, NumPy
+  array, fitted module, timestamp, UUID, or filesystem-specific runtime
+  state. Repeated serialisation is byte-identical. The PyTorch-unavailable
+  path is deterministic and explicit (a fixed reason string), not a
+  silent `None` or a crash.
+- **OUT (this increment, and every later increment until explicitly
+  implemented):** model training, an MLP or any architecture, training
+  loops, Phase 9 `ExperimentRecord` / MLflow, hyperparameter optimization,
+  SHAP / explainability, deployment / API / frontend, general
+  Feature-Engineering execution, multi-series forecasting, backtesting,
+  autonomous experimentation. Phase 8 status is recorded as **in progress
+  — 8.1 foundation**, not done.
+- **Phase state:** Phases 0–7 done (+ stabilization + Forecasting
+  Foundation + Forecasting Execution + Forecasting Execution part 2 &
+  Recursive Multi-Step Forecasting). Phase 8 in progress (8.1 foundation
+  done); 8.2+ and Phase 9 not started. `pytest` (1659 passed, 2 skipped)
+  / `ruff` / `ruff format` / `mypy` (`data_engine`, `datapilot`,
+  `dl_engine`) all green.
+
+---
+
 ## 0079 — Forecasting Execution part 2 (calendar/seasonal execution) + Recursive Multi-Step Forecasting
 
 - **Decision:** implement the two remaining forecasting-execution items

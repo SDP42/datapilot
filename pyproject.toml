@@ -15,8 +15,10 @@ keywords = ["data-science", "automl", "mlops", "llm", "autonomous-agent"]
 # Phase 0 keeps runtime dependencies deliberately minimal.
 # Engine-specific stacks are added in the phase that first needs them —
 # see docs/roadmap.md. scikit-learn was added in Phase 7.4 (the first
-# phase that fits estimators). xgboost / lightgbm / torch / shap / mlflow
-# / fastapi / sqlalchemy / duckdb ... remain deliberately unadded.
+# phase that fits estimators). xgboost / lightgbm / shap / mlflow /
+# fastapi / sqlalchemy / duckdb ... remain deliberately unadded. torch is
+# Phase 8's optional 'dl' extra (below) — every Phase 0-7 capability,
+# including the classical data_engine.modeling path, works without it.
 dependencies = [
     "pandas>=2.2",
     "numpy>=1.26",
@@ -45,6 +47,13 @@ dev = [
 # export_visualization(). HTML export needs nothing extra.
 export = [
     "kaleido",
+]
+# Phase 8 — deep learning (dl_engine). Optional: dl_engine.availability
+# detects its absence deterministically, and every Phase 0-7 capability
+# (including the classical scikit-learn modeling path) is fully usable
+# without installing it.
+dl = [
+    "torch>=2.2",
 ]
 
 [project.urls]

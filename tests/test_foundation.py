@@ -91,6 +91,8 @@ ENGINE_PACKAGES = [
     "data_engine.modeling.pipeline",
     "database",
     "dl_engine",
+    "dl_engine.availability",
+    "dl_engine.contracts",
     "experimentation",
     "explainability",
     "ml_engine",

@@ -28,6 +28,13 @@ Responsible for everything that touches the dataset directly.
 ## `dl_engine/` — deep learning
 - PyTorch model definitions, training loops, evaluation.
 - Used only where justified by the data/task.
+- **Phase 8.1 (done, foundation-only):** `availability.py` — a
+  deterministic, lazily-imported PyTorch probe (PyTorch is an optional
+  `dl` extra; every Phase 0-7 capability works without it).
+  `contracts.py` — `DLTrainingConfig`, a deterministic configuration
+  contract for a future training-execution increment; reuses Phase 7's
+  `ModelFamily` / Phase 5's `TaskType` rather than a parallel vocabulary.
+  No model is trained, no architecture exists yet.
 
 ## `experimentation/`
 - Experiment definitions (config → pipeline).

@@ -487,10 +487,27 @@ changing the one-step `rmse` selection metric. General
 Feature-Engineering execution (Phase-6.3 transformations outside
 forecasting), multi-series, and backtesting remain future work.
 
+**Phase 8.1 — Deep Learning Foundation (done, foundation-only):**
+`dl_engine` now exists as a real package rather than a docstring stub, but
+**trains nothing**. `dl_engine.availability.torch_availability()` /
+`is_torch_available()` are a deterministic, lazily-imported probe — the
+only place in `dl_engine` that imports `torch`, and only when called, so
+importing `dl_engine` (or any Phase 0-7 package) never requires PyTorch.
+PyTorch is an optional dependency (`pip install 'datapilot[dl]'`).
+`dl_engine.contracts.DLTrainingConfig` is a deterministic, JSON-primitive
+configuration contract for a future training-execution increment
+(architecture name, task type, seed, epochs, batch size, learning rate,
+optimizer, loss, device, deterministic mode, status, reason); its
+`status` defaults to `not_yet_started` and it reuses the existing
+`ModelFamily.NEURAL` / `TaskType` vocabularies rather than a parallel one
+— a future increment that trains a network is expected to populate the
+**existing** `TrainingRun` / `TrainingOutcome` (Phase 7.4), not a second
+pipeline or evaluation contract. No architecture, training loop, or model
+is implemented yet.
+
 **Future-phase components:** everything else —
 figure generation, executing the Phase-6 recommendations, executing /
-deploying the Phase-7 recommended model,
-`dl_engine`,
+deploying the Phase-7 recommended model, DL model training (Phase 8.2+),
 `experimentation`, `explainability`, `ai_engine`, `database`, `backend`,
 `frontend`, MLOps.
 

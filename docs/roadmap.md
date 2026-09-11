@@ -13,7 +13,7 @@ future phases are not anticipated in code.
 | 5 | Automated Problem Understanding | **Done** — `data_engine.problem_understanding`: the `ProblemSpec` contract + `understand_problem` foundation (5.1), **target identification** `identify_target` (5.2), **task-type inference** `infer_task_type` (5.3), **candidate metrics** `recommend_metrics` (5.4), **feasibility assessment** `assess_feasibility` (5.5). All deterministic, standalone, analysis-only; no ML/LLM. **Forecasting Foundation (done):** additive `TaskTypeInference.time_column` + `infer_task_type(..., time_column=)`; feasibility blocks an unsorted forecasting frame |
 | 6 | Feature Engineering | **Done** — `data_engine.feature_engineering`, all deterministic, standalone, analysis-only: `FeatureEngineeringSpec` contract + foundation (6.1); **structural feature inventory** `inventory_features` (6.2); **transformation recommendations** `recommend_transformations` (6.3); **feature-selection recommendations** `recommend_feature_selection` (6.4); **preprocessing requirements** `recommend_preprocessing` (6.5); **feature-engineering assessment** `assess_feature_engineering` — structural consistency & readiness check over 6.2–6.5, `feasible` True/False from blocking structural inconsistencies (6.6). Nothing is executed; no ML/LLM. **Forecasting Foundation (done):** new `FeatureEngineeringSpec.temporal` section + `recommend_temporal_features` — lag / rolling feature **recommendations** for a forecasting problem, `unavailable` for every other task; new `LAG_FEATURE` / `ROLLING_FEATURE` operation types; nothing built |
 | 7 | Model Development / Modeling | **Done** — `data_engine.modeling`, all deterministic and standalone: `ModelingSpec` contract + foundation (7.1); **model readiness** `assess_model_readiness` + **data-split planning** `recommend_data_split` (7.2); **model candidate generation** `generate_model_candidates` (7.3); **training & evaluation** `train_and_evaluate_models` (7.4) — fits one conservative scikit-learn baseline per candidate family and reports per-candidate metrics; **model selection & recommendation** `select_model` (7.5) — deterministically ranks the successful 7.4 runs by a fixed per-task metric and recommends one family/estimator. Nothing beyond the 7.4 baselines is trained; no hyperparameter tuning, CV, feature importance, SHAP, or artifact persistence anywhere in Phase 7. **Post-Phase-7 stabilization (done):** `run_modeling_pipeline` deterministic end-to-end composition + overall `ModelingSpec.status`; `EvaluationResults` is now a status mirror of `TrainingOutcome`; explicit forecasting chronological-order precondition. **Forecasting Foundation (done):** first-class `TaskTypeInference.time_column` + `infer_task_type(..., time_column=)`; unsorted-forecasting caught in Phase-5 feasibility; new `FeatureEngineeringSpec.temporal` section + `recommend_temporal_features` (lag / rolling **recommendations**). **Forecasting Execution (done):** Phase 7.4 now **builds** those lag / rolling features (`build_temporal_features`, backward-looking, leakage-safe one-step-ahead) and trains the forecasting model on them; `TrainingRun.temporal_features_built` / `rows_consumed_as_history`. **Forecasting Execution — part 2 & Recursive Multi-Step Forecasting (done):** Phase 7.4 also **builds** the Phase-6.3 calendar / seasonal derivations (`build_calendar_features`, stateless, no leakage; `TrainingRun.calendar_features_built`); additive `ModelingRequest.forecast_horizon` / `TrainingRun.forecast_horizon` add recursive rolling-origin multi-step diagnostics (`rmse_h1..hN`) without changing the one-step selection metric |
-| 8 | Deep Learning | **Not started** |
+| 8 | Deep Learning | **In progress — 8.1 foundation.** `dl_engine` package established: PyTorch optional-dependency boundary (`availability.py`, lazy/deterministic probe) + deterministic `DLTrainingConfig` contract (`contracts.py`). No model trained, no architecture, no training loop; every Phase 0-7 capability works without PyTorch installed |
 | 9 | Experiment Tracking | Not started |
 | 10 | Explainable AI | Not started |
 | 11 | AI Scientist / Agent | Not started |
@@ -931,10 +931,50 @@ future phases are not anticipated in code.
 - **Quality gates:** `pytest` (1624 passed, 1 skipped) / `ruff` / `ruff
   format` / `mypy` all green; decision 0079.
 
-### Phase 8 — Deep Learning — **Not started**
+### Phase 8 — Deep Learning — **In progress — 8.1 foundation**
 - **Objective:** add DL where justified.
 - **Components:** `dl_engine` PyTorch models, training loops, evaluation.
 - **Output:** trained DL models + evaluation reports.
+
+#### Phase 8.1 — Deep Learning Foundation — **Done**
+- **Scope:** foundation only — no model is trained, no architecture is
+  implemented, no training loop exists. Establishes the `dl_engine`
+  package structure, the PyTorch optional-dependency boundary, and the
+  deterministic DL training **configuration** contract.
+- **`dl_engine/availability.py`** — `torch_availability()` /
+  `is_torch_available()`: a deterministic, lazily-imported probe for
+  whether PyTorch is installed in the current environment (`torch` is
+  imported only when the probe function is called, never at package
+  import time). Returns a JSON-primitive `TorchAvailability` (`available`,
+  `version`, `reason`).
+- **`dl_engine/contracts.py`** — `DLTrainingConfig`: the deterministic,
+  JSON-serialisable configuration a future training-execution increment
+  will consume (`architecture_name`, `task_type`, `family` (reuses the
+  existing `ModelFamily.NEURAL` rather than a parallel vocabulary), `seed`,
+  `epochs`, `batch_size`, `learning_rate`, `optimizer`, `loss`, `device`,
+  `deterministic_mode`, `status`, `reason`). `status` defaults to
+  `not_yet_started` — constructing a config never implies training
+  occurred. `DLTrainingStatus` also declares `completed` / `failed` ahead
+  of use (mirroring the existing three-state pattern) so a future
+  training increment is additive, not a contract change.
+- **PyTorch is optional** (`pip install 'datapilot[dl]'`, `torch>=2.2`) —
+  every Phase 0-7 capability, including the classical
+  `data_engine.modeling` path, works with **zero** PyTorch dependency;
+  verified by a subprocess-level test that imports `data_engine.modeling`
+  and asserts `torch` never lands in `sys.modules`.
+- **Integrates with, does not duplicate, Phase 7:** `dl_engine` reuses
+  `ModelFamily` (Phase 7) and `TaskType` (Phase 5); a future increment
+  that actually trains a network is expected to populate the **existing**
+  `TrainingRun` / `TrainingOutcome` contracts (`family=NEURAL`), not a
+  second modeling pipeline or evaluation contract.
+- **OUT (this increment and until explicitly implemented):** model
+  training, an MLP or any architecture, training loops, Phase 9
+  `ExperimentRecord`, MLflow, hyperparameter optimization, SHAP,
+  deployment, general feature-engineering execution, multi-series
+  forecasting, backtesting, autonomous experimentation, API/frontend.
+- **Quality gates:** `pytest` (1659 passed, 2 skipped) / `ruff` / `ruff
+  format` / `mypy` (`data_engine`, `datapilot`, `dl_engine`) all green;
+  decision 0080.
 
 ### Phase 9 — Experiment Tracking
 - **Objective:** make every experiment reproducible and comparable.
