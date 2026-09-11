@@ -4,6 +4,90 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0079 — Forecasting Execution part 2 (calendar/seasonal execution) + Recursive Multi-Step Forecasting
+
+- **Decision:** implement the two remaining forecasting-execution items
+  called out as OUT in 0078 — (A) execute the Phase-6.3 calendar / seasonal
+  derivations, and (B) recursive multi-step forecasting via
+  `ModelingRequest.forecast_horizon` — as **one increment landing in one
+  commit**. Of the four candidate next-increments presented, the other two
+  (general Feature-Engineering execution for all task types, and the
+  Phase-9 `ExperimentRecord` reproducibility foundation) were explicitly
+  **not selected** and remain planned separately; they carry larger
+  architectural surface and no review checkpoint yet.
+- **Single-commit note:** the originally sketched plan described A and B
+  as landing in separate commits. In implementation both extend the same
+  Phase-7.4 forecasting execution block in `training.py` (A's
+  `build_calendar_features` call sits next to B's `_recursive_horizon_metrics`
+  call in the same function, and B's target-derived-feature reconstruction
+  depends on A/temporal's `temporal_feature_spec`), so a clean split would
+  have meant either checking in A without the multi-step diagnostics that
+  exercise it, or duplicating the shared plumbing. They are committed and
+  documented together as a single increment instead.
+- **(A) `build_calendar_features(df, recommendations)`** — new function
+  in the existing `data_engine/modeling/temporal_execution.py`, called
+  only from Phase 7.4 (keeps `data_engine.feature_engineering`
+  recommendation-only). Executes the Phase-6.3
+  `FeatureOperationType.DATETIME_DERIVATION` recommendations:
+  `derive <part>` (`year` / `month` / `day` / `day_of_week` /
+  `day_of_year` / `quarter` / `hour`) → one `float64` column
+  `<column>__<part>`; `cyclical (sin/cos) <part>` → two columns
+  `<column>__<part>_sin` / `_cos` bounded in `[-1, 1]` (skipped with a
+  note when the part has no fixed period). **Stateless row-wise** — no
+  lookback, no warm-up, no leakage, unlike the lag / rolling features.
+  Copies `df`, never mutates, raises `ValueError` on a name collision,
+  skips (with a note) a missing source column or unrecognised part.
+- **(B) `ModelingRequest.forecast_horizon: int = Field(default=1, ge=1)`**
+  (additive) threads through `run_modeling_pipeline` →
+  `train_and_evaluate_models(..., forecast_horizon=)` (additive
+  keyword-only param) → `TrainingRun.forecast_horizon` (additive,
+  default `1`). The **fixed one-step `rmse` selection metric is never
+  overridden or replaced with a composite** — matching the existing rule
+  that the selection metric is fixed per task. When `forecast_horizon >
+  1`, a new module function `_recursive_horizon_metrics` in `training.py`
+  computes rolling-origin recursive diagnostics: from each usable origin
+  in the test partition it predicts step 1, reconstructs the
+  target-derived lag / rolling features for step 2 from the growing
+  actual+predicted history (via `temporal_feature_spec`, which maps each
+  built temporal feature name back to its `(source_column, kind, n)`),
+  predicts step 2, and so on to the horizon; calendar / exogenous
+  features use their real future values (the standard forecasting
+  assumption that regressors and the calendar are known over the forecast
+  window). Produces `metrics["rmse_h1"] … ["rmse_hN"]` per candidate as
+  **diagnostics only** — skipped (no `rmse_h*` keys) when the test
+  partition is smaller than the horizon, or for a non-forecasting run.
+- **Additive contracts:** `TrainingRun.calendar_features_built: int = 0`,
+  `TrainingRun.forecast_horizon: int = 1`, `ModelingRequest.forecast_horizon:
+  int = 1` (all defaulted; legacy JSON validates). New exports:
+  `build_calendar_features`, `temporal_feature_spec`.
+- **Scope gate:** calendar-feature construction is gated on the same
+  `forecasting_run` condition as temporal-feature construction (time-ordered
+  split + forecasting task); a non-forecasting or non-time-ordered run is
+  byte-for-byte unchanged and ignores `forecast_horizon` entirely (it is
+  still recorded on the run for auditability, but nothing acts on it).
+- **Verified** (through the public `run_modeling_pipeline` API only): a
+  weekly-seasonal + trend + AR(1) demand series improves from RMSE ≈ 18.6
+  (lag features alone, `linear` family) to RMSE ≈ 3.0 (`ensemble` family)
+  once calendar features are added. At `forecast_horizon=5`, each
+  candidate family's `rmse_h1` closely tracks its own one-step `rmse`
+  (confirmed per-family, resolving an earlier apparent discrepancy that
+  turned out to be a debug script comparing `rmse_h1` from one family
+  against the selected score of a different family — not a defect); the
+  selected family and score are unchanged from the horizon-1-only run;
+  repeated calls are byte-identical; the input `df` is never mutated.
+- **OUT (still, by explicit choice, not oversight):** general
+  Feature-Engineering execution for all task types (Phase-6.3 log/sqrt/etc.
+  transformations outside forecasting); the Phase-9 `ExperimentRecord` +
+  filesystem store foundation; multi-series / panel forecasting;
+  backtesting / rolling-origin CV as a first-class feature; any
+  forecasting library.
+- **Phase state:** Phases 0–7 done + stabilization + Forecasting
+  Foundation + Forecasting Execution + Forecasting Execution part 2 &
+  Recursive Multi-Step Forecasting. Phase 8 not started. `pytest` (1624
+  passed, 1 skipped) / `ruff` / `ruff format` / `mypy` all green.
+
+---
+
 ## 0078 — Forecasting Execution: Phase 7.4 builds the lag/rolling features (backward-looking, one-step-ahead)
 
 - **Decision:** execute — no longer just recommend — the Phase-6

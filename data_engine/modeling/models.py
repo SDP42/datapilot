@@ -234,10 +234,22 @@ class TrainingRun(BaseModel):
         "for this forecasting run (one-step-ahead; 0 for every non-forecasting run). "
         "Additive and defaulted — legacy JSON validates.",
     )
+    calendar_features_built: int = Field(
+        default=0,
+        description="Datetime-derivation feature columns (year / month / quarter / cyclical …) "
+        "built from the Phase-6.3 recommendations for this forecasting run; 0 otherwise. "
+        "Additive and defaulted.",
+    )
     rows_consumed_as_history: int = Field(
         default=0,
         description="Leading rows dropped because a built lag / rolling feature was still NaN "
-        "(the lag / window warm-up). Additive and defaulted.",
+        "(the lag / window warm-up), or a row carried an unparseable timestamp. Additive and "
+        "defaulted.",
+    )
+    forecast_horizon: int = Field(
+        default=1,
+        description="Requested forecast horizon (steps). 1 = one-step-ahead (the default for "
+        "every run). Additive and defaulted.",
     )
     reason: str | None = Field(
         default=None, description="Why the run is unavailable / failed; None when completed."
@@ -413,6 +425,16 @@ class ModelingRequest(BaseModel):
             "of the rows. Optional — auto-resolved when the frame has exactly one datetime "
             "column. Never inferred from column names or content. Additive and defaulted — "
             "legacy JSON validates."
+        ),
+    )
+    forecast_horizon: int = Field(
+        default=1,
+        ge=1,
+        description=(
+            "For a forecasting objective: how many steps ahead to evaluate. 1 (default) is "
+            "one-step-ahead. > 1 adds recursive rolling-origin multi-step diagnostics "
+            "(rmse_h2 … rmse_hN); the selection metric stays the one-step rmse. Ignored for "
+            "every non-forecasting task. Additive and defaulted."
         ),
     )
 

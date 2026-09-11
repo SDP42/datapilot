@@ -70,7 +70,11 @@ from .split_planning import (
     SMALL_DATA_TRAIN_FRACTION,
     recommend_data_split,
 )
-from .temporal_execution import build_temporal_features
+from .temporal_execution import (
+    build_calendar_features,
+    build_temporal_features,
+    temporal_feature_spec,
+)
 from .training import (
     MODEL_TRAINING_FORECASTING_MIN_MODELABLE_ROWS,
     MODEL_TRAINING_FOREST_N_ESTIMATORS,
@@ -120,12 +124,14 @@ __all__ = [
     "TrainingRun",
     "TrainingRunStatus",
     "assess_model_readiness",
+    "build_calendar_features",
     "build_temporal_features",
     "generate_model_candidates",
     "recommend_data_split",
     "run_modeling_pipeline",
     "select_model",
     "summarize_evaluation",
+    "temporal_feature_spec",
     "train_and_evaluate_models",
     "understand_modeling",
 ]

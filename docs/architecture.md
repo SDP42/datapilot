@@ -472,13 +472,20 @@ target gap in Phase 5. Phase 6 carries lag / rolling feature
 recommendation-only. **Phase 7.4 executes** those recommendations via
 `build_temporal_features` (a pure backward-looking transform: `lag k =
 shift(k)`, `rolling w = shift(1).rolling(w)` — leakage-safe for
-one-step-ahead evaluation) and trains the forecasting model on the built
-features; the datetime column itself stays excluded. This is the first
-place feature *construction* happens — it is inside the Phase-7.4 training
-boundary (which already executed the Phase-6.5 preprocessing), so
-`data_engine.feature_engineering` stays recommendation-only. Recursive
-multi-step / horizon forecasting, calendar / seasonal derivation
-execution, multi-series, and backtesting remain future work.
+one-step-ahead evaluation) and `build_calendar_features` (a pure
+stateless transform of the Phase-6.3 `datetime_derivation`
+recommendations — year / month / quarter / day-of-week / cyclical
+sin-cos — zero lookback, zero leakage), then trains the forecasting model
+on the built features; the datetime column itself stays excluded. This is
+the first place feature *construction* happens — it is inside the
+Phase-7.4 training boundary (which already executed the Phase-6.5
+preprocessing), so `data_engine.feature_engineering` stays
+recommendation-only. Additive `ModelingRequest.forecast_horizon` (default
+`1`) adds recursive rolling-origin multi-step **diagnostics**
+(`rmse_h1..hN`, via `_recursive_horizon_metrics`) when `> 1`, without ever
+changing the one-step `rmse` selection metric. General
+Feature-Engineering execution (Phase-6.3 transformations outside
+forecasting), multi-series, and backtesting remain future work.
 
 **Future-phase components:** everything else —
 figure generation, executing the Phase-6 recommendations, executing /

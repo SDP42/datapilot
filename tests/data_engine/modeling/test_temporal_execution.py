@@ -13,8 +13,16 @@ import pandas as pd
 import pytest
 
 from data_engine import modeling
-from data_engine.feature_engineering import FeatureOperationType, TemporalFeatureRecommendation
-from data_engine.modeling import build_temporal_features
+from data_engine.feature_engineering import (
+    FeatureOperationType,
+    TemporalFeatureRecommendation,
+    TransformationRecommendation,
+)
+from data_engine.modeling import (
+    build_calendar_features,
+    build_temporal_features,
+    temporal_feature_spec,
+)
 
 
 def _rec(column: str, description: str) -> TemporalFeatureRecommendation:
@@ -163,3 +171,119 @@ def test_empty_recommendations_returns_copy():
     assert built == []
     assert out is not df
     pd.testing.assert_frame_equal(out, df)
+
+
+# --- temporal_feature_spec ------------------------------------
+
+
+def test_temporal_feature_spec_maps_names_to_provenance():
+    recs = [
+        _rec("demand", "lag 7"),
+        _rec("demand", "rolling mean window 30"),
+        _rec("demand", "rolling std window 30"),
+        _rec("exog", "lag 1"),
+    ]
+    spec = temporal_feature_spec(recs)
+    assert spec["demand__lag_7"] == ("demand", "lag", 7)
+    assert spec["demand__rollmean_30"] == ("demand", "rollmean", 30)
+    assert spec["demand__rollstd_30"] == ("demand", "rollstd", 30)
+    assert spec["exog__lag_1"] == ("exog", "lag", 1)
+
+
+def test_temporal_feature_spec_keys_match_build_temporal_features_names():
+    df = _frame(60)
+    recs = [_rec("demand", "lag 7"), _rec("demand", "rolling mean window 7")]
+    _, built, _ = build_temporal_features(df, recs)
+    assert set(temporal_feature_spec(recs)) == set(built)
+
+
+# --- build_calendar_features -----------------------------------
+
+
+def _dt_rec(column: str, description: str) -> TransformationRecommendation:
+    return TransformationRecommendation(
+        column=column,
+        operation=FeatureOperationType.DATETIME_DERIVATION,
+        description=description,
+        reason="x",
+    )
+
+
+def test_calendar_derive_parts():
+    df = _frame(60)
+    recs = [_dt_rec("ds", "derive month"), _dt_rec("ds", "derive day_of_week")]
+    out, built, _ = build_calendar_features(df, recs)
+    assert built == ["ds__month", "ds__day_of_week"]
+    pd.testing.assert_series_equal(
+        out["ds__month"], df["ds"].dt.month.astype("float64"), check_names=False
+    )
+    pd.testing.assert_series_equal(
+        out["ds__day_of_week"], df["ds"].dt.dayofweek.astype("float64"), check_names=False
+    )
+
+
+def test_calendar_cyclical_bounded_and_periodic():
+    df = _frame(400)  # > 1 year so month repeats
+    out, built, _ = build_calendar_features(df, [_dt_rec("ds", "cyclical (sin/cos) month")])
+    assert built == ["ds__month_sin", "ds__month_cos"]
+    assert out["ds__month_sin"].between(-1.0, 1.0).all()
+    assert out["ds__month_cos"].between(-1.0, 1.0).all()
+    # same calendar month -> identical cyclical encoding (period = 12)
+    jan_rows = df.index[df["ds"].dt.month == 1]
+    assert out.loc[jan_rows, "ds__month_sin"].nunique() == 1
+    assert out.loc[jan_rows, "ds__month_cos"].nunique() == 1
+
+
+def test_calendar_features_are_stateless_no_warmup():
+    df = _frame(30)
+    out, built, _ = build_calendar_features(df, [_dt_rec("ds", "derive quarter")])
+    assert out[built[0]].isna().sum() == 0  # no lookback -> no warm-up NaNs
+
+
+def test_calendar_ignores_non_datetime_derivation_recs():
+    df = _frame(20)
+    recs = [
+        TransformationRecommendation(
+            column="exog",
+            operation=FeatureOperationType.TRANSFORMATION,
+            description="log transform",
+            reason="x",
+        )
+    ]
+    out, built, _ = build_calendar_features(df, recs)
+    assert built == []
+    pd.testing.assert_frame_equal(out, df)
+
+
+def test_calendar_missing_column_skipped_with_note():
+    _, built, notes = build_calendar_features(_frame(10), [_dt_rec("ghost", "derive month")])
+    assert built == []
+    assert any("'ghost' skipped: not a column of the frame" in n for n in notes)
+
+
+def test_calendar_unrecognised_part_skipped_with_note():
+    _, built, notes = build_calendar_features(_frame(10), [_dt_rec("ds", "derive fortnight")])
+    assert built == []
+    assert any("unrecognised calendar part" in n for n in notes)
+
+
+def test_calendar_collision_raises():
+    df = _frame(10)
+    df["ds__month"] = 0.0
+    with pytest.raises(ValueError, match="collides with an existing column"):
+        build_calendar_features(df, [_dt_rec("ds", "derive month")])
+
+
+def test_calendar_df_not_mutated_and_deterministic():
+    df = _frame(40)
+    before = df.copy(deep=True)
+    recs = [_dt_rec("ds", "derive month"), _dt_rec("ds", "cyclical (sin/cos) day_of_week")]
+    a, _, _ = build_calendar_features(df, recs)
+    b, _, _ = build_calendar_features(df, recs)
+    pd.testing.assert_frame_equal(df, before)
+    pd.testing.assert_frame_equal(a, b)
+
+
+def test_calendar_notes_state_the_stateless_property():
+    _, _, notes = build_calendar_features(_frame(10), [_dt_rec("ds", "derive month")])
+    assert any("stateless row-wise functions of the timestamp" in n for n in notes)

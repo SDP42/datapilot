@@ -92,6 +92,7 @@ contracts / registered data, but Phase 7.1 does not.
 | `dataset_version_id` | `str \| None` | `None` | Registered `DatasetVersion` id, when the caller has one. |
 | `objective` | `str \| None` | `None` | The user's plain-language goal, **verbatim**. Never inferred from column names or data. A blank string is **preserved exactly**, not replaced with `None`. |
 | `time_column` | `str \| None` | `None` | For a forecasting objective: the column defining the chronological order of the rows. Optional — auto-resolved when the frame has exactly one datetime column. Never inferred from column names or content. Additive / defaulted — legacy JSON validates. `run_modeling_pipeline` passes it to `infer_task_type`. |
+| `forecast_horizon` | `int` | `1` | For a forecasting objective: how many steps ahead to evaluate. `1` (default) is one-step-ahead. `> 1` adds recursive rolling-origin multi-step diagnostics (`rmse_h2 … rmse_hN`); the selection metric stays the one-step `rmse`. Ignored for every non-forecasting task. `ge=1` — `0` or negative raises `ValidationError`. Additive / defaulted — legacy JSON validates. See ["Recursive multi-step forecasting"](#recursive-multi-step-forecasting-forecast_horizon). |
 
 `objective_provided` on the spec is `True` **only** when the objective is
 non-blank after `.strip()`.
@@ -795,7 +796,7 @@ for a caller who bypasses feasibility:
   explicit "sort the DataFrame chronologically … Phase 7.4 does not
   reorder rows" reason.
 
-## Forecasting execution — lag / rolling feature construction
+## Forecasting execution — lag / rolling / calendar feature construction
 
 Since the **Forecasting Execution** increment, a `time_ordered_holdout`
 run **builds** the Phase-6 `FeatureEngineeringSpec.temporal` recommendations
@@ -808,20 +809,35 @@ into real columns via `build_temporal_features` (in
 The transform is **backward-looking by construction** — every built
 feature at row `i` uses only values *strictly before* `i`, so it never
 sees `target[i]` and is **leakage-safe for one-step-ahead evaluation**
-regardless of where the split falls. **Recursive multi-step forecasting
-is a later increment** — the metrics measure "given the true recent past,
-predict the next value".
+regardless of where the split falls.
+
+**Since the Forecasting Execution — part 2 increment**, the same run also
+**builds** the Phase-6.3 `datetime_derivation` recommendations
+(`FeatureEngineeringSpec.transformations`) via `build_calendar_features`
+(same module, same Phase-7.4-only call boundary):
+
+- `derive <part>` (`year` / `month` / `day` / `day_of_week` / `day_of_year`
+  / `quarter` / `hour`) → one `float64` column, `<column>__<part>`.
+- `cyclical (sin/cos) <part>` → two columns in `[-1, 1]`,
+  `<column>__<part>_sin` / `_cos` (only for parts with a fixed period —
+  `year` / `day` / `day_of_year` have none and are skipped with a note).
+
+Calendar features are **stateless row-wise** functions of the timestamp —
+no lookback, no warm-up, no leakage — so they capture seasonality (e.g.
+day-of-week) that a short lag window cannot.
 
 Flow (forecasting + time-ordered only):
 
 1. trim only the **leading / trailing** run of missing-target rows
    (contiguity preserved for the positional split; **internal** target
    gaps are blocked upstream at Phase-5 feasibility).
-2. `build_temporal_features(work, temporal.recommendations)` → new numeric
-   columns; drop the leading rows whose lag / rolling value is still NaN
-   (the warm-up), recorded as `TrainingRun.rows_consumed_as_history`.
+2. `build_temporal_features(work, temporal.recommendations)` and
+   `build_calendar_features(work, transformations.recommendations)` → new
+   numeric columns; drop the leading rows whose lag / rolling value is
+   still `NaN` (the warm-up — calendar columns never contribute warm-up
+   rows), recorded as `TrainingRun.rows_consumed_as_history`.
 3. add the built columns to the model matrix
-   (`TrainingRun.temporal_features_built`).
+   (`TrainingRun.temporal_features_built`, `TrainingRun.calendar_features_built`).
 4. `< MODEL_TRAINING_FORECASTING_MIN_MODELABLE_ROWS` (20) rows remain
    after the warm-up → `TrainingOutcome.status = unavailable`.
 5. positional time-ordered split + the usual leakage-safe Phase-6.5
@@ -829,9 +845,35 @@ Flow (forecasting + time-ordered only):
 
 The datetime `time_column` itself stays **excluded** from the model
 matrix. `TrainingRun` gains additive defaulted `temporal_features_built` /
-`rows_consumed_as_history` (both `0` for every non-forecasting run;
-legacy JSON validates). Executing the Phase-6.3 calendar / seasonal
-derivations for forecasting, forecast horizons, multi-series, and
+`rows_consumed_as_history` / `calendar_features_built` (all `0` for every
+non-forecasting run; legacy JSON validates).
+
+### Recursive multi-step forecasting (`forecast_horizon`)
+
+Since the **Recursive Multi-Step Forecasting** increment,
+`ModelingRequest.forecast_horizon` (`int`, default `1`, `ge=1`, additive)
+threads through `run_modeling_pipeline` → `train_and_evaluate_models` to
+every `TrainingRun.forecast_horizon` (default `1`; every run — forecasting
+or not — records the requested horizon, but only a forecasting run acts
+on it).
+
+The **primary evaluation and the selection metric stay one-step-ahead**
+(`rmse`, computed exactly as before) — `forecast_horizon` never changes
+which model is selected. When `forecast_horizon > 1`, Phase 7.4 *also*
+computes **rolling-origin recursive diagnostics**: starting from each
+origin in the test partition, it predicts step 1, feeds that prediction
+back to reconstruct the target-derived lag / rolling features for step 2,
+predicts step 2, and so on up to the horizon — target-derived features
+(from `temporal_feature_spec`) are rebuilt from the growing
+actual+predicted history; calendar and exogenous features use their real
+future values (the standard forecasting assumption that regressors and
+the calendar are known over the forecast window). This yields
+`metrics["rmse_h1"] … ["rmse_hN"]` per candidate, purely as **diagnostics**
+— `rmse_h1` closely tracks the batch one-step `rmse` for the same family.
+Diagnostics are skipped (no `rmse_h*` keys) when the test partition is
+smaller than the horizon, or for a non-forecasting run.
+
+Forecast horizons beyond `forecast_horizon`, multi-series, and
 backtesting remain future increments.
 
 The **random / stratified holdout** contract is unchanged: those

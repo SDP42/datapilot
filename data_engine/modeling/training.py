@@ -47,7 +47,11 @@ from .models import (
     TrainingRun,
     TrainingRunStatus,
 )
-from .temporal_execution import build_temporal_features
+from .temporal_execution import (
+    build_calendar_features,
+    build_temporal_features,
+    temporal_feature_spec,
+)
 
 # --- fixed, documented tunables --------------------------------------------
 
@@ -429,6 +433,68 @@ def _classification_metrics(
     return metrics
 
 
+def _recursive_horizon_metrics(
+    pipeline: Any,
+    x_all: pd.DataFrame,
+    y_all: np.ndarray,
+    feature_cols: list[str],
+    target_spec: dict[str, tuple[str, str, int]],
+    test_start: int,
+    n_rows: int,
+    horizon: int,
+) -> dict[str, float]:
+    """Rolling-origin **recursive** multi-step RMSE, one value per horizon step.
+
+    From every origin ``o`` in ``[max(test_start, max_lookback), n_rows - horizon]``
+    forecast ``horizon`` steps: a target lag / rolling feature is rebuilt from the
+    growing ``actuals[:o] + predictions[o:]`` history; every other feature
+    (exogenous, calendar) uses its **actual** row value (the standard assumption
+    that regressors and the calendar are known over the forecast window).
+    Deterministic; no metric here ever feeds ``select_model`` — the selection
+    metric stays the one-step ``rmse``.
+    """
+    y = np.asarray(y_all, dtype=float)
+    actual_features = {c: x_all[c].to_numpy() for c in feature_cols}
+    target_kinds = {c: target_spec[c] for c in feature_cols if c in target_spec}
+    max_lookback = max((n for _, _, n in target_kinds.values()), default=0)
+    start = max(test_start, max_lookback)
+    per_h_sq: list[list[float]] = [[] for _ in range(horizon)]
+
+    for origin in range(start, n_rows - horizon + 1):
+        preds: list[float] = []
+        for step in range(horizon):
+            pos = origin + step
+            history = np.concatenate([y[:origin], np.asarray(preds, dtype=float)])
+            row: dict[str, float] = {}
+            for col in feature_cols:
+                spec = target_kinds.get(col)
+                if spec is None:
+                    row[col] = float(actual_features[col][pos])
+                    continue
+                _, kind, k = spec
+                if kind == "lag":
+                    row[col] = float(history[pos - k]) if pos - k >= 0 else float("nan")
+                else:
+                    window = history[pos - k : pos]
+                    if window.size == k:
+                        row[col] = float(
+                            window.mean() if kind == "rollmean" else window.std(ddof=1)
+                        )
+                    else:
+                        row[col] = float("nan")
+            pred = float(np.asarray(pipeline.predict(pd.DataFrame([row], columns=feature_cols)))[0])
+            preds.append(pred)
+            actual = y[pos]
+            if math.isfinite(actual) and math.isfinite(pred):
+                per_h_sq[step].append((pred - actual) ** 2)
+
+    metrics: dict[str, float] = {}
+    for h in range(horizon):
+        if per_h_sq[h]:
+            metrics[f"rmse_h{h + 1}"] = _round(math.sqrt(sum(per_h_sq[h]) / len(per_h_sq[h])))
+    return metrics
+
+
 def _clustering_metrics(features: np.ndarray, labels: np.ndarray) -> dict[str, float]:
     from sklearn.metrics import (
         calinski_harabasz_score,
@@ -458,6 +524,7 @@ def train_and_evaluate_models(
     candidates: ModelCandidates,
     *,
     objective: str | None = None,
+    forecast_horizon: int = 1,
 ) -> TrainingOutcome:
     """Deterministically train & evaluate one baseline estimator per candidate.
 
@@ -680,43 +747,60 @@ def train_and_evaluate_models(
                 )
     work = work.reset_index(drop=True)
 
-    # --- forecasting: execute the Phase-6 lag / rolling recommendations ---
+    # --- forecasting: execute the Phase-6 lag / rolling / calendar recommendations ---
     temporal_features_built = 0
+    calendar_features_built = 0
     rows_consumed_as_history = 0
-    if (
-        is_time_ordered
-        and task is TaskType.TIME_SERIES_FORECASTING
-        and target_column is not None
-        and temporal.status is _FE_COMPLETED
-        and temporal.recommendations
-    ):
+    forecasting_run = is_time_ordered and task is TaskType.TIME_SERIES_FORECASTING
+    if forecasting_run and target_column is not None:
+        built_temporal: list[str] = []
+        built_calendar: list[str] = []
         try:
-            work, built_names, tf_notes = build_temporal_features(work, temporal.recommendations)
+            if temporal.status is _FE_COMPLETED and temporal.recommendations:
+                work, built_temporal, tf_notes = build_temporal_features(
+                    work, temporal.recommendations
+                )
+                notes.extend(tf_notes)
+            transformation_recs = feature_engineering.transformations
+            if transformation_recs.status is _FE_COMPLETED and transformation_recs.recommendations:
+                work, built_calendar, cal_notes = build_calendar_features(
+                    work, transformation_recs.recommendations
+                )
+                notes.extend(cal_notes)
         except ValueError as exc:
             return _unavailable(
-                "forecasting lag / rolling features could not be built: "
-                + _normalise_error(str(exc)),
+                "forecasting features could not be built: " + _normalise_error(str(exc)),
                 objective_used=objective_used,
             )
-        if built_names:
+
+        built_all = built_temporal + built_calendar
+        if built_all:
             before = len(work)
-            work = work.dropna(subset=built_names).reset_index(drop=True)
+            work = work.dropna(subset=built_all).reset_index(drop=True)
             rows_consumed_as_history = before - len(work)
-            temporal_features_built = len(built_names)
-            numeric_cols = sorted(set(numeric_cols) | set(built_names))
-            feature_cols = sorted(set(feature_cols) | set(built_names))
-            notes.extend(tf_notes)
+            temporal_features_built = len(built_temporal)
+            calendar_features_built = len(built_calendar)
+            numeric_cols = sorted(set(numeric_cols) | set(built_all))
+            feature_cols = sorted(set(feature_cols) | set(built_all))
             notes.append(
-                f"{rows_consumed_as_history} leading row(s) consumed as lag / rolling history"
+                f"{rows_consumed_as_history} leading / invalid-timestamp row(s) consumed as "
+                "lag / rolling history"
             )
             notes.append(
-                "one-step-ahead evaluation: lag / rolling features use observed actuals; "
-                "recursive multi-step forecasting is a later increment"
+                "primary evaluation is one-step-ahead: lag / rolling features use observed "
+                "actuals; calendar features are stateless functions of the timestamp"
             )
+            if forecast_horizon > 1:
+                notes.append(
+                    f"forecast_horizon = {forecast_horizon}: recursive rolling-origin "
+                    "multi-step diagnostics (rmse_h2 …) are added per run; the calendar and "
+                    "exogenous features are assumed known over the forecast window; the "
+                    "selection metric is still the one-step rmse"
+                )
         else:
             notes.append(
-                "Phase 6 recommended temporal features but none referenced a column of the "
-                "frame; trained as baseline regression on the eligible features"
+                "no Phase-6 lag / rolling / calendar recommendation referenced a column of "
+                "the frame; trained as baseline regression on the eligible features"
             )
         if len(work) < MODEL_TRAINING_FORECASTING_MIN_MODELABLE_ROWS:
             return _unavailable(
@@ -727,8 +811,8 @@ def train_and_evaluate_models(
             )
     elif task is TaskType.TIME_SERIES_FORECASTING:
         notes.append(
-            "no Phase-6 lag / rolling recommendations were available; trained as baseline "
-            "regression on the currently-eligible features"
+            "forecasting without a time-ordered holdout; trained as baseline regression on "
+            "the currently-eligible features"
         )
 
     # canonicalise row order for the non-temporal strategies so the split
@@ -756,6 +840,14 @@ def train_and_evaluate_models(
     train_idx, val_idx, test_idx, split_notes = _split_indices(n, split, stratify_y)
     notes.extend(split_notes)
 
+    target_temporal_spec: dict[str, tuple[str, str, int]] = {}
+    if forecasting_run and target_column is not None and temporal.status is _FE_COMPLETED:
+        target_temporal_spec = {
+            name: meta
+            for name, meta in temporal_feature_spec(temporal.recommendations).items()
+            if meta[0] == target_column and name in feature_cols
+        }
+
     runs: list[TrainingRun] = []
     for family in candidate_families:
         runs.append(
@@ -771,15 +863,19 @@ def train_and_evaluate_models(
                 train_idx=train_idx,
                 val_idx=val_idx,
                 test_idx=test_idx,
+                forecast_horizon=forecast_horizon if forecasting_run else 1,
+                target_temporal_spec=target_temporal_spec,
             )
         )
 
-    if temporal_features_built or rows_consumed_as_history:
+    if forecasting_run:
         runs = [
             run.model_copy(
                 update={
                     "temporal_features_built": temporal_features_built,
+                    "calendar_features_built": calendar_features_built,
                     "rows_consumed_as_history": rows_consumed_as_history,
+                    "forecast_horizon": forecast_horizon,
                 }
             )
             for run in runs
@@ -821,6 +917,8 @@ def _run_candidate(
     train_idx: np.ndarray,
     val_idx: np.ndarray,
     test_idx: np.ndarray,
+    forecast_horizon: int = 1,
+    target_temporal_spec: dict[str, tuple[str, str, int]] | None = None,
 ) -> TrainingRun:
     built = _build_estimator(family, category)
     if built is None:
@@ -905,6 +1003,29 @@ def _run_candidate(
             if category == "regression":
                 metrics = _regression_metrics(y_test.astype(float), y_pred.astype(float))
                 notes = []
+                if (
+                    forecast_horizon > 1
+                    and target_temporal_spec
+                    and int(test_idx.size) > forecast_horizon
+                ):
+                    metrics = {
+                        **metrics,
+                        **_recursive_horizon_metrics(
+                            pipeline,
+                            x_all,
+                            y_all,
+                            feature_cols,
+                            target_temporal_spec,
+                            test_start=int(test_idx[0]),
+                            n_rows=int(x_all.shape[0]),
+                            horizon=forecast_horizon,
+                        ),
+                    }
+                    notes.append(
+                        f"recursive rolling-origin multi-step diagnostics (rmse_h2 … "
+                        f"rmse_h{forecast_horizon}); the selection metric is still the "
+                        "one-step rmse"
+                    )
             else:
                 proba = None
                 model = pipeline.named_steps["model"]

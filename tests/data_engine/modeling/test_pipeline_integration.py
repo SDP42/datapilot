@@ -12,6 +12,7 @@ import json
 import numpy as np
 import pandas as pd
 import pytest
+from pydantic import ValidationError
 
 from data_engine import modeling
 from data_engine.modeling import (
@@ -308,6 +309,8 @@ def test_forecasting_pipeline_builds_temporal_features():
     for run in spec.training.runs:
         assert run.temporal_features_built > 0
         assert run.rows_consumed_as_history >= 30
+        assert run.calendar_features_built > 0
+        assert run.forecast_horizon == 1
     assert any("leakage-safe for one-step-ahead evaluation" in n for n in spec.training.notes)
     # deterministic + no mutation
     before = df.copy(deep=True)
@@ -316,6 +319,39 @@ def test_forecasting_pipeline_builds_temporal_features():
     )
     assert again.model_dump_json() == spec.model_dump_json()
     pd.testing.assert_frame_equal(df, before)
+
+
+def test_forecasting_pipeline_recursive_multistep_horizon():
+    df, objective, _ = CASES["forecasting"]
+    spec = run_modeling_pipeline(
+        df.copy(),
+        ModelingRequest(dataset_id="forecasting", objective=objective, forecast_horizon=4),
+    )
+    assert spec.status is COMPLETED
+    assert spec.training.runs
+    for run in spec.training.runs:
+        assert run.forecast_horizon == 4
+        if run.status.value == "completed" and run.metrics is not None:
+            metrics = run.metrics
+            for h in range(1, 5):
+                assert f"rmse_h{h}" in metrics
+    # the selection metric is unaffected by the horizon diagnostics
+    assert spec.selection.selection_metric == "rmse"
+    # deterministic across repeated calls
+    again = run_modeling_pipeline(
+        df.copy(),
+        ModelingRequest(dataset_id="forecasting", objective=objective, forecast_horizon=4),
+    )
+    assert again.model_dump_json() == spec.model_dump_json()
+
+
+def test_modeling_request_forecast_horizon_is_additive_and_validated():
+    legacy = '{"dataset_id": "d"}'
+    req = ModelingRequest.model_validate_json(legacy)
+    assert req.forecast_horizon == 1
+
+    with pytest.raises(ValidationError):
+        ModelingRequest(dataset_id="d", forecast_horizon=0)
 
 
 def test_declared_time_column_resolves_two_datetime_column_forecasting():

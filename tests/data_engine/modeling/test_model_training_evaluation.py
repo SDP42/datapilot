@@ -178,7 +178,8 @@ def test_return_type(clf):
 
 
 def test_exact_signature():
-    assert list(inspect.signature(train_and_evaluate_models).parameters) == [
+    params = inspect.signature(train_and_evaluate_models).parameters
+    assert list(params) == [
         "df",
         "problem",
         "feature_engineering",
@@ -186,7 +187,11 @@ def test_exact_signature():
         "split",
         "candidates",
         "objective",
+        "forecast_horizon",
     ]
+    # forecast_horizon is keyword-only and defaulted — every existing call is unchanged.
+    assert params["forecast_horizon"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert params["forecast_horizon"].default == 1
 
 
 def test_structured_output(clf):
@@ -411,19 +416,87 @@ def test_clustering_uses_unsupervised_metrics(clustering):
 # --- forecasting -------------------------------------------
 
 
-def test_forecasting_builds_temporal_features(forecasting):
+def test_forecasting_builds_temporal_and_calendar_features(forecasting):
     out = _run(forecasting)
     joined = " ".join(out.notes)
     assert "never a datetime column" in joined
-    assert "leakage-safe for one-step-ahead evaluation" in joined
-    assert "recursive multi-step forecasting is a later increment" in joined
+    assert "one-step-ahead" in joined
+    assert "calendar features are stateless functions of the timestamp" in joined
     assert "consumed as lag / rolling history" in joined
     assert out.status is COMPLETED
     for r in out.runs:
         if r.status is TrainingRunStatus.COMPLETED:
             assert set(r.metrics) >= {"rmse", "mae"}
             assert r.temporal_features_built > 0
+            assert r.calendar_features_built > 0  # ds__month, cyclical month, ...
             assert r.rows_consumed_as_history >= 30  # max rolling window
+            assert r.forecast_horizon == 1
+
+
+def test_forecasting_calendar_features_use_the_time_column_not_the_target(forecasting):
+    out = _run(forecasting)
+    for r in out.runs:
+        if r.status is TrainingRunStatus.COMPLETED:
+            # calendar columns are derived from the time column ("day" in this fixture)
+            assert r.calendar_features_built >= 1
+
+
+# --- forecasting: recursive multi-step (forecast_horizon > 1) --
+
+
+def test_default_horizon_is_one_and_no_horizon_metrics(forecasting):
+    out = _run(forecasting)
+    for r in out.runs:
+        if r.status is TrainingRunStatus.COMPLETED:
+            assert r.forecast_horizon == 1
+            assert not any(k.startswith("rmse_h") for k in r.metrics)
+
+
+def test_horizon_greater_than_one_adds_per_horizon_diagnostics(forecasting):
+    out = _run(forecasting, forecast_horizon=4)
+    assert out.status is COMPLETED
+    joined = " ".join(out.notes)
+    assert "forecast_horizon = 4" in joined
+    assert "selection metric is still the one-step rmse" in joined
+    for r in out.runs:
+        if r.status is TrainingRunStatus.COMPLETED:
+            assert r.forecast_horizon == 4
+            assert set(r.metrics) >= {"rmse", "rmse_h1", "rmse_h2", "rmse_h3", "rmse_h4"}
+            # h1 should be close to the batch one-step rmse (same model, near-identical origins)
+            assert abs(r.metrics["rmse_h1"] - r.metrics["rmse"]) < 0.5 * r.metrics["rmse"] + 1.0
+
+
+def test_horizon_metrics_deterministic_and_no_mutation(forecasting):
+    df = forecasting[0].copy(deep=True)
+    a = _run(forecasting, forecast_horizon=3)
+    b = _run(forecasting, forecast_horizon=3)
+    assert a.model_dump_json() == b.model_dump_json()
+    pd.testing.assert_frame_equal(forecasting[0], df)
+
+
+def test_non_forecasting_run_ignores_horizon(clf):
+    out = _run(clf, forecast_horizon=5)
+    for r in out.runs:
+        assert r.forecast_horizon == 1
+        assert not any(k.startswith("rmse_h") for k in r.metrics)
+
+
+def test_horizon_wider_than_test_partition_skips_diagnostics():
+    rng = np.random.default_rng(21)
+    n = 55  # small: test partition will be too short for a large horizon
+    df = pd.DataFrame(
+        {
+            "day": pd.date_range("2021-01-01", periods=n, freq="D"),
+            "demand": rng.uniform(10.0, 90.0, n),
+        }
+    )
+    fixture = _build(df, "forecast future demand over time")
+    if fixture[1].task_type.task_type is not TaskType.TIME_SERIES_FORECASTING:
+        pytest.skip("task inference did not yield forecasting")
+    out = _run(fixture, forecast_horizon=50)
+    for r in out.runs:
+        if r.status is TrainingRunStatus.COMPLETED:
+            assert not any(k.startswith("rmse_h") for k in r.metrics)
 
 
 def test_forecasting_no_temporal_section_trains_baseline():

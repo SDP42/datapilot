@@ -247,7 +247,14 @@ def run_modeling_pipeline(df: pd.DataFrame, request: ModelingRequest) -> Modelin
         df, problem, feature_engineering, readiness, split, objective=objective
     )
     training = train_and_evaluate_models(
-        df, problem, feature_engineering, readiness, split, candidates, objective=objective
+        df,
+        problem,
+        feature_engineering,
+        readiness,
+        split,
+        candidates,
+        objective=objective,
+        forecast_horizon=request.forecast_horizon,
     )
     evaluation = summarize_evaluation(training)
     selection = select_model(
