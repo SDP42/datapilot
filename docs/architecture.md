@@ -505,6 +505,29 @@ optimizer, loss, device, deterministic mode, status, reason); its
 pipeline or evaluation contract. No architecture, training loop, or model
 is implemented yet.
 
+**Phase 8.2 — Deterministic PyTorch Training Foundation (done,
+still no architecture):** `dl_engine` gains the training *infrastructure*,
+each module lazy-import / PyTorch-optional exactly like 8.1.
+`dl_engine.runtime.seed_everything()` seeds Python / NumPy / PyTorch
+(CPU + CUDA-if-present) and enables deterministic-algorithms mode — the
+one deliberate exception to DataPilot's usual local-RNG-instance
+convention, because PyTorch initializes an arbitrary caller-supplied
+module from its own global RNG. `resolve_device()` resolves a requested
+`DLDevice` and returns a structured failure (never a silent CPU fallback)
+when CUDA / MPS is requested but absent. `dl_engine.tensors.to_tensors()`
+is the narrow dataset-to-tensor boundary — it converts already-prepared
+numeric data (never raw data; Phase 6.5 / 7.4 preprocessing remains the
+boundary) into regression / binary / multiclass-classification tensors,
+validating shape / dtype / finiteness in pure NumPy before PyTorch is
+even required. `dl_engine.training_loop.train_model()` trains an
+**already-constructed** `torch.nn.Module` — no architecture is defined
+here — for a configured number of epochs, returning the new, additive
+`DLTrainingResult` contract (raw training-loop execution only: loss
+history, final loss, device used, status/reason; no evaluation metric, no
+timestamp, no experiment id). `TrainingRun` / `TrainingOutcome` were not
+modified. No evaluation against a test set, no model selection, no
+persistence, no experiment tracking exists yet.
+
 **Future-phase components:** everything else —
 figure generation, executing the Phase-6 recommendations, executing /
 deploying the Phase-7 recommended model, DL model training (Phase 8.2+),

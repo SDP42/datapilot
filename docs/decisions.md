@@ -4,6 +4,131 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0081 — Phase 8.2: Deterministic PyTorch Training Foundation — runtime, tensor boundary, training loop, `DLTrainingResult`
+
+- **Decision:** implement the training *infrastructure* only — the
+  three tasks specified for Phase 8.2 — with no DL architecture defined
+  anywhere in this increment:
+  1. **`dl_engine/runtime.py` — deterministic seeding + device
+     resolution.** `seed_everything(seed, *, deterministic=True)` seeds
+     Python's `random`, NumPy's global RNG, and PyTorch (`torch.manual_seed`
+     + `torch.cuda.manual_seed_all` when CUDA is present), and enables
+     `torch.use_deterministic_algorithms(True, warn_only=True)` when
+     `deterministic=True`. This is a deliberate, documented exception to
+     the rest of DataPilot's modeling code, which threads a local
+     `np.random.default_rng` instance rather than mutating global state
+     (see `training.py`'s `_split_rows`) — PyTorch initializes an
+     arbitrary caller-supplied `nn.Module` from its own global RNG, so a
+     process-wide seed is the only way to make that reproducible. The
+     function does so **only when called**, never at import time, mirrors
+     `MODEL_TRAINING_RANDOM_SEED = 42`'s convention via
+     `DLTrainingConfig.seed`'s default, and returns `False` — nothing
+     partially seeded — when PyTorch is not installed.
+     `resolve_device(requested: DLDevice) -> DeviceResolution`
+     deterministically resolves CPU (always available, no `torch` import
+     needed) / CUDA / MPS; a requested-but-unavailable accelerator returns
+     a structured `available=False` result with a reason and **never**
+     silently substitutes another device — matching the fixed-`n_jobs=1`,
+     no-silent-behavior-change ethos already used throughout Phase 7.4.
+     No distributed training, multiprocessing, GPU orchestration, or mixed
+     precision is introduced.
+  2. **`dl_engine/tensors.py` — the dataset-to-tensor boundary.**
+     `to_tensors(X, y, task_type) -> TensorBatch` converts an
+     already-prepared, fully numeric `(X, y)` pair — exactly what a
+     Phase-6.5 / Phase-7.4 preprocessing pipeline already produces — into
+     PyTorch tensors: `float32` features shape `(n_rows, n_features)`;
+     `float32` column-vector targets for regression, or `int64` class
+     indices for binary / multiclass classification (ready for
+     `nn.CrossEntropyLoss`). Validation (shape, row-count match, numeric
+     dtype, finiteness) is **pure NumPy and runs before PyTorch is
+     required** — so a malformed-input test suite runs in every
+     environment, not only one with PyTorch installed. Row order is
+     preserved exactly (no shuffling); source arrays are copied before
+     conversion so the returned tensors never alias (and therefore never
+     mutate) the caller's data. Deliberately **not** a preprocessing
+     engine: no imputation, scaling, encoding, feature
+     generation/selection, or lag/rolling/calendar construction — Phase
+     6.5 / 7.4 remain that boundary, unchanged.
+  3. **`dl_engine/training_loop.py` — the minimal training loop.**
+     `train_model(model, batch, config) -> DLTrainingResult` trains an
+     **already-constructed** `torch.nn.Module` (Phase 8.2 defines no
+     architecture) for `config.epochs` epochs, using `config`'s optimizer
+     (`Adam` / `AdamW` / `SGD`), loss (`MSELoss` / `L1Loss` /
+     `CrossEntropyLoss`), learning rate, and batch size (manual tensor
+     slicing — no `DataLoader`, no `num_workers`, no multiprocessing).
+     Batches are iterated in the fixed row order of `batch` every epoch —
+     never shuffled, so batch order is deterministic by construction
+     rather than by additional RNG control. Calls `seed_everything` before
+     the first forward/backward pass (documented precisely: this makes
+     everything the loop itself controls — optimizer steps, batch order,
+     loss computation — deterministic; it cannot make the caller's
+     pre-constructed model's *initial* weights reproducible, since the
+     loop never creates the model). A caught, explicit shape check treats
+     a mismatched model-output / target shape as the `failed` condition it
+     actually is, rather than letting `MSELoss` / `L1Loss` silently
+     broadcast a wrong-but-"successful" result (discovered while writing
+     the determinism tests: PyTorch's regression losses broadcast instead
+     of raising on a shape mismatch that `CrossEntropyLoss` correctly
+     rejects). PyTorch-missing and device-unavailable are reported as
+     `unavailable`; every other exception during training is caught
+     narrowly (`RuntimeError`, `ValueError`) and reported as `failed` with
+     the underlying message as `reason` — nothing is swallowed or
+     generalised into a context-free failure.
+- **`DLTrainingResult`** (`dl_engine/contracts.py`) — a **new, additive**
+  contract, not a modification of `TrainingRun` / `TrainingOutcome`
+  (neither was touched): `status` (reuses the existing
+  `TrainingRunStatus` enum rather than a fourth status vocabulary),
+  `family`, `device_used`, `epochs_requested` / `epochs_completed`,
+  `batch_size`, `learning_rate`, `optimizer`, `loss`, `seed`,
+  `deterministic_mode`, `loss_history`, `final_loss`, `reason`, `notes`.
+  Deliberately narrower than `TrainingOutcome`: it reports the raw
+  training-loop execution of *one* already-constructed model — no
+  evaluation against a held-out/test partition, no candidate ranking, no
+  test-set metric — because `TrainingRun` / `TrainingOutcome` are Phase
+  7's candidate-evaluation contracts and integrating a completed DL run
+  into them is explicitly deferred to a later increment, not decided
+  here. No timestamp, UUID, experiment id, artifact path, or
+  explainability/deployment metadata.
+- **Reason:** Phase 8.1 defined *what* a training run would be configured
+  with; Phase 8.2 is the smallest step that can actually run PyTorch code
+  end-to-end (seed → tensors → forward/backward → structured result)
+  while still deferring every open architectural question (which
+  architecture, how results integrate into `TrainingRun`, evaluation,
+  experiment tracking) to a later increment — mirroring the project's
+  established split between foundation and execution work (Forecasting
+  Foundation vs. Forecasting Execution; Phase 7.1 vs. 7.2-7.5).
+- **Verified deterministic:** two `train_model` calls, given identically
+  `seed_everything`-seeded fresh `torch.nn.Linear` models and the same
+  `TensorBatch` / `DLTrainingConfig`, produce byte-identical
+  `loss_history`, `final_loss`, and `model_dump_json()`. Verified with
+  PyTorch actually installed (a CPU wheel was installed temporarily to
+  run the full test suite, then fully uninstalled — including a stray
+  empty-directory leftover from `pip uninstall` that a bare `import torch`
+  would otherwise resolve as a namespace package — restoring the
+  torch-less default environment); training genuinely reduces loss and
+  updates model parameters on a small synthetic linear-regression
+  problem; batch size / epoch count / optimizer / loss selections all
+  behave as configured.
+- **OUT (this increment, and every later increment until explicitly
+  implemented):** any DL architecture (MLP / CNN / LSTM / Transformer),
+  DL evaluation against a test set, model selection, Phase 9
+  `ExperimentRecord`, MLflow, hyperparameter optimization, SHAP,
+  deployment, general Feature-Engineering execution, multi-series
+  forecasting, backtesting, autonomous experimentation. Phase-7 classical
+  modeling and forecasting behavior are unchanged (`data_engine.modeling`
+  has zero diffs in this increment).
+- **Phase state:** Phases 0-7 done (+ stabilization + forecasting
+  increments). Phase 8 in progress (8.1 + 8.2 done); 8.3+ and Phase 9 not
+  started. `pytest` full suite 1692 passed / 24 skipped by default
+  (PyTorch not installed); separately verified with PyTorch installed:
+  1715 passed / 1 skipped (all 89 `dl_engine` tests passing, 56 new this
+  increment). `ruff` / `ruff format` / `mypy` (`data_engine`, `datapilot`,
+  `dl_engine`) all green; the 5 pre-existing `mypy` errors in
+  `tests/data_engine/{conftest.py,test_validation_lineage.py}` are
+  unrelated to this increment (confirmed present on `main` before it).
+
+---
+
 ## 0080 — Phase 8.1: Deep Learning Foundation — `dl_engine` package, PyTorch optional-dependency boundary, `DLTrainingConfig` contract
 
 - **Decision:** begin Phase 8 (Deep Learning) with a foundation-only

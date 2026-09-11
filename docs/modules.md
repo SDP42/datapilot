@@ -34,7 +34,18 @@ Responsible for everything that touches the dataset directly.
   `contracts.py` — `DLTrainingConfig`, a deterministic configuration
   contract for a future training-execution increment; reuses Phase 7's
   `ModelFamily` / Phase 5's `TaskType` rather than a parallel vocabulary.
-  No model is trained, no architecture exists yet.
+- **Phase 8.2 (done, still no architecture):** `runtime.py` — deterministic
+  seeding (Python / NumPy / PyTorch) + `resolve_device()` (a requested,
+  unavailable CUDA/MPS never silently falls back to CPU). `tensors.py` —
+  `to_tensors()`, the narrow already-prepared-numeric-data → PyTorch-tensor
+  boundary (not a preprocessing engine; Phase 6.5 / 7.4 remain that
+  boundary). `training_loop.py` — `train_model()`, a minimal deterministic
+  loop that trains an **already-constructed** `torch.nn.Module` (no
+  architecture defined here) and returns the new, additive
+  `DLTrainingResult` contract (`contracts.py`) — raw training-loop
+  execution only, no evaluation, no model selection, no persistence.
+  `TrainingRun` / `TrainingOutcome` were not modified. No model
+  architecture exists yet.
 
 ## `experimentation/`
 - Experiment definitions (config → pipeline).

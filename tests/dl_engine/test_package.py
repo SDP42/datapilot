@@ -1,5 +1,5 @@
-"""Phase 8.1 — package-level sanity: imports, exports, no circular imports,
-and the PyTorch-optional boundary at the process level.
+"""Phase 8.1 / 8.2 — package-level sanity: imports, exports, no circular
+imports, and the PyTorch-optional boundary at the process level.
 """
 
 from __future__ import annotations
@@ -23,21 +23,29 @@ def test_public_exports_are_intentional():
         "DLLoss",
         "DLOptimizer",
         "DLTrainingConfig",
+        "DLTrainingResult",
         "DLTrainingStatus",
+        "DeviceResolution",
+        "TensorBatch",
         "TorchAvailability",
         "is_torch_available",
+        "resolve_device",
+        "seed_everything",
+        "to_tensors",
         "torch_availability",
+        "train_model",
     }
     assert set(dl_engine.__all__) == expected
     # every declared export is actually resolvable as an attribute
     for name in dl_engine.__all__:
         assert hasattr(dl_engine, name)
-    # no training-execution / outcome contract is exported yet — Phase 8.1 is
-    # foundation-only (config + availability, never a result of training)
+    # still no reuse-breaking parallel evaluation contract — DLTrainingResult
+    # is additive (see dl_engine.contracts), not a second TrainingOutcome
     assert not any("outcome" in name.lower() for name in dl_engine.__all__)
     assert not any("trainingrun" in name.lower() for name in dl_engine.__all__)
-    assert "train_model" not in dl_engine.__all__
-    assert not hasattr(dl_engine, "train_model")
+    # Phase 8.3+ (architectures) is not implemented — no MLP / CNN / LSTM export
+    for arch_hint in ("mlp", "cnn", "lstm", "transformer"):
+        assert not any(arch_hint in name.lower() for name in dl_engine.__all__)
 
 
 def test_no_circular_import_dl_engine_first():

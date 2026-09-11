@@ -44,13 +44,23 @@ human data scientist would — and explains every step.
 >   real package: a deterministic, lazily-imported PyTorch
 >   availability probe (`dl_engine.availability`, PyTorch is an optional
 >   `dl` extra — every Phase 0-7 capability works without it) and a
->   deterministic `DLTrainingConfig` contract (`dl_engine.contracts`) for
->   a future training-execution increment. **No model is trained yet** —
->   no architecture, no training loop.
+>   deterministic `DLTrainingConfig` contract (`dl_engine.contracts`).
+> - **Phase 8.2 — Deterministic PyTorch Training Foundation (done)** —
+>   `dl_engine.runtime`: deterministic seeding (Python / NumPy / PyTorch)
+>   + device resolution (a requested, unavailable CUDA/MPS never silently
+>   falls back to CPU). `dl_engine.tensors`: the narrow
+>   already-prepared-numeric-data → tensor boundary (regression / binary /
+>   multiclass classification; not a preprocessing engine). `dl_engine.
+>   training_loop.train_model()`: a minimal deterministic loop that trains
+>   an **already-constructed** `torch.nn.Module`, returning the new,
+>   additive `DLTrainingResult` contract. **Still no model architecture,
+>   no evaluation against a test set, no model selection** —
+>   `TrainingRun` / `TrainingOutcome` were not modified.
 >
-> No hyperparameter tuning, cross-validation, trained deep-learning
-> models, experiment tracking, explainability, LLM usage, API, or UI
-> exists yet. Phase 8 is **in progress (8.1 foundation only)**; Phase 9
+> No hyperparameter tuning, cross-validation, a DL architecture (MLP /
+> CNN / LSTM), DL evaluation, experiment tracking, explainability, LLM
+> usage, API, or UI exists yet. Phase 8 is **in progress (8.2 training
+> foundation)**; Phase 9
 > onward is **not started**. See [docs/roadmap.md](docs/roadmap.md).
 
 ---
@@ -107,7 +117,7 @@ Raw data → deterministic engines → structured results → AI reasoning
 | `datapilot/` | Shared core: version, config, shared data contracts |
 | `data_engine/` | Ingestion, profiling, quality, cleaning, validation & lineage, EDA, problem understanding, feature engineering, **modeling** (Phase 7) |
 | `ml_engine/` | *Empty stub.* Phase 7 was implemented in `data_engine.modeling`; this package is unused. |
-| `dl_engine/` | Deep learning (PyTorch) — *Phase 8.1 foundation done: PyTorch optional-dependency boundary + deterministic `DLTrainingConfig` contract; no model trained yet* |
+| `dl_engine/` | Deep learning (PyTorch) — *Phase 8.2 training foundation done: PyTorch optional-dependency boundary + `DLTrainingConfig` (8.1); deterministic seeding/device resolution + dataset-to-tensor boundary + a minimal training loop for an already-built model + `DLTrainingResult` (8.2). No model architecture yet* |
 | `experimentation/` | Experiment definition, execution, comparison, history — *stub, Phase 9* |
 | `explainability/` | Feature importance, SHAP, explanation objects — *stub, Phase 10* |
 | `ai_engine/` | LLM orchestration — *interface only (`LLMProvider` ABC); Phase 11–12* |
@@ -166,8 +176,9 @@ continuous Testing/Benchmarking/Docs. See [docs/roadmap.md](docs/roadmap.md).
 | **Forecasting Execution** (`data_engine.modeling`) | ✅ Done — Phase 7.4 now **builds** the Phase-6 lag / rolling recommendations (`build_temporal_features`, a pure backward-looking transform: `lag k = shift(k)`, `rolling w = shift(1).rolling(w)`) and trains the forecasting model on them. **Leakage-safe for one-step-ahead evaluation** (a feature at row `i` uses only values strictly before `i`). The leading warm-up rows are dropped (`TrainingRun.rows_consumed_as_history`), the built columns recorded (`TrainingRun.temporal_features_built`); `< 20` modelable rows after the warm-up → `unavailable`. Also fixes a latent non-contiguous-row-drop bug for time-ordered forecasting (`assess_feasibility` blocks an internal target gap). No new dependency. |
 | **Forecasting Execution — part 2 & Recursive Multi-Step Forecasting** (`data_engine.modeling`) | ✅ Done — Phase 7.4 also **builds** the Phase-6.3 calendar / seasonal derivations (`build_calendar_features`: `derive <part>` / `cyclical (sin/cos) <part>` → stateless row-wise columns, zero lookback, zero leakage; `TrainingRun.calendar_features_built`). Additive `ModelingRequest.forecast_horizon` (default `1`, `ge=1`) → `TrainingRun.forecast_horizon`; `> 1` adds recursive rolling-origin multi-step diagnostics (`_recursive_horizon_metrics`, feeding predictions back through `temporal_feature_spec` to rebuild target-derived lags) as `metrics["rmse_h1"]..["rmse_hN"]` — **diagnostics only**, the fixed one-step `rmse` selection metric is never overridden. General Feature-Engineering execution (all task types) and the Phase-9 `ExperimentRecord` foundation remain out of scope, planned separately. No new dependency. |
 | AI-driven cleaning approval / reasoning | ⛔ Not started (Phase 11+) |
-| **Phase 8.1 — Deep Learning Foundation** (`dl_engine`) | ✅ Done — `dl_engine.availability`: a deterministic, lazily-imported PyTorch probe (`torch_availability()` / `is_torch_available()`; `torch` is an optional `dl` extra, imported only when the probe is called, never at package import time — every Phase 0-7 capability works without it). `dl_engine.contracts.DLTrainingConfig`: a deterministic, JSON-serialisable configuration contract for a future training-execution increment (architecture name, task type, seed, epochs, batch size, learning rate, optimizer, loss, device, deterministic mode, status, reason); `status` defaults to `not_yet_started`, and it reuses the existing `ModelFamily.NEURAL` / `TaskType` vocabularies rather than a parallel one. **No model is trained, no architecture exists, no training loop runs yet** — Phase 8 remains **in progress**, not done. |
-| Deep learning — model training / architectures / training loops (Phase 8.2+) | ⛔ Not started |
+| **Phase 8.1 — Deep Learning Foundation** (`dl_engine`) | ✅ Done — `dl_engine.availability`: a deterministic, lazily-imported PyTorch probe (`torch_availability()` / `is_torch_available()`; `torch` is an optional `dl` extra, imported only when the probe is called, never at package import time — every Phase 0-7 capability works without it). `dl_engine.contracts.DLTrainingConfig`: a deterministic, JSON-serialisable configuration contract (architecture name, task type, seed, epochs, batch size, learning rate, optimizer, loss, device, deterministic mode, status, reason); `status` defaults to `not_yet_started`, and it reuses the existing `ModelFamily.NEURAL` / `TaskType` vocabularies rather than a parallel one. |
+| **Phase 8.2 — Deterministic PyTorch Training Foundation** (`dl_engine`) | ✅ Done — `dl_engine.runtime`: `seed_everything()` (Python / NumPy / PyTorch CPU+CUDA seeding, deterministic-algorithms mode) + `resolve_device()` (a requested, unavailable CUDA/MPS returns a structured failure, never a silent CPU fallback). `dl_engine.tensors.to_tensors()`: the narrow already-prepared-numeric-data → tensor boundary (regression / binary / multiclass classification; validates shape/dtype/finiteness in pure NumPy before PyTorch is required; never mutates source data or reorders rows; **not** a preprocessing engine — no imputation/scaling/encoding/feature construction). `dl_engine.training_loop.train_model()`: a minimal deterministic loop that trains an **already-constructed** `torch.nn.Module` (no architecture defined here) for the configured epochs/batch-size/optimizer/loss/learning-rate, returning the new additive `DLTrainingResult` contract (`status` reuses `TrainingRunStatus`; loss history, final loss, device used, reason — no evaluation metric). **`TrainingRun` / `TrainingOutcome` were not modified.** **No model architecture, no evaluation against a test set, no model selection, no persistence, no experiment tracking exists yet** — Phase 8 remains **in progress**, not done. |
+| Deep learning — model architectures (MLP/CNN/LSTM/etc.), DL evaluation, model selection (Phase 8.3+) | ⛔ Not started |
 | Iterative ML experimentation, hyperparameter tuning, CV, experiment tracking (Phase 9+) | ⛔ Not started |
 | Explainability, AI Scientist / agent loop, backend API, frontend, MLOps, deployment | ⛔ Not started |
 
