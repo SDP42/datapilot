@@ -86,6 +86,36 @@ Responsible for everything that touches the dataset directly.
   `data_engine.modeling.run_modeling_pipeline` — a separate, opt-in
   Phase-8 entry point; `data_engine/modeling/*` has zero diffs from this
   increment. No model selection, no classical-vs-DL comparison.
+- **Phase 8.6 (done, still no classical-vs-DL comparison):**
+  `selection.py` — `select_dl_models()`, executing each supplied
+  `DLCandidate` **exactly once** via `run_mlp_modeling` (verified by a
+  call-count spy) and ranking the results deterministically. Reuses the
+  exact Phase-7 per-task `(metric, direction)` values (`rmse`/minimize,
+  `f1`/maximize) — no DL-specific metric. `contracts.py` gains
+  `DLCandidate` (an `MLPArchitectureConfig` + `DLTrainingConfig` pair,
+  identified by a deterministic SHA-256 config digest, never a random
+  UUID), `DLCandidateRank` (nests `DLModelingResult` per candidate), and
+  `DLSelectionResult`. An ineligible candidate stays visible with a
+  reason and `rank = None`; tie-break is `(architecture_name, serialised
+  training_config)`. Deliberately **not** wired into
+  `data_engine.modeling.select_model` — compares Phase-8 DL candidates
+  against each other only. No classical-vs-DL comparison, no experiment
+  tracking.
+- **Phase 8.7 (done, contracts + builders only — zero training /
+  evaluation / selection integration):** `architectures.py` gains
+  `CNNArchitectureConfig`, `LSTMArchitectureConfig`,
+  `TransformerArchitectureConfig` — sharing `MLPArchitectureConfig`'s
+  own `task_type`/`output_dim` convention (unchanged) via new shared
+  helper functions, plus an architecture-specific constraint each (odd
+  `kernel_size` for CNN; `dropout == 0.0` when `num_layers == 1` for
+  LSTM; `num_heads` evenly divides `d_model` for Transformer). `cnn.py` —
+  `build_cnn()`, `lstm.py` — `build_lstm()`, `transformer.py` —
+  `build_transformer()`: each mirrors `mlp.py`'s lazy-PyTorch-import and
+  deterministic-construction discipline, returns raw logits, and
+  validates its expected input tensor shape explicitly (raising
+  `ValueError` on a mismatch rather than reshaping). **None of the three
+  are wired into `training_loop.py`, `execution.py`, or `selection.py`**
+  — that integration is deferred to a later increment.
 
 ## `experimentation/`
 - Experiment definitions (config → pipeline).

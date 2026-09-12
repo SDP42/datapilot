@@ -64,9 +64,8 @@
   ``train_model`` and there is no ``fit_and_evaluate()`` convenience
   function.
 
-**Phase 8.5 (this increment)** connects the existing components into a
-coherent single-model workflow — still no model selection, no
-comparison against classical models, no experiment tracking:
+**Phase 8.5** connected the existing components into a coherent
+single-model workflow:
 
 * :mod:`dl_engine.execution` — :func:`run_mlp_modeling`, the single
   modeling-facing entry point chaining ``build_mlp`` → ``to_tensors``
@@ -92,80 +91,172 @@ comparison against classical models, no experiment tracking:
   entry point a caller reaches by explicitly importing ``dl_engine``,
   not something the existing Phase-7 API triggers automatically.
 
+**Phase 8.6 (this increment)** adds a deterministic, DL-only selection
+layer comparing multiple Phase-8 candidates — still no comparison against
+classical models, no experiment tracking:
+
+* :mod:`dl_engine.selection` — :func:`select_dl_models`, executing each
+  supplied :class:`DLCandidate` exactly once via the existing
+  ``run_mlp_modeling`` (no candidate is ever retrained) and ranking the
+  results deterministically. The selection metric / direction reuse the
+  **exact** per-task values :mod:`data_engine.modeling.selection`
+  already established (``rmse`` / minimize for regression, ``f1`` /
+  maximize for binary and multiclass classification) — never a
+  DL-specific substitute. A candidate is eligible only when its run
+  completed and its evaluation carries a finite selection-metric value;
+  an ineligible candidate stays visible in the ranking with a reason, it
+  is never dropped. The tie-break (metric, then architecture name, then
+  the candidate's own serialised training configuration) is fully
+  reproducible — never dictionary order, an object id, or a random
+  number.
+* :mod:`dl_engine.contracts` also gained :class:`DLCandidate` (an
+  ``MLPArchitectureConfig`` + ``DLTrainingConfig`` pair, identified by a
+  deterministic configuration digest — never a random UUID),
+  :class:`DLCandidateRank`, and :class:`DLSelectionResult` (which
+  **nests** ``DLModelingResult`` per candidate rather than duplicating
+  its fields).
+* **Compares Phase-8 DL candidates against each other only** — never
+  against a Phase-7 classical candidate; that broader comparison is
+  explicitly out of scope and would need its own separate design.
+
 ``dl_engine`` integrates with the existing Phase-7
 :class:`~data_engine.modeling.ModelFamily` (``NEURAL``) and Phase-5
 :class:`~data_engine.problem_understanding.TaskType` vocabularies rather
 than inventing a parallel one; wiring a completed DL run into the
 existing :class:`~data_engine.modeling.TrainingRun` /
 :class:`~data_engine.modeling.TrainingOutcome` /
-:class:`~data_engine.modeling.EvaluationResults` contracts, DL model
-selection, and classical-vs-DL comparison remain future work.
+:class:`~data_engine.modeling.EvaluationResults` contracts,
+classical-vs-DL comparison, and experiment tracking remain future work.
 
     from dl_engine import (
         is_torch_available, DLTrainingConfig, MLPArchitectureConfig,
-        run_mlp_modeling,
+        DLCandidate, select_dl_models,
     )
 
     if is_torch_available():
-        arch = MLPArchitectureConfig(
-            task_type=TaskType.REGRESSION, input_features=4, output_dim=1,
-            hidden_layer_sizes=[16],
-        )
-        config = DLTrainingConfig(architecture_name="mlp", task_type=TaskType.REGRESSION)
-        result = run_mlp_modeling(X_train, y_train, X_eval, y_eval, arch, config)
+        candidates = [
+            DLCandidate(
+                architecture=MLPArchitectureConfig(
+                    task_type=TaskType.REGRESSION, input_features=4, output_dim=1,
+                    hidden_layer_sizes=[16],
+                ),
+                training_config=DLTrainingConfig(
+                    architecture_name="mlp-16", task_type=TaskType.REGRESSION,
+                ),
+            ),
+            DLCandidate(
+                architecture=MLPArchitectureConfig(
+                    task_type=TaskType.REGRESSION, input_features=4, output_dim=1,
+                    hidden_layer_sizes=[32, 16],
+                ),
+                training_config=DLTrainingConfig(
+                    architecture_name="mlp-32-16", task_type=TaskType.REGRESSION,
+                ),
+            ),
+        ]
+        result = select_dl_models(X_train, y_train, X_eval, y_eval, candidates)
 
-Out of scope for Phase 8.5 (and every later increment in this package
-until explicitly implemented): automatic model selection, DL candidate
-ranking, comparison between classical and DL models, any architecture
-beyond the MLP (CNN / LSTM / Transformer / attention / sequence models),
-experiment tracking / ``ExperimentRecord`` (Phase 9), hyperparameter
-optimization, SHAP, deployment, and general feature-engineering
-execution.
+**Phase 8.7 (this increment)** adds architecture **foundations only** for
+three advanced architectures — contracts and lazy-PyTorch builders, with
+**no training / evaluation / selection integration**:
+
+* :mod:`dl_engine.architectures` gains :class:`CNNArchitectureConfig`,
+  :class:`LSTMArchitectureConfig`, and
+  :class:`TransformerArchitectureConfig` — sharing the same ``task_type``
+  / ``output_dim`` convention as :class:`MLPArchitectureConfig`
+  (unchanged, untouched by this increment).
+* :mod:`dl_engine.cnn` — :func:`build_cnn` (a small 1D CNN; input shape
+  ``(batch, input_channels, sequence_length)``), :mod:`dl_engine.lstm` —
+  :func:`build_lstm` (a standard sequence LSTM; input shape ``(batch,
+  seq_len, input_size)``), :mod:`dl_engine.transformer` — :func:`build_transformer`
+  (a compact numeric-sequence Transformer encoder; input shape ``(batch,
+  seq_len, input_size)``). Each returns raw logits (no softmax/sigmoid),
+  rejects a mismatched input shape with ``ValueError`` rather than
+  reshaping it, and is deterministic when
+  :func:`dl_engine.runtime.seed_everything` seeds immediately beforehand
+  — exactly like :func:`dl_engine.mlp.build_mlp`.
+* **None of the three are wired into**
+  :func:`dl_engine.training_loop.train_model`,
+  :func:`dl_engine.execution.run_mlp_modeling`, or
+  :func:`dl_engine.selection.select_dl_models` — that integration, and
+  classical-vs-DL comparison, remain future work.
+
+Out of scope for Phase 8.7 (and every later increment in this package
+until explicitly implemented): CNN / LSTM / Transformer training loops,
+modeling execution, evaluation integration, or candidate selection;
+comparison between classical and DL models; automatic model selection
+*within* the Phase-7 pipeline; attention-based architectures beyond the
+compact Transformer foundation; experiment tracking /
+``ExperimentRecord`` (Phase 9); hyperparameter optimization; SHAP;
+deployment; and general feature-engineering execution.
 """
 
 from __future__ import annotations
 
-from .architectures import MLPActivation, MLPArchitectureConfig
+from .architectures import (
+    CNNArchitectureConfig,
+    LSTMArchitectureConfig,
+    MLPActivation,
+    MLPArchitectureConfig,
+    TransformerArchitectureConfig,
+)
 from .availability import TorchAvailability, is_torch_available, torch_availability
+from .cnn import build_cnn
 from .contracts import (
     DL_ENGINE_VERSION,
+    DLCandidate,
+    DLCandidateRank,
     DLDevice,
     DLEvaluationResult,
     DLLoss,
     DLModelingResult,
     DLOptimizer,
+    DLSelectionResult,
     DLTrainingConfig,
     DLTrainingResult,
     DLTrainingStatus,
 )
 from .evaluation import evaluate_model
 from .execution import run_mlp_modeling
+from .lstm import build_lstm
 from .mlp import build_mlp
 from .runtime import DeviceResolution, resolve_device, seed_everything
+from .selection import select_dl_models
 from .tensors import TensorBatch, to_tensors
 from .training_loop import train_model
+from .transformer import build_transformer
 
 __all__ = [
     "DL_ENGINE_VERSION",
+    "CNNArchitectureConfig",
+    "DLCandidate",
+    "DLCandidateRank",
     "DLDevice",
     "DLEvaluationResult",
     "DLLoss",
     "DLModelingResult",
     "DLOptimizer",
+    "DLSelectionResult",
     "DLTrainingConfig",
     "DLTrainingResult",
     "DLTrainingStatus",
     "DeviceResolution",
+    "LSTMArchitectureConfig",
     "MLPActivation",
     "MLPArchitectureConfig",
     "TensorBatch",
     "TorchAvailability",
+    "TransformerArchitectureConfig",
+    "build_cnn",
+    "build_lstm",
     "build_mlp",
+    "build_transformer",
     "evaluate_model",
     "is_torch_available",
     "resolve_device",
     "run_mlp_modeling",
     "seed_everything",
+    "select_dl_models",
     "to_tensors",
     "torch_availability",
     "train_model",

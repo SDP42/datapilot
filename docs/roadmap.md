@@ -13,7 +13,7 @@ future phases are not anticipated in code.
 | 5 | Automated Problem Understanding | **Done** — `data_engine.problem_understanding`: the `ProblemSpec` contract + `understand_problem` foundation (5.1), **target identification** `identify_target` (5.2), **task-type inference** `infer_task_type` (5.3), **candidate metrics** `recommend_metrics` (5.4), **feasibility assessment** `assess_feasibility` (5.5). All deterministic, standalone, analysis-only; no ML/LLM. **Forecasting Foundation (done):** additive `TaskTypeInference.time_column` + `infer_task_type(..., time_column=)`; feasibility blocks an unsorted forecasting frame |
 | 6 | Feature Engineering | **Done** — `data_engine.feature_engineering`, all deterministic, standalone, analysis-only: `FeatureEngineeringSpec` contract + foundation (6.1); **structural feature inventory** `inventory_features` (6.2); **transformation recommendations** `recommend_transformations` (6.3); **feature-selection recommendations** `recommend_feature_selection` (6.4); **preprocessing requirements** `recommend_preprocessing` (6.5); **feature-engineering assessment** `assess_feature_engineering` — structural consistency & readiness check over 6.2–6.5, `feasible` True/False from blocking structural inconsistencies (6.6). Nothing is executed; no ML/LLM. **Forecasting Foundation (done):** new `FeatureEngineeringSpec.temporal` section + `recommend_temporal_features` — lag / rolling feature **recommendations** for a forecasting problem, `unavailable` for every other task; new `LAG_FEATURE` / `ROLLING_FEATURE` operation types; nothing built |
 | 7 | Model Development / Modeling | **Done** — `data_engine.modeling`, all deterministic and standalone: `ModelingSpec` contract + foundation (7.1); **model readiness** `assess_model_readiness` + **data-split planning** `recommend_data_split` (7.2); **model candidate generation** `generate_model_candidates` (7.3); **training & evaluation** `train_and_evaluate_models` (7.4) — fits one conservative scikit-learn baseline per candidate family and reports per-candidate metrics; **model selection & recommendation** `select_model` (7.5) — deterministically ranks the successful 7.4 runs by a fixed per-task metric and recommends one family/estimator. Nothing beyond the 7.4 baselines is trained; no hyperparameter tuning, CV, feature importance, SHAP, or artifact persistence anywhere in Phase 7. **Post-Phase-7 stabilization (done):** `run_modeling_pipeline` deterministic end-to-end composition + overall `ModelingSpec.status`; `EvaluationResults` is now a status mirror of `TrainingOutcome`; explicit forecasting chronological-order precondition. **Forecasting Foundation (done):** first-class `TaskTypeInference.time_column` + `infer_task_type(..., time_column=)`; unsorted-forecasting caught in Phase-5 feasibility; new `FeatureEngineeringSpec.temporal` section + `recommend_temporal_features` (lag / rolling **recommendations**). **Forecasting Execution (done):** Phase 7.4 now **builds** those lag / rolling features (`build_temporal_features`, backward-looking, leakage-safe one-step-ahead) and trains the forecasting model on them; `TrainingRun.temporal_features_built` / `rows_consumed_as_history`. **Forecasting Execution — part 2 & Recursive Multi-Step Forecasting (done):** Phase 7.4 also **builds** the Phase-6.3 calendar / seasonal derivations (`build_calendar_features`, stateless, no leakage; `TrainingRun.calendar_features_built`); additive `ModelingRequest.forecast_horizon` / `TrainingRun.forecast_horizon` add recursive rolling-origin multi-step diagnostics (`rmse_h1..hN`) without changing the one-step selection metric |
-| 8 | Deep Learning | **In progress — 8.5 deep learning modeling pipeline integration.** 8.1: `dl_engine` package + PyTorch optional-dependency boundary + `DLTrainingConfig`. 8.2: deterministic seeding/device resolution, the dataset-to-tensor boundary, and a minimal deterministic training loop (`train_model`, `DLTrainingResult`). 8.3: the first Phase-8 architecture — a small feed-forward MLP (`MLPArchitectureConfig`, `build_mlp`) for regression / binary / multiclass classification. 8.4: `evaluate_model` — evaluates an already-trained model on explicitly supplied evaluation data, reusing the exact Phase-7 metric vocabulary (`DLEvaluationResult`). 8.5: `run_mlp_modeling` — chains build → train → evaluate into one deterministic single-model run (`DLModelingResult`, nesting the existing training/evaluation results); an explicit, opt-in Phase-8 entry point, not wired into `run_modeling_pipeline`. No model selection, no classical-vs-DL comparison, no CNN/LSTM/Transformer; every Phase 0-7 capability works without PyTorch installed |
+| 8 | Deep Learning | **In progress — 8.6 deep learning model selection.** 8.1: `dl_engine` package + PyTorch optional-dependency boundary + `DLTrainingConfig`. 8.2: deterministic seeding/device resolution, the dataset-to-tensor boundary, and a minimal deterministic training loop (`train_model`, `DLTrainingResult`). 8.3: the first Phase-8 architecture — a small feed-forward MLP (`MLPArchitectureConfig`, `build_mlp`) for regression / binary / multiclass classification. 8.4: `evaluate_model` — evaluates an already-trained model on explicitly supplied evaluation data, reusing the exact Phase-7 metric vocabulary (`DLEvaluationResult`). 8.5: `run_mlp_modeling` — chains build → train → evaluate into one deterministic single-model run (`DLModelingResult`). 8.6: `select_dl_models` — executes multiple `DLCandidate` configurations (each exactly once) and deterministically ranks them by the exact Phase-7 selection metric per task (`rmse`/minimize, `f1`/maximize), comparing DL candidates against each other only (`DLSelectionResult`). No classical-vs-DL comparison, no CNN/LSTM/Transformer, no experiment tracking; every Phase 0-7 capability works without PyTorch installed |
 | 9 | Experiment Tracking | Not started |
 | 10 | Explainable AI | Not started |
 | 11 | AI Scientist / Agent | Not started |
@@ -931,7 +931,7 @@ future phases are not anticipated in code.
 - **Quality gates:** `pytest` (1624 passed, 1 skipped) / `ruff` / `ruff
   format` / `mypy` all green; decision 0079.
 
-### Phase 8 — Deep Learning — **In progress — 8.5 deep learning modeling pipeline integration**
+### Phase 8 — Deep Learning — **In progress — 8.6 deep learning model selection**
 - **Objective:** add DL where justified.
 - **Components:** `dl_engine` PyTorch models, training loops, evaluation.
 - **Output:** trained DL models + evaluation reports.
@@ -1280,6 +1280,166 @@ future phases are not anticipated in code.
   installed: 1820 passed / 1 skipped, all 194 `dl_engine` tests passing
   (21 new in this increment). `ruff` / `ruff format` / `mypy`
   (`data_engine`, `datapilot`, `dl_engine`) all green; decision 0084.
+
+#### Phase 8.6 — Deep Learning Model Selection — **Done**
+- **Scope:** a deterministic selection layer comparing multiple explicit
+  Phase-8 `MLPArchitectureConfig` / `DLTrainingConfig` candidates against
+  **each other only** — never against a Phase-7 classical model. Still
+  not wired into `run_modeling_pipeline()` or `select_model()`; still no
+  advanced architectures, experiment tracking, or hyperparameter search.
+- **`dl_engine/contracts.py` — `DLCandidate`, `DLCandidateRank`,
+  `DLSelectionResult`.** `DLCandidate` pairs an existing
+  `MLPArchitectureConfig` with an existing `DLTrainingConfig` — no new
+  configuration vocabulary; its identity (`candidate_id`, exposed via
+  `DLCandidateRank`) is a deterministic SHA-256 digest of both configs'
+  own JSON, truncated to 16 hex characters — **never** a random UUID or
+  an experiment id, and stable across repeated computation for identical
+  configuration. `DLCandidateRank` **nests** the existing
+  `DLModelingResult` per candidate (never duplicating its fields, the
+  same pattern `DLModelingResult` itself already uses for
+  `DLTrainingResult`/`DLEvaluationResult`): `candidate_id`,
+  `architecture_name`, `status` (reuses `TrainingRunStatus`), `score`,
+  `metric`, `rank` (`1`-based for eligible, `None` otherwise — mirroring
+  `ModelSelectionRank`'s exact convention), `reason`, `modeling_result`.
+  `DLSelectionResult`: `status` (reuses `TrainingRunStatus`), `task_type`,
+  `family` (`= NEURAL`), `selection_metric`, `selection_direction`,
+  `ranking` (eligible candidates first, ordered by rank, then ineligible
+  ones), `selected_candidate_id`, `selected_architecture_name`,
+  `selected_score`, `reason`, `notes`.
+- **`dl_engine/selection.py` — `select_dl_models(X_train, y_train, X_eval,
+  y_eval, candidates)`.** Pure orchestration: calls the existing
+  `run_mlp_modeling` **exactly once per candidate** — no model
+  construction, tensor conversion, training, or evaluation logic is
+  duplicated. All candidates are compared on the same shared
+  train/evaluation split, exactly like `select_model` compares classical
+  candidates on the same Phase-7.4 split. Every candidate must agree on
+  `task_type` (both architecture and training config) — a mismatch
+  across the set is a structured failure, since one selection metric
+  cannot meaningfully compare candidates from different tasks.
+- **Selection metric — reused verbatim, never a DL-specific
+  substitute:** regression → `rmse` (minimize); binary classification →
+  `f1` (maximize); multiclass classification → `f1` (maximize) — the
+  **exact** `(metric, direction)` pairs `data_engine.modeling.selection`
+  already established. `roc_auc` remains present and visible in each
+  candidate's nested evaluation metrics but is never the selection
+  metric and never overrides `f1`.
+- **Eligibility (mirrors `select_model`'s own per-run classification
+  exactly):** a candidate is eligible only when its `run_mlp_modeling`
+  result is `completed`, its evaluation carries the task's selection
+  metric, and that value is finite. An ineligible candidate — failed
+  modeling execution, missing metric, non-finite metric — remains
+  **visible** in `ranking` with `rank = None` and an explicit `reason`;
+  it is never silently dropped. When zero candidates are eligible,
+  `DLSelectionResult.status = failed` with a reason explaining why (a
+  deliberate difference from Phase 7's `ModelSelection`, which reports
+  `completed` even with nothing selected — documented in decision 0085).
+- **Deterministic ranking / tie-break:** eligible candidates sort by
+  `(metric value oriented so lower is always better, architecture_name,
+  the candidate's own training_config.model_dump_json())` — the
+  recommended order from the plan, adapted from Phase 7's own
+  `(family, estimator_name)` tie-break (inspected first; DL candidates
+  have no varying `family` to fall back on, since every Phase-8
+  candidate is `NEURAL`, so architecture name + a fully serialised
+  configuration take that role instead). Never dictionary order, an
+  object id, a timestamp, or a random number. Ineligible candidates are
+  sorted the same way (without the metric) and appended after every
+  eligible one.
+- **No retraining:** each candidate is executed **exactly once** — a
+  test spies on `run_mlp_modeling` and confirms the call count equals
+  the candidate count exactly, with no additional call after ranking.
+- **Verified deterministic:** two full `select_dl_models` calls with
+  identical data / candidates produce byte-identical rankings, the same
+  selected candidate, and byte-identical `model_dump_json()` — for
+  regression, binary classification, and multiclass classification.
+  Genuine ties (identical configuration except `architecture_name`)
+  resolve to the same winner on every repeated run via the documented
+  tie-break.
+- **New exports:** `select_dl_models`, `DLCandidate`, `DLCandidateRank`,
+  `DLSelectionResult`.
+- **OUT (this increment and until explicitly implemented):** comparison
+  between classical and DL models, automatic model selection *within*
+  the Phase-7 pipeline, any architecture beyond the MLP, Phase 9
+  `ExperimentRecord`, MLflow, hyperparameter optimization, SHAP,
+  deployment, cross-validation orchestration. Phase-7 candidate
+  generation / training / evaluation / model selection,
+  `run_modeling_pipeline()`, and forecasting behavior are unchanged.
+- **Quality gates:** `pytest` full suite 1764 passed / 83 skipped
+  (PyTorch not installed by default); separately verified with PyTorch
+  installed: 1846 passed / 1 skipped, all 220 `dl_engine` tests passing
+  (26 new in this increment). `ruff` / `ruff format` / `mypy`
+  (`data_engine`, `datapilot`, `dl_engine`) all green; decision 0085.
+
+#### Phase 8.7 — Advanced Deep Learning Architecture Foundation — **Done**
+- **Scope:** architecture **foundations only** for three advanced
+  architectures — contracts (Task 1) and lazy-PyTorch builders (Task 2)
+  — with **zero** training, evaluation, or selection integration. Still
+  not wired into `train_model`, `run_mlp_modeling`, or
+  `select_dl_models`; still no classical-vs-DL comparison, no
+  experiment tracking.
+- **`dl_engine/architectures.py` gains `CNNArchitectureConfig`,
+  `LSTMArchitectureConfig`, `TransformerArchitectureConfig`.** All three
+  share the existing `task_type` / `output_dim` convention
+  (`MLPArchitectureConfig` itself is **byte-for-byte unchanged** — the
+  shared validation was factored into two new module-level helper
+  functions used only by the new classes, not by editing the existing
+  one). `CNNArchitectureConfig`: `input_channels`, `sequence_length`,
+  `conv_channels` (non-empty positive-int list), `kernel_size`
+  (validated **odd**, so `padding = kernel_size // 2` preserves
+  `sequence_length` exactly through every conv layer — no shape drift
+  to track), `activation` (reuses `MLPActivation`), `pooling` (bool —
+  `AdaptiveMaxPool1d(1)` when `True`), `dropout`. `LSTMArchitectureConfig`:
+  `input_size`, `hidden_size`, `num_layers`, `bidirectional`, `dropout`
+  (validated: `> 0.0` requires `num_layers > 1`, matching
+  `torch.nn.LSTM`'s own real constraint). `TransformerArchitectureConfig`:
+  `input_size`, `d_model`, `num_heads` (validated: must evenly divide
+  `d_model`, matching `torch.nn.MultiheadAttention`'s own real
+  constraint), `num_encoder_layers`, `dim_feedforward`, `dropout`.
+- **`dl_engine/cnn.py` — `build_cnn()`, `dl_engine/lstm.py` —
+  `build_lstm()`, `dl_engine/transformer.py` — `build_transformer()`.**
+  Each mirrors `build_mlp`'s exact lazy-PyTorch-import discipline and
+  deterministic-construction guarantee (seed immediately before calling
+  → bit-identical initial parameters). Each returns raw logits — no
+  softmax/sigmoid — matching the existing MLP / `CrossEntropyLoss`
+  convention; output dimension follows the same rule (`1` regression,
+  `2` binary, `num_classes` multiclass). Each validates its expected
+  input tensor shape explicitly inside `forward()` and **raises
+  `ValueError` on a mismatch rather than reshaping**: CNN expects
+  `(batch, input_channels, sequence_length)`; LSTM and Transformer both
+  expect `(batch, seq_len, input_size)` (`seq_len` may vary per call;
+  only the feature-count dimension is fixed). The Transformer omits
+  positional encoding deliberately, to stay a minimal foundation.
+- **No integration performed (Task 2's own explicit boundary):** none of
+  the three builders are called from `train_model`, `run_mlp_modeling`,
+  or `select_dl_models`; no CNN/LSTM/Transformer candidate can be
+  trained, evaluated, or selected through any existing Phase-8 entry
+  point yet.
+- **Verified (with real PyTorch):** each builder returns a genuine
+  `torch.nn.Module`; correct output shapes for regression (`(n, 1)`),
+  binary classification (`(n, 2)`), and multiclass classification
+  (`(n, num_classes)`); an invalid input shape raises `ValueError`
+  rather than being silently reshaped; two independently-seeded builds
+  from the same config produce structurally identical (and, for
+  parameters, bit-identical) results; classification outputs are raw
+  logits, not probabilities; building a model never mutates the config
+  object that described it.
+- **New exports:** `CNNArchitectureConfig`, `LSTMArchitectureConfig`,
+  `TransformerArchitectureConfig`, `build_cnn`, `build_lstm`,
+  `build_transformer`.
+- **OUT (this increment and until explicitly implemented):** CNN / LSTM
+  / Transformer training loops, modeling execution, evaluation
+  integration, or candidate selection; classical-vs-DL comparison;
+  hyperparameter optimization; Phase 9 `ExperimentRecord`; MLflow; model
+  persistence / registry; deployment; explainability; forecasting-
+  specific DL execution. `data_engine/modeling/*`, Phase-7 selection, and
+  forecasting behavior are unchanged; `MLPArchitectureConfig` /
+  `build_mlp` / `train_model` / `run_mlp_modeling` /
+  `select_dl_models` public semantics are unchanged.
+- **Quality gates:** `pytest` full suite and real-PyTorch verification
+  reported in decision 0086 (a local environment issue — a corrupted
+  `sympy` install left over from an earlier temporary-PyTorch-install
+  cycle — required remediation before the real-PyTorch run could
+  complete; documented there for transparency). `ruff` / `ruff format` /
+  `mypy` (`data_engine`, `datapilot`, `dl_engine`) all green.
 
 ### Phase 9 — Experiment Tracking
 - **Objective:** make every experiment reproducible and comparable.

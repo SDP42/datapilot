@@ -605,11 +605,76 @@ one-way (`dl_engine` → `data_engine.modeling`), so `data_engine.modeling`
 still never requires PyTorch to import. Still no model selection, no
 classical-vs-DL comparison, no CNN / LSTM / Transformer.
 
+**Phase 8.6 — Deep Learning Model Selection (done, still no
+classical-vs-DL comparison):** `dl_engine` gains a deterministic
+selection layer comparing multiple Phase-8 candidates **against each
+other only**. `dl_engine.contracts.DLCandidate` pairs an existing
+`MLPArchitectureConfig` with an existing `DLTrainingConfig` — no new
+configuration vocabulary — identified by a deterministic SHA-256 digest
+of both configs' own JSON, never a random UUID.
+`dl_engine.selection.select_dl_models()` calls the existing
+`run_mlp_modeling` **exactly once per candidate** (verified by a call-
+count spy) and only compares the already-produced results — it
+duplicates no model construction, tensor conversion, training, or
+evaluation logic. The selection metric and direction reuse the **exact**
+per-task values `data_engine.modeling.selection` already established
+(`rmse` / minimize for regression, `f1` / maximize for binary and
+multiclass classification) rather than a DL-specific substitute; `roc_
+auc` stays visible in each candidate's nested evaluation but never
+overrides `f1`. A candidate is eligible only when its run completed and
+its evaluation carries a finite selection-metric value; an ineligible
+candidate remains visible in the ranking with `rank = None` and a
+reason, never silently dropped — when zero candidates are eligible,
+`DLSelectionResult.status = failed` (a documented, deliberate difference
+from Phase 7's `ModelSelection`, which reports `completed` even with
+nothing selected; Phase 8's own result contracts already use `failed` to
+mean "no usable outcome," and this keeps that convention consistent).
+Ranking ties break on `(architecture_name, the candidate's own
+serialised training_config)` — adapted from Phase 7's own
+`(family, estimator_name)` tie-break, since every Phase-8 candidate
+shares the same `family = NEURAL` and has no varying family to fall back
+on. `dl_engine.contracts.DLCandidateRank` **nests** the existing
+`DLModelingResult` per candidate rather than duplicating its fields.
+Deliberately **not** wired into `data_engine.modeling.select_model()` or
+`run_modeling_pipeline()` — `data_engine/modeling/*` has zero diffs.
+Still no comparison against a Phase-7 classical candidate, no CNN / LSTM
+/ Transformer, no experiment tracking.
+
+**Phase 8.7 — Advanced Deep Learning Architecture Foundation (done,
+contracts + builders only — zero training/evaluation/selection
+integration):** `dl_engine` gains three more architecture
+*foundations*, mirroring `MLPArchitectureConfig` / `build_mlp` exactly.
+`dl_engine.architectures.CNNArchitectureConfig` /
+`LSTMArchitectureConfig` / `TransformerArchitectureConfig` share the
+existing `task_type` / `output_dim` convention (`MLPArchitectureConfig`
+itself is unchanged — the shared validation logic was factored into new
+module-level helper functions used only by the three new classes).
+Each contract validates its own architecture-specific constraint
+explicitly: CNN requires an odd `kernel_size` (so same-padding preserves
+`sequence_length` exactly, with no shape-drift tracking needed); LSTM
+requires `dropout == 0.0` when `num_layers == 1` (matching
+`torch.nn.LSTM`'s own real constraint); Transformer requires `num_heads`
+to evenly divide `d_model` (matching `torch.nn.MultiheadAttention`'s own
+real constraint). `dl_engine.cnn.build_cnn()` / `dl_engine.lstm.
+build_lstm()` / `dl_engine.transformer.build_transformer()` each use the
+same lazy-PyTorch-import discipline and deterministic-construction
+guarantee as `build_mlp`, return raw logits (no softmax/sigmoid), and
+validate their expected input tensor shape explicitly inside
+`forward()` — CNN expects `(batch, input_channels, sequence_length)`;
+LSTM and Transformer both expect `(batch, seq_len, input_size)` — raising
+`ValueError` on a mismatch rather than silently reshaping. **None of the
+three are wired into** `train_model`, `run_mlp_modeling`, or
+`select_dl_models` — no CNN/LSTM/Transformer candidate can be trained,
+evaluated, or selected through any existing Phase-8 entry point yet;
+that integration is explicitly deferred. Still no classical-vs-DL
+comparison, no experiment tracking.
+
 **Future-phase components:** everything else —
 figure generation, executing the Phase-6 recommendations, executing /
-deploying the Phase-7 recommended model, DL model selection /
-classical-vs-DL comparison (Phase 8.6+), `experimentation`,
-`explainability`, `ai_engine`, `database`, `backend`, `frontend`, MLOps.
+deploying the Phase-7 recommended model, advanced-architecture training
+/ evaluation / selection integration, classical-vs-DL comparison
+(Phase 8.8+), `experimentation`, `explainability`, `ai_engine`,
+`database`, `backend`, `frontend`, MLOps.
 
 ## C. Data flow
 

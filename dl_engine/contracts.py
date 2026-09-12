@@ -59,16 +59,47 @@ evaluation completed), mirroring
 :func:`data_engine.modeling.pipeline._resolve_overall_status`'s
 stage-naming-the-failure convention without importing that private
 function across the package boundary.
+
+**Phase 8.6** adds :class:`DLCandidate`, :class:`DLCandidateRank`, and
+:class:`DLSelectionResult` — a deterministic, DL-only selection layer
+comparing multiple already-specified Phase-8 configurations against each
+other (never against a Phase-7 classical model; that comparison is out
+of scope). ``DLCandidate`` pairs an existing
+:class:`~dl_engine.architectures.MLPArchitectureConfig` with an existing
+:class:`DLTrainingConfig` — no new configuration vocabulary. Its
+identity (``DLCandidateRank.candidate_id``) is a deterministic digest of
+both configs' own JSON — never a random UUID or an experiment id.
+``DLCandidateRank`` **nests** the existing :class:`DLModelingResult`
+rather than duplicating any of its fields, the same pattern
+``DLModelingResult`` itself already uses for ``DLTrainingResult`` /
+``DLEvaluationResult``. The selection metric and direction reuse the
+**exact** per-task values :mod:`data_engine.modeling.selection` already
+established (``rmse`` / minimize for regression, ``f1`` / maximize for
+binary and multiclass classification) — not a separate DL-specific
+metric. ``DLSelectionResult.status`` reuses
+:class:`~data_engine.modeling.TrainingRunStatus`: ``completed`` once at
+least one candidate is eligible and one is selected, ``failed`` when no
+supplied candidate was eligible (a deliberate, documented difference
+from Phase 7's own :class:`~data_engine.modeling.ModelSelection`, which
+reports ``completed`` even with nothing selected — Phase 8's own
+:class:`DLTrainingResult` / :class:`DLEvaluationResult` /
+:class:`DLModelingResult` already use ``failed`` to mean "this call did
+not produce a usable outcome," and this keeps that convention
+consistent across every Phase-8 contract rather than introducing Phase
+7's separate three-state ``ModelingStatus`` vocabulary for one contract).
 """
 
 from __future__ import annotations
 
+import hashlib
 from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from data_engine.modeling import ModelFamily, TrainingRunStatus
 from data_engine.problem_understanding import TaskType
+
+from .architectures import MLPArchitectureConfig
 
 DL_ENGINE_VERSION = "1"
 
@@ -335,13 +366,136 @@ class DLModelingResult(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class DLCandidate(BaseModel):
+    """One concrete Phase-8 model configuration to execute and compare.
+
+    Pairs an existing :class:`~dl_engine.architectures.MLPArchitectureConfig`
+    with an existing :class:`DLTrainingConfig` — no new configuration
+    vocabulary is introduced. ``candidate_id`` is a deterministic digest
+    of both configs' own JSON (never a random UUID or experiment id), so
+    the same configuration always yields the same identity and two
+    candidates with identical configuration are indistinguishable by
+    design — exactly as they should be.
+    """
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    architecture: MLPArchitectureConfig
+    training_config: DLTrainingConfig
+
+    @property
+    def candidate_id(self) -> str:
+        """A deterministic identity derived from this candidate's own configuration."""
+        digest_input = (
+            f"{self.architecture.model_dump_json()}|{self.training_config.model_dump_json()}"
+        )
+        return hashlib.sha256(digest_input.encode("utf-8")).hexdigest()[:16]
+
+
+class DLCandidateRank(BaseModel):
+    """One candidate's place in a :class:`DLSelectionResult`'s ranking.
+
+    **Nests** the existing :class:`DLModelingResult` rather than
+    duplicating any of its fields — the full training / evaluation
+    detail for this candidate lives there. ``rank`` is ``1``-based for
+    an eligible candidate and ``None`` for one that is not (failed,
+    unavailable, missing the selection metric, or carrying a
+    non-finite metric value) — mirroring
+    :class:`~data_engine.modeling.ModelSelectionRank`'s exact
+    eligible/ineligible convention. ``score`` is populated **only** for
+    an eligible candidate; it is the existing evaluation metric value,
+    never recomputed.
+    """
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    candidate_id: str = Field(description="This candidate's deterministic configuration digest.")
+    architecture_name: str | None = Field(
+        default=None, description="This candidate's architecture label; purely descriptive."
+    )
+    status: TrainingRunStatus = Field(description="The candidate's DLModelingResult.status.")
+    score: float | None = Field(
+        default=None, description="The selection-metric value for an eligible candidate; else None."
+    )
+    metric: str | None = Field(default=None, description="The selection metric name; else None.")
+    rank: int | None = Field(
+        default=None, description="1-based rank among eligible candidates; else None."
+    )
+    reason: str = Field(description="Why the candidate is eligible, or why it is not selectable.")
+    modeling_result: DLModelingResult | None = Field(
+        default=None, description="The full build/train/evaluate result for this candidate."
+    )
+
+
+class DLSelectionResult(BaseModel):
+    """A deterministic DL-only comparison of multiple :class:`DLCandidate` runs.
+
+    Produced by :func:`dl_engine.selection.select_dl_models`, which
+    **executes nothing itself** — it calls the existing
+    :func:`dl_engine.execution.run_mlp_modeling` once per candidate and
+    only compares the results. Selection metric and direction reuse the
+    **exact** per-task values already established by
+    :mod:`data_engine.modeling.selection` (``rmse`` / minimize for
+    regression, ``f1`` / maximize for binary and multiclass
+    classification) — never a DL-specific metric or a different
+    averaging semantic. Compares Phase-8 DL candidates against each
+    other **only** — never against a Phase-7 classical model; that
+    comparison is out of scope for this contract.
+
+    ``status`` is ``completed`` once at least one candidate was eligible
+    and one was selected; ``failed`` when no supplied candidate was
+    eligible (every candidate remains visible in ``ranking`` either way,
+    with a ``reason`` explaining its ineligibility).
+    """
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    status: TrainingRunStatus = Field(
+        description="completed once a candidate was selected; failed when none was eligible."
+    )
+    task_type: TaskType = Field(
+        description="regression, binary_classification, or multiclass_classification."
+    )
+    family: ModelFamily = Field(
+        default=ModelFamily.NEURAL,
+        description="Always NEURAL — reuses the existing Phase-7 ModelFamily vocabulary.",
+    )
+    selection_metric: str | None = Field(
+        default=None, description="The fixed selection metric for the task."
+    )
+    selection_direction: str | None = Field(
+        default=None, description="'minimize' or 'maximize' for the selection metric."
+    )
+    ranking: list[DLCandidateRank] = Field(
+        default_factory=list,
+        description="Every supplied candidate's selection standing, deterministically ordered "
+        "(eligible candidates first, by rank, then ineligible candidates).",
+    )
+    selected_candidate_id: str | None = Field(
+        default=None, description="The winning candidate's id; None when nothing is selectable."
+    )
+    selected_architecture_name: str | None = Field(
+        default=None, description="The winning candidate's architecture label; descriptive only."
+    )
+    selected_score: float | None = Field(
+        default=None, description="The winning candidate's selection-metric value."
+    )
+    reason: str | None = Field(
+        default=None, description="Why status is failed / why nothing was selected."
+    )
+    notes: list[str] = Field(default_factory=list)
+
+
 __all__ = [
     "DL_ENGINE_VERSION",
+    "DLCandidate",
+    "DLCandidateRank",
     "DLDevice",
     "DLEvaluationResult",
     "DLLoss",
     "DLModelingResult",
     "DLOptimizer",
+    "DLSelectionResult",
     "DLTrainingConfig",
     "DLTrainingResult",
     "DLTrainingStatus",

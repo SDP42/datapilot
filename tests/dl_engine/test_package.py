@@ -1,6 +1,6 @@
-"""Phase 8.1 / 8.2 / 8.3 / 8.4 / 8.5 — package-level sanity: imports,
-exports, no circular imports, and the PyTorch-optional boundary at the
-process level.
+"""Phase 8.1 / 8.2 / 8.3 / 8.4 / 8.5 / 8.6 / 8.7 — package-level sanity:
+imports, exports, no circular imports, and the PyTorch-optional
+boundary at the process level.
 """
 
 from __future__ import annotations
@@ -20,25 +20,35 @@ def test_dl_engine_imports_correctly():
 def test_public_exports_are_intentional():
     expected = {
         "DL_ENGINE_VERSION",
+        "CNNArchitectureConfig",
+        "DLCandidate",
+        "DLCandidateRank",
         "DLDevice",
         "DLEvaluationResult",
         "DLLoss",
         "DLModelingResult",
         "DLOptimizer",
+        "DLSelectionResult",
         "DLTrainingConfig",
         "DLTrainingResult",
         "DLTrainingStatus",
         "DeviceResolution",
+        "LSTMArchitectureConfig",
         "MLPActivation",
         "MLPArchitectureConfig",
         "TensorBatch",
         "TorchAvailability",
+        "TransformerArchitectureConfig",
+        "build_cnn",
+        "build_lstm",
         "build_mlp",
+        "build_transformer",
         "evaluate_model",
         "is_torch_available",
         "resolve_device",
         "run_mlp_modeling",
         "seed_everything",
+        "select_dl_models",
         "to_tensors",
         "torch_availability",
         "train_model",
@@ -48,18 +58,20 @@ def test_public_exports_are_intentional():
     for name in dl_engine.__all__:
         assert hasattr(dl_engine, name)
     # still no reuse-breaking parallel evaluation/outcome contract —
-    # DLTrainingResult / DLEvaluationResult / DLModelingResult are additive
-    # (see dl_engine.contracts), not a second TrainingOutcome / EvaluationResults
+    # DLTrainingResult / DLEvaluationResult / DLModelingResult / DLSelectionResult
+    # are additive (see dl_engine.contracts), not a second TrainingOutcome /
+    # EvaluationResults / ModelSelection
     assert not any("outcome" in name.lower() for name in dl_engine.__all__)
     assert not any("trainingrun" in name.lower() for name in dl_engine.__all__)
-    # Phase 8.6+ (model selection, classical-vs-DL comparison, experiment
-    # tracking) is not implemented — no ranking / selection / experiment
-    # exports beyond the single run_mlp_modeling entry point
-    for forbidden in ("select", "rank", "experiment", "mlflow"):
+    assert "ModelSelection" not in dl_engine.__all__
+    # Phase 8.8+ (classical-vs-DL comparison, experiment tracking,
+    # hyperparameter search, advanced-architecture training/selection) is
+    # not implemented
+    for forbidden in ("experiment", "mlflow", "hyperparameter", "compare", "comparison"):
         assert not any(forbidden in name.lower() for name in dl_engine.__all__)
-    # no architecture beyond the MLP is implemented — MLP is the only one exported
-    for arch_hint in ("cnn", "lstm", "transformer", "attention"):
-        assert not any(arch_hint in name.lower() for name in dl_engine.__all__)
+    # CNN/LSTM/Transformer are contracts + builders only (Phase 8.7) — no
+    # attention-specific export beyond the compact Transformer foundation
+    assert not any("attention" in name.lower() for name in dl_engine.__all__)
 
 
 def test_no_circular_import_dl_engine_first():
