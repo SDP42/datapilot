@@ -4,6 +4,85 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0094 — Phase 13.1-13.4: Backend API — the first database-backed store, an opt-in Postgres driver, and updating a guard test that was right to fail
+
+- **Decision:** expose the platform over HTTP as four increments:
+  1. **Stateless 13.1 endpoints wrap Phase 1/2/4/7 directly, with zero
+     persistence.** `/datasets/ingest` / `/quality` / `/eda` and
+     `/modeling/run` each upload a CSV and return the real result
+     contract in one request — no dataset registry, no job tracking.
+     This was deliberately kept minimal, matching every phase's own
+     foundation-first discipline, rather than building persistence and
+     a synchronous API simultaneously.
+  2. **Job records are the first database-backed store in this
+     codebase** (`backend.datapilot_api.job_store.JobStore`,
+     SQLAlchemy) — every earlier store (`DatasetVersionStore`,
+     `ExperimentStore`) is a filesystem JSON-file registry, which works
+     well for an immutable, append-only record but not for
+     concurrent-safe, queryable-by-status job tracking across
+     potentially many simultaneous API requests. SQLite is the default
+     (`backend.settings.Settings.database_url`) so no database server is
+     needed for dev or `pytest`; PostgreSQL is selected in production
+     purely via `DATAPILOT_DATABASE_URL`, with zero code change.
+  3. **`psycopg2-binary` was *not* added as a forced base dependency —
+     it is an opt-in `postgres` extra**, following the exact pattern
+     this codebase has applied to every other backend-specific driver
+     (`torch` for Phase 8, `mlflow` for Phase 9, `shap` for Phase 10,
+     `anthropic` for Phase 11, `duckdb` for this same phase's 13.4). The
+     first draft added it unconditionally (reasoning: "the backend needs
+     persistence, persistence might mean Postgres") — corrected on
+     review, because SQLite needs no driver at all, so forcing a
+     Postgres driver on every installation (including one that only
+     ever uses SQLite) would have been the one inconsistency in an
+     otherwise uniform optional-dependency story across five phases.
+  4. **`BackgroundTasks` was chosen for job orchestration over a real
+     task queue (Celery, RQ, arq).** A real queue needs a message
+     broker (Redis, RabbitMQ) running as external infrastructure this
+     project has no way to provision or verify inside its own test
+     suite — exactly the same reasoning that kept Phase 12's autonomous
+     loop synchronous rather than reaching for a workflow engine.
+     `BackgroundTasks` is in-process and needs nothing extra, and
+     `TestClient` runs them synchronously before the response completes
+     (verified directly, not assumed), so every job-orchestration test
+     needs no real async waiting.
+  5. **`tests/data_engine/test_no_deferred_dependencies.py`'s
+     `test_declared_runtime_dependencies_are_the_expected_set` was
+     updated, not weakened.** That test's failure after adding `fastapi`
+     / `sqlalchemy` to the base dependencies was *correct* — the test
+     was doing exactly its job, catching a dependency-set change for
+     deliberate review rather than silently; the fix updates its
+     expected set to include the two genuinely-new base dependencies and
+     narrows its "still banned from the base dependency list" check to
+     exclude only those two names (`_STILL_DEFERRED_FROM_BASE_DEPENDENCIES`),
+     while `data_engine`'s own import scan (`test_no_banned_imports_anywhere_in_data_engine`)
+     is completely unchanged — `data_engine` itself must still never
+     import `fastapi` / `sqlalchemy` / `torch` / anything else on that
+     list, regardless of what the project as a whole now depends on.
+- **Reason:** every choice here either closes a gap this project
+  explicitly flagged in advance (`datapilot/config.py`'s own docstring
+  named Phase 13 as where typed settings would arrive) or extends an
+  already-established, proven pattern (filesystem stores' own CRUD
+  shape for the new DB-backed one; the optional-dependency boundary for
+  the fifth time running) rather than inventing a new convention for
+  this one phase.
+- **Alternatives considered:** persisting job records as JSON files
+  (rejected — see point 2: the concurrent, queryable-by-status access
+  pattern is genuinely different from every prior store's append-only
+  shape); a forced `psycopg2-binary` base dependency (rejected on
+  review — see point 3); Celery/RQ for job orchestration (rejected —
+  see point 4: unprovisionable, untestable infrastructure this project
+  has no way to verify); weakening the failing guard test's assertion
+  instead of updating it to the new, correct expected set (rejected —
+  the test exists specifically to force exactly this kind of change
+  through deliberate review, not to be silenced).
+- **Consequence:** the platform is now reachable over HTTP — upload a
+  CSV, get real quality / EDA / modeling results back synchronously, or
+  submit a modeling run as a background job and poll for it; DuckDB
+  analytics over recorded experiments is available when the `analytics`
+  extra is installed, and reports its own absence clearly otherwise.
+  Quality gates: `pytest` full suite 2117 passed / 3 skipped, 0 failed;
+  `ruff` / `ruff format` / `mypy` (175 source files) all green.
+
 ## 0093 — Phase 12.1-12.4: Autonomous Experimentation — extending `ai_engine` rather than a new package, a deterministic (non-LLM) critic, and refusing to fabricate DL architecture defaults
 
 - **Decision:** implement the planner -> executor -> critic loop as four

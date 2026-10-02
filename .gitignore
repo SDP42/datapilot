@@ -28,10 +28,13 @@ htmlcov/
 data/raw/
 data/processed/
 data/interim/
+data/versions/
+data/experiments/
 artifacts/
 mlruns/
 *.duckdb
 *.sqlite3
+*.db
 
 # Secrets
 .env

@@ -35,6 +35,24 @@ dependencies = [
     # scikit-learn's dependency-light baseline estimators are used; no
     # XGBoost / LightGBM / Optuna / MLflow / deep-learning stack is added.
     "scikit-learn>=1.4",
+    # Phase 13 — the backend API is the first phase that exposes the
+    # platform over HTTP and needs typed settings / persistence. FastAPI
+    # ships its own request validation on top of pydantic (already a
+    # dependency); SQLAlchemy is the ORM/engine-abstraction layer — works
+    # against SQLite (its stdlib driver, zero extra install) for dev/test
+    # with zero extra install; the postgres extra (below) is the opt-in
+    # production driver, following this project's own established
+    # optional-dependency pattern (torch / mlflow / shap / anthropic /
+    # duckdb) rather than forcing every installation to carry a Postgres
+    # driver it may never use. pydantic-settings replaces the Phase-0
+    # YAML-only config loader for the backend specifically
+    # (datapilot.config.load_config is untouched, still used by every
+    # non-backend engine).
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "python-multipart>=0.0.9",
+    "sqlalchemy>=2.0",
+    "pydantic-settings>=2.4",
 ]
 
 [project.optional-dependencies]
@@ -84,6 +102,21 @@ explain = [
 # without installing it.
 ai = [
     "anthropic>=0.40",
+]
+# Phase 13.4 — DuckDB analytical queries over already-recorded experiments
+# (backend.analytics). Optional: backend.availability detects its
+# absence deterministically, and every other Phase 13 capability (the
+# FastAPI app, SQLAlchemy job persistence, job orchestration) is fully
+# usable without installing it.
+analytics = [
+    "duckdb>=1.0",
+]
+# Phase 13.2 — the PostgreSQL driver for backend.settings.Settings.database_url
+# in production. Optional: SQLite (dev/test default) needs no driver at
+# all; every Phase 13 capability works without this installed as long as
+# DATAPILOT_DATABASE_URL stays a sqlite:// URL.
+postgres = [
+    "psycopg2-binary>=2.9",
 ]
 
 [project.urls]

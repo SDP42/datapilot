@@ -18,7 +18,7 @@ future phases are not anticipated in code.
 | 10 | Explainable AI | **Done.** 10.1: `ExplanationRequest` / `ExplanationReport` foundation (all `not_yet_inferred`). 10.2: `compute_permutation_importance` (`sklearn.inspection.permutation_importance`). 10.3: optional `compute_shap_importance` (model-agnostic `shap.Explainer`, the `explain` extra). 10.4: `compute_partial_dependence` (`sklearn.inspection.partial_dependence`). Every function takes an **already-fitted** estimator — no fitted model is ever persisted anywhere in this codebase (Phase 7/8's own result contracts hold only JSON primitives), so explainability never fits, re-fits, or mutates one; the caller supplies it, mirroring `dl_engine.evaluate_model`'s own "already-trained model" convention. |
 | 11 | AI Scientist / Agent | **Done.** 11.1: `build_analysis_context` / `render_context_as_text` — deterministic, generic bundling of any already-produced Phase 1-10 report into one `AnalysisContext`, never a raw dataframe or fitted model. 11.2: the fixed `TOOL_NAMES` vocabulary — JSON-schema-described deterministic capabilities an LLM may reference by name, never invent. 11.3: `AnthropicProvider`, the first concrete `LLMProvider` (Phase 0's decision 0004 deferred this); `anthropic` is an optional `ai` extra, detected via the same lazy-import boundary as `torch` / `mlflow` / `shap`. 11.4: `interpret_results` (natural-language summary) and `recommend_next_steps` (structured, tool-name-validated recommendations — an unrecognised tool is dropped with an explicit reason, never silently kept, per architecture principle #6). Nothing here executes a recommended tool — that's Phase 12. |
 | 12 | Autonomous Experimentation | **Done.** 12.1: `execute_tool` — the deterministic executor turning a Phase-11-validated `Recommendation` into a real call against one of the 7 declared tools, via a fixed dispatch table; `ExecutionContext` holds the runtime resources (dataframe, fitted model, experiment store, …) a handler needs, never fabricated. 12.2: `evaluate_step` — a *deterministic* critic (never a second LLM call) deciding continue/stop from an `ExecutionResult`'s own status. 12.3/12.4: `run_autonomous_experimentation` — the planner (`recommend_next_steps`) → executor → critic loop under an explicit `max_steps` budget, producing a fully JSON-serialisable `AutonomousRunTrace` a human can review step by step. |
-| 13 | Backend API | Not started |
+| 13 | Backend API | **Done.** 13.1: FastAPI app (`backend.datapilot_api.create_app`) + stateless endpoints wrapping Phase 1/2/4/7 directly (`/datasets/ingest`, `/datasets/quality`, `/datasets/eda`, `/modeling/run`) — upload a CSV, get the real result contract back. `backend.settings` is the first typed (`pydantic-settings`) config, additive to the Phase-0 YAML loader. 13.2: the first database-backed store in this codebase (`JobStore`, SQLAlchemy) — SQLite by default, PostgreSQL via `DATAPILOT_DATABASE_URL` with zero code change (the driver is an opt-in `postgres` extra, not a forced base dependency). 13.3: `/jobs/modeling` (submit) + `/jobs/{id}` (poll) — asynchronous job orchestration via `BackgroundTasks`. 13.4: optional DuckDB ad-hoc analytics (`/analytics/experiments/query`) over already-recorded experiments — reports `503` with an explicit reason when the `analytics` extra isn't installed, rather than the route not existing. |
 | 14 | Frontend | Not started |
 | 15 | MLOps / Monitoring | Not started |
 | 16 | Deployment | Not started |
@@ -2019,11 +2019,136 @@ Phase-7/8 entry point.
 
 **Phase 12 is now complete end to end.**
 
-### Phase 13 — Backend API
+### Phase 13 — Backend API — **Done**
 - **Objective:** expose the platform over HTTP.
 - **Components:** `backend` FastAPI app, request/response schemas, job
   orchestration, PostgreSQL persistence, DuckDB for analytical queries.
 - **Output:** a documented REST API.
+
+#### Phase 13.1 — FastAPI App Foundation — **Done**
+- **Scope:** a working HTTP app with stateless endpoints wrapping
+  Phase 1/2/4/7 directly — no persistence, no job tracking (13.2/13.3's
+  concern). Upload a CSV, get the real result contract back.
+- **`backend/datapilot_api/app.py` — `create_app()`.** A **factory
+  function, not a module-level app instance** — every test (and every
+  real deployment) builds a fresh app, never imports a shared mutable
+  global. Routers: `health` (`GET /health`), `datasets` (`POST
+  /api/v1/datasets/ingest` / `/quality` / `/eda`), `modeling` (`POST
+  /api/v1/modeling/run`).
+- **`backend/datapilot_api/dependencies.py` — `ingest_upload(file)`.**
+  The one place every upload-accepting route goes through: writes the
+  upload to a temp file, calls the existing Phase-1 `ingest_dataset`
+  exactly as any other caller would (never re-implementing ingestion),
+  and reads the dataframe back from the now-immutable raw copy
+  `ingest_dataset` produced — never the caller's raw upload bytes
+  directly. Raises `HTTPException(400)` / `413` for a caller-facing
+  problem (empty file, too large, unparseable CSV via the existing
+  `IngestionError` hierarchy) — never an opaque `500`.
+- **`backend/settings.py` — `Settings` (`pydantic-settings`),
+  `get_settings()`.** The first typed configuration in this codebase —
+  additive to, not a replacement of, the Phase-0 YAML loader
+  (`datapilot.config.load_config`, still used by every non-backend
+  engine). Every value is `DATAPILOT_`-prefixed-environment-variable
+  driven with a working default (`database_url` defaults to a local
+  SQLite file — no server needed for dev/test).
+- **Quality gates:** see 13.4 below for the combined final count.
+
+#### Phase 13.2 — Job Persistence (SQLAlchemy) — **Done**
+- **Scope:** the **first database-backed store** in this codebase —
+  every Phase 1-12 store (`DatasetVersionStore`, `ExperimentStore`) is a
+  filesystem JSON-file registry; job records need concurrent-safe,
+  queryable-by-status access across potentially many simultaneous API
+  requests, which a filesystem store is not well suited for.
+- **`backend/datapilot_api/db.py` — `Base`, `make_engine`,
+  `make_session_factory`, `get_engine` (process-wide, `lru_cache`d),
+  `create_all_tables`, `get_session` (a FastAPI dependency).** SQLite by
+  default — `check_same_thread=False` for FastAPI's threaded model;
+  PostgreSQL in production purely by setting `DATAPILOT_DATABASE_URL` to
+  a `postgresql://...` URL, zero code change. No migration tool
+  (Alembic) introduced — `create_all_tables` is idempotent table
+  creation only.
+- **`backend/datapilot_api/job_models.py` / `job_store.py` —
+  `JobRow` (ORM), `JobStatus`, `JobRecord`, `JobStore`.** Mirrors the
+  filesystem stores' own read/write boundary (`create` / `get` /
+  `mark_running` / `mark_completed` / `mark_failed`) — a database table
+  instead of JSON files, but the same never-leak-the-storage-detail
+  shape (`JobStore` never returns a raw ORM row, only the JSON-
+  serialisable `JobRecord`). `result_json` / `error` are plain `Text`
+  columns holding an already-serialised JSON string — never a database-
+  specific JSON column type, so the same schema works identically on
+  SQLite and PostgreSQL.
+- **`psycopg2-binary` is an opt-in `postgres` extra, not a forced base
+  dependency** — SQLite needs no driver at all, and this codebase has
+  never forced an optional backend's driver on every installation
+  (`torch` / `mlflow` / `shap` / `anthropic` / `duckdb` all follow the
+  same pattern); `backend` itself never imports `psycopg2` directly —
+  SQLAlchemy loads it dynamically only when a `postgresql://` URL is
+  actually used.
+
+#### Phase 13.3 — Job Orchestration — **Done**
+- **Scope:** submit a long-running Phase-7 modeling run without
+  blocking the HTTP request; poll for its status / result.
+- **`backend/datapilot_api/routes/jobs.py` — `POST /api/v1/jobs/modeling`,
+  `GET /api/v1/jobs/{job_id}`.** Submission ingests the upload, creates a
+  `PENDING` `JobRecord`, and schedules the actual run via FastAPI's
+  `BackgroundTasks` — returning the `job_id` immediately. The background
+  task opens its **own** database session (`make_session_factory`, not
+  the request-scoped `Depends(get_session)` one, which is closed once
+  the HTTP response is sent — before the background task actually runs)
+  and updates the job through `RUNNING` -> `COMPLETED` / `FAILED`,
+  catching and recording any underlying exception rather than losing it
+  silently.
+- **New tests cover every stop/status transition** (`PENDING` ->
+  `RUNNING` -> `COMPLETED`; `PENDING` -> `RUNNING` -> `FAILED`; polling
+  an unknown job id returns `404`; job ids are unique per submission) —
+  verified against FastAPI's `TestClient`, which runs `BackgroundTasks`
+  synchronously before the response completes, so no real async waiting
+  is needed in tests.
+
+#### Phase 13.4 — Optional DuckDB Analytics — **Done**
+- **Scope:** ad-hoc, read-only SQL over already-recorded
+  `experimentation.ExperimentRecord`s — exploration a fixed comparison
+  function can't anticipate, never a second experiment-comparison
+  algorithm competing with `experimentation.comparison.compare_experiments`.
+- **`backend/availability.py` — `duckdb_availability()` /
+  `is_duckdb_available()`.** Byte-for-byte mirrors every other lazy-
+  import boundary in this codebase (`dl_engine` / `experimentation` /
+  `explainability` / `ai_engine.providers` `availability` modules).
+- **`backend/analytics.py` — `query_experiments(records, sql)`.**
+  Validates `sql` is read-only (`SELECT` / `WITH` / `DESCRIBE` / `SHOW`
+  / `PRAGMA` only — checked **before** the availability probe, so
+  rejecting a malformed query needs no `duckdb` install at all) before
+  ever touching DuckDB; loads the records into an in-memory table named
+  `experiments` via `pandas`, runs the query, returns the rows. Raises
+  `RuntimeError` when DuckDB isn't installed, `AnalyticsQueryError` for
+  a non-read-only statement or a DuckDB-raised execution error.
+- **`backend/datapilot_api/routes/analytics.py` — `POST
+  /api/v1/analytics/experiments/query`.** Always registered (the API
+  surface stays discoverable even without the `analytics` extra) —
+  reports `503` with an explicit reason when DuckDB isn't available,
+  rather than the route not existing at all.
+- **New tests:** environment-independent throughout — the unavailable
+  path and the read-only-rejection path need no real `duckdb`; query-
+  execution logic is verified against a hand-built fake `duckdb` module
+  through the same injectable `_import` seam `ai_engine.providers.anthropic_provider`'s
+  own tests already established (this codebase's second optional
+  dependency, after `anthropic`, that is never exercised for real in
+  its own test suite — `duckdb` simply isn't installed in this
+  project's own dev environment either, so there is nothing to
+  `pytest.importorskip` against).
+- **Existing guard test updated:** `tests/data_engine/test_no_deferred_dependencies.py`'s
+  `test_declared_runtime_dependencies_are_the_expected_set` now expects
+  `fastapi` / `sqlalchemy` / `uvicorn` / `python-multipart` /
+  `pydantic-settings` in the project's base dependencies (Phase 13's own
+  legitimate addition) while still asserting `data_engine` itself never
+  imports any of them, and that everything still genuinely deferred
+  (`torch`, `mlflow`, `shap`, `anthropic`, `duckdb`, `psycopg2-binary`,
+  …) stays out of the base dependency list.
+- **Quality gates (13.1 + 13.2 + 13.3 + 13.4 combined):** `pytest` full
+  suite — 2117 passed / 3 skipped, 0 failed. `ruff` / `ruff format` /
+  `mypy` (175 source files) all green; decision 0094.
+
+**Phase 13 is now complete end to end.**
 
 ### Phase 14 — Frontend
 - **Objective:** interactive UI.

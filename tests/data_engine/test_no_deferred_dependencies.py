@@ -1,9 +1,21 @@
-"""Guard: the Phase 0-7 stabilization pass introduced no deferred-phase stack.
+"""Guard: `data_engine` itself never imports a later-phase stack.
 
-The only modeling dependency currently justified is ``scikit-learn``.
-Deep learning, hyperparameter-search, boosting, explainability, tracking,
-backend, and database stacks belong to later phases and must not appear
-in the data engine's imports or the project's declared dependencies.
+The only modeling dependency `data_engine` ever needs is ``scikit-learn``
+(Phase 7.4). Deep learning (Phase 8), explainability (Phase 10),
+experiment tracking (Phase 9), and the AI/backend stack (Phase 11/13)
+all belong to other packages and must never appear in `data_engine`'s
+own imports — the deterministic data engine stays independently usable
+without any of them installed, exactly as every later phase's own
+"every Phase 0-7 capability works without X installed" test already
+verifies from the opposite direction (e.g. `tests/dl_engine/test_package.py`).
+
+This module does **not** assert the *project's* full declared-dependency
+set is minimal forever — Phase 13 legitimately added ``fastapi`` /
+``sqlalchemy`` / ``uvicorn`` / ``python-multipart`` / ``pydantic-settings``
+as real, unconditional dependencies of the ``backend`` package (see
+`docs/decisions.md`); ``torch`` / ``mlflow`` / ``shap`` / ``anthropic`` /
+``duckdb`` / ``psycopg2-binary`` remain correctly scoped to their own
+optional extras, never promoted to the base dependency list.
 """
 
 from __future__ import annotations
@@ -15,6 +27,8 @@ import tomllib
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 DATA_ENGINE = REPO_ROOT / "data_engine"
 
+# Never acceptable inside data_engine's own imports, regardless of
+# whether the project declares it as a dependency elsewhere.
 _BANNED_IMPORT_ROOTS = frozenset(
     {
         "mlflow",
@@ -43,6 +57,12 @@ _BANNED_IMPORT_ROOTS = frozenset(
         "langchain",
     }
 )
+
+# fastapi / sqlalchemy are the two entries in _BANNED_IMPORT_ROOTS that
+# Phase 13 legitimately promoted to the project's base `dependencies` —
+# still banned from data_engine's own imports (above), but no longer
+# expected to be absent from the project's declared dependency set.
+_STILL_DEFERRED_FROM_BASE_DEPENDENCIES = _BANNED_IMPORT_ROOTS - {"fastapi", "sqlalchemy"}
 
 
 def _iter_imported_roots(path: pathlib.Path):
@@ -79,8 +99,13 @@ def test_declared_runtime_dependencies_are_the_expected_set():
         "matplotlib",
         "plotly",
         "scikit-learn",
+        "fastapi",
+        "uvicorn",
+        "python-multipart",
+        "sqlalchemy",
+        "pydantic-settings",
     }
-    assert _BANNED_IMPORT_ROOTS.isdisjoint(declared)
+    assert _STILL_DEFERRED_FROM_BASE_DEPENDENCIES.isdisjoint(declared)
 
 
 def test_modeling_only_learning_dependency_is_sklearn():
