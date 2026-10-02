@@ -14,7 +14,7 @@ future phases are not anticipated in code.
 | 6 | Feature Engineering | **Done** — `data_engine.feature_engineering`, all deterministic, standalone, analysis-only: `FeatureEngineeringSpec` contract + foundation (6.1); **structural feature inventory** `inventory_features` (6.2); **transformation recommendations** `recommend_transformations` (6.3); **feature-selection recommendations** `recommend_feature_selection` (6.4); **preprocessing requirements** `recommend_preprocessing` (6.5); **feature-engineering assessment** `assess_feature_engineering` — structural consistency & readiness check over 6.2–6.5, `feasible` True/False from blocking structural inconsistencies (6.6). Nothing is executed; no ML/LLM. **Forecasting Foundation (done):** new `FeatureEngineeringSpec.temporal` section + `recommend_temporal_features` — lag / rolling feature **recommendations** for a forecasting problem, `unavailable` for every other task; new `LAG_FEATURE` / `ROLLING_FEATURE` operation types; nothing built |
 | 7 | Model Development / Modeling | **Done** — `data_engine.modeling`, all deterministic and standalone: `ModelingSpec` contract + foundation (7.1); **model readiness** `assess_model_readiness` + **data-split planning** `recommend_data_split` (7.2); **model candidate generation** `generate_model_candidates` (7.3); **training & evaluation** `train_and_evaluate_models` (7.4) — fits one conservative scikit-learn baseline per candidate family and reports per-candidate metrics; **model selection & recommendation** `select_model` (7.5) — deterministically ranks the successful 7.4 runs by a fixed per-task metric and recommends one family/estimator. Nothing beyond the 7.4 baselines is trained; no hyperparameter tuning, CV, feature importance, SHAP, or artifact persistence anywhere in Phase 7. **Post-Phase-7 stabilization (done):** `run_modeling_pipeline` deterministic end-to-end composition + overall `ModelingSpec.status`; `EvaluationResults` is now a status mirror of `TrainingOutcome`; explicit forecasting chronological-order precondition. **Forecasting Foundation (done):** first-class `TaskTypeInference.time_column` + `infer_task_type(..., time_column=)`; unsorted-forecasting caught in Phase-5 feasibility; new `FeatureEngineeringSpec.temporal` section + `recommend_temporal_features` (lag / rolling **recommendations**). **Forecasting Execution (done):** Phase 7.4 now **builds** those lag / rolling features (`build_temporal_features`, backward-looking, leakage-safe one-step-ahead) and trains the forecasting model on them; `TrainingRun.temporal_features_built` / `rows_consumed_as_history`. **Forecasting Execution — part 2 & Recursive Multi-Step Forecasting (done):** Phase 7.4 also **builds** the Phase-6.3 calendar / seasonal derivations (`build_calendar_features`, stateless, no leakage; `TrainingRun.calendar_features_built`); additive `ModelingRequest.forecast_horizon` / `TrainingRun.forecast_horizon` add recursive rolling-origin multi-step diagnostics (`rmse_h1..hN`) without changing the one-step selection metric |
 | 8 | Deep Learning | **In progress — 8.8 (CNN/LSTM/Transformer training/evaluation/selection integration) done; classical-vs-DL comparison and experiment tracking not started.** 8.1: `dl_engine` package + PyTorch optional-dependency boundary + `DLTrainingConfig`. 8.2: deterministic seeding/device resolution, the dataset-to-tensor boundary, and a minimal deterministic training loop (`train_model`, `DLTrainingResult`). 8.3: the first Phase-8 architecture — a small feed-forward MLP (`MLPArchitectureConfig`, `build_mlp`) for regression / binary / multiclass classification. 8.4: `evaluate_model` — evaluates an already-trained model on explicitly supplied evaluation data, reusing the exact Phase-7 metric vocabulary (`DLEvaluationResult`). 8.5: `run_mlp_modeling` — chains build → train → evaluate into one deterministic single-model run (`DLModelingResult`). 8.6: `select_dl_models` — executes multiple `DLCandidate` configurations (each exactly once) and deterministically ranks them by the exact Phase-7 selection metric per task (`rmse`/minimize, `f1`/maximize), comparing DL candidates against each other only (`DLSelectionResult`). 8.7: `CNNArchitectureConfig` / `LSTMArchitectureConfig` / `TransformerArchitectureConfig` + `build_cnn` / `build_lstm` / `build_transformer` — architecture foundations. 8.8: `run_cnn_modeling` / `run_lstm_modeling` / `run_transformer_modeling` + `to_sequence_tensors` wire those three architectures into real training/evaluation; `select_dl_models` now dispatches across all four architecture families. No classical-vs-DL comparison, no experiment tracking; every Phase 0-7 capability works without PyTorch installed |
-| 9 | Experiment Tracking | Not started |
+| 9 | Experiment Tracking | **Done.** 9.1: `ExperimentRecord` contract (the first deliberately non-deterministic contract — timestamp + UUID), `capture_environment`, `record_experiment`. 9.2: `ExperimentStore` — a filesystem registry (one read-only JSON file per record), mirroring `DatasetVersionStore`. 9.3: `compare_experiments` — deterministic ranking of recorded experiments by each one's own already-established selection metric (never recomputes one); mismatched metrics across records fail safely. 9.4: optional MLflow logging (`log_experiment_to_mlflow`), detected via the same lazy-import optional-dependency boundary as Phase 8's `torch`. Nothing is wired into `run_modeling_pipeline` / `run_mlp_modeling` / `select_dl_models` automatically — every Phase-9 capability is an explicit, opt-in call. |
 | 10 | Explainable AI | Not started |
 | 11 | AI Scientist / Agent | Not started |
 | 12 | Autonomous Experimentation | Not started |
@@ -1518,7 +1518,7 @@ future phases are not anticipated in code.
   than skipped). `ruff` / `ruff format` / `mypy` (`data_engine`,
   `datapilot`, `dl_engine`) all green; decision 0087.
 
-### Phase 9 — Experiment Tracking — **In progress — 9.1 foundation done**
+### Phase 9 — Experiment Tracking — **Done**
 - **Objective:** make every experiment reproducible and comparable.
 - **Components:** `experimentation` definitions/execution/comparison,
   MLflow integration, seed and environment capture.
@@ -1585,6 +1585,112 @@ future phases are not anticipated in code.
 - **Quality gates:** `pytest` full suite — 1956 passed / 2 skipped, 0
   failed. `ruff` / `ruff format` / `mypy` (`experimentation` clean of any
   new error) all green; decision 0088.
+
+#### Phase 9.2 — Experiment Store — **Done**
+- **Scope:** a persistent, filesystem-based registry for
+  `ExperimentRecord`s — no database, no querying beyond `source`, no
+  automatic registration from `record_experiment`.
+- **`experimentation/store.py` — `ExperimentStore`.** Design mirrors
+  `data_engine.validation.DatasetVersionStore` exactly: one directory
+  (`data/experiments/` by default, via a new `datapilot.paths.DATA_EXPERIMENTS_DIR`),
+  one read-only (`0o444`) JSON file per record, named
+  `<experiment_id>.json`. `register(record)` rejects a non-`completed`
+  record (`ValueError` — nothing partial is ever persisted) and a
+  duplicate `experiment_id` (`DuplicateExperimentError`); `get` /
+  `exists` / `list_experiments` read back, the last optionally filtered
+  by `source`. `ExperimentStore.default()` uses the shared
+  `DATA_EXPERIMENTS_DIR` convention, matching every other Phase 1-3
+  filesystem store.
+- **New exports:** `ExperimentStore`, `ExperimentStoreError`,
+  `DuplicateExperimentError`, `ExperimentNotFoundError`.
+- **OUT (this increment):** a database-backed store; querying by
+  anything beyond `source` (date range, metric value, …) — a caller
+  filters further in Python; automatic registration anywhere.
+- **Quality gates:** `pytest` full suite — see 9.4 below for the
+  combined final count (9.2/9.3/9.4 landed together). `ruff` / `ruff
+  format` / `mypy` all green.
+
+#### Phase 9.3 — Experiment Comparison — **Done**
+- **Scope:** deterministic ranking of multiple already-recorded
+  experiments by each one's own already-established selection metric —
+  no new metric computation, no re-training, no re-evaluation.
+- **`experimentation/comparison.py` — `compare_experiments(records)`.**
+  Mirrors `data_engine.modeling.select_model` /
+  `dl_engine.select_dl_models`'s own selection-only boundary exactly. A
+  `CLASSICAL_MODELING` record's metric/direction/score come from its
+  nested `classical_result.selection` (Phase 7's own `ModelSelection`,
+  which already carries `selection_metric` / `selection_direction` /
+  `selected_score`); a `DL_SELECTION` record's come from its nested
+  `dl_selection_result` directly (Phase 8's own `DLSelectionResult`,
+  same three fields) — both reused verbatim, never a second
+  metric-extraction path. A `DL_MODELING` record (one single run, no
+  selection ever ran) has no established selection metric and is
+  **always** ineligible — it stays visible in `entries` with `rank =
+  None` and an explicit reason, never silently dropped. Every eligible
+  record in one comparison must share the same `(metric, direction)`
+  pair; a mismatch (e.g. one record's `rmse` against another's `f1`) is
+  `status = failed` with an explicit reason, never a silent pick.
+  Deterministic tie-break: `(score oriented so lower is always better,
+  experiment_id)` — reproducible for a given fixed list of records.
+- **New contracts (`experimentation/contracts.py`):**
+  `ExperimentComparisonEntry`, `ExperimentComparisonResult` (`status`
+  reuses `TrainingRunStatus`, the same convention every other Phase
+  8/9 result already uses).
+- **OUT (this increment):** comparing a `DL_MODELING` record on its raw
+  evaluation metrics (it has no *selection*, by definition — logging
+  its metrics is Phase 9.4's job, not comparison's); ranking by
+  anything other than each record's own established selection metric.
+- **Quality gates:** see 9.4 below.
+
+#### Phase 9.4 — Optional MLflow Logging — **Done**
+- **Scope:** log one already-recorded `ExperimentRecord` to an MLflow
+  run — params + its established metric(s). No model-registry
+  integration, no automatic logging, no new metric computation.
+- **`experimentation/availability.py` — `mlflow_availability()` /
+  `is_mlflow_available()`.** Byte-for-byte mirrors
+  `dl_engine.availability`'s own `torch` boundary: a deterministic,
+  lazily-imported probe (`mlflow` is imported only when the probe
+  function is called, never at package import time), returning a
+  JSON-primitive `MLflowAvailability` (`available`, `version`,
+  `reason`).
+- **`experimentation/mlflow_integration.py` — `log_experiment_to_mlflow(record,
+  *, experiment_name="datapilot")`.** Logs params (`experiment_id`,
+  `source`, `seed` when set, `python_version`, `platform`, each tracked
+  package's version prefixed `pkg_` — `None` logged as the string `"not
+  installed"` since MLflow params are string-only) and metrics (a
+  `DL_MODELING` record's full evaluation-metrics dict; a
+  `CLASSICAL_MODELING` / `DL_SELECTION` record's single established
+  selection metric — the exact same extraction `compare_experiments`
+  itself uses, never a second path) to one MLflow run named
+  `record.experiment_id`. Never raises for an environment-level
+  condition (MLflow missing, or MLflow itself raising while logging) —
+  both are reported as a structured `MLflowLogResult` naming the stage
+  that stopped the attempt.
+- **`pyproject.toml` gains the optional `mlflow` extra**
+  (`pip install 'datapilot[mlflow]'`, `mlflow>=2.10`) — every other
+  Phase 9 capability (`ExperimentRecord`, `capture_environment`,
+  `record_experiment`, `ExperimentStore`, `compare_experiments`) works
+  without it, verified by a subprocess-level test that imports
+  `experimentation` and asserts `mlflow` never lands in `sys.modules`.
+- **New contracts:** `MLflowLogResult` (`experimentation/contracts.py`,
+  `status` reuses `TrainingRunStatus`).
+- **New exports:** `MLflowAvailability`, `is_mlflow_available`,
+  `mlflow_availability`, `log_experiment_to_mlflow`, `MLflowLogResult`.
+- **OUT (this increment and until explicitly implemented):** an MLflow
+  model-registry integration; automatic logging from
+  `record_experiment` / `ExperimentStore`; any tracking backend other
+  than MLflow.
+- **Quality gates (9.2 + 9.3 + 9.4 combined):** `pytest` full suite —
+  1982 passed / 3 skipped (the third skip is the real-MLflow logging
+  test, cleanly skipped since MLflow is not installed by default — the
+  same convention every `dl_engine` torch-gated test already follows),
+  0 failed. `ruff` / `ruff format` / `mypy` (142 source files) all
+  green; decision 0090.
+
+**Phase 9 is now complete end to end** — `ExperimentRecord` capture,
+persistent storage, deterministic comparison, and optional MLflow
+logging all exist, all tested, none of it wired automatically into any
+Phase-7/8 entry point.
 
 ### Phase 10 — Explainable AI
 - **Objective:** explain model behaviour.

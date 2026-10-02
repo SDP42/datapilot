@@ -61,6 +61,14 @@ export = [
 dl = [
     "torch>=2.2",
 ]
+# Phase 9.4 — MLflow experiment logging (experimentation.mlflow_integration).
+# Optional: experimentation.availability detects its absence
+# deterministically, and every other Phase 9 capability (ExperimentRecord,
+# capture_environment, record_experiment, ExperimentStore,
+# compare_experiments) is fully usable without installing it.
+mlflow = [
+    "mlflow>=2.10",
+]
 
 [project.urls]
 Documentation = "https://github.com/your-org/datapilot/tree/main/docs"

@@ -4,6 +4,84 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0090 — Phase 9.2/9.3/9.4: Experiment Store, Comparison, and Optional MLflow Logging — reusing Phase 7/8's own selection metrics instead of a second extraction path, and a by-name dispatch precedent carried forward
+
+- **Decision:** complete Phase 9 (store, comparison, MLflow) in one pass,
+  landed together since each one is small and each one's design leans on
+  the previous:
+  1. **`ExperimentStore` (9.2) copies `DatasetVersionStore`'s own
+     filesystem-registry design wholesale** — one read-only JSON file per
+     record, `register` rejects a duplicate id — rather than inventing a
+     different persistence shape for Phase 9. The one real difference:
+     `ExperimentStore.register` additionally refuses a non-`completed`
+     record outright (`DatasetVersionStore.register` has no such check,
+     since a `DatasetVersion` has no "not yet recorded" state at all) —
+     an `ExperimentRecord` does, by design (Phase 9.1's `NOT_YET_RECORDED`
+     default), so the store is the natural place to enforce that only a
+     real, completed record is ever persisted.
+  2. **`compare_experiments` (9.3) never computes a new metric — it reads
+     each record's own already-established selection** (`ModelSelection`
+     for a classical record, `DLSelectionResult` directly for a DL
+     selection record), both of which already carry
+     `selection_metric` / `selection_direction` / `selected_score` from
+     Phase 7.5 / 8.6. The alternative — asking the caller to name an
+     arbitrary metric key to pull out of each record's raw evaluation
+     metrics dict — was rejected: a `DL_MODELING` record's dict has no
+     single designated "the metric for this run" the way a *selection*
+     result does by definition, so a generic "pull this named key"
+     design would have silently produced a comparison for records that
+     were never actually compared against alternatives in the first
+     place (a single training run isn't a *selection*). Scoping
+     `compare_experiments` to records that *do* carry an established
+     selection is more honest about what is actually being compared,
+     even though it means a `DL_MODELING` record is never comparable
+     through this function — it remains visible with an explicit reason
+     rather than being silently forced into a comparison it was never
+     designed for.
+  3. **`log_experiment_to_mlflow` (9.4) reuses `_established_selection`'s
+     exact same metric extraction** for classical/DL-selection records,
+     and falls back to logging a `DL_MODELING` record's *entire*
+     evaluation-metrics dict (since MLflow logging isn't a *comparison* —
+     there's no reason to withhold `mae` just because `rmse` is primary).
+     `experimentation/availability.py` is a byte-for-byte copy of
+     `dl_engine/availability.py`'s structure (`Availability` Pydantic
+     model, lazy `_import` seam, `is_*_available()` convenience function)
+     — the pattern already proved itself for `torch` and needed no
+     redesign for `mlflow`.
+  4. **MLflow params are logged as strings, with an uninstalled
+     package's `None` version logged as the literal `"not installed"`**
+     — MLflow's `log_params` API only accepts strings; rather than
+     silently dropping `None`-valued packages from the logged params
+     (which would make "this package wasn't tracked" indistinguishable
+     from "this package wasn't installed"), the distinction is preserved
+     as an explicit string.
+- **Reason:** every one of these choices follows the same rule the whole
+  project has applied at every increment — extend by reusing an
+  already-established value, never invent a second path to the same
+  information, and never silently coerce something into a shape it
+  doesn't actually have (a single run forced to look like a selection; a
+  missing version silently becoming indistinguishable from an untracked
+  one).
+- **Alternatives considered:** a generic `compare_experiments(records, *,
+  metric_key)` pulling an arbitrary dict key from every record type
+  uniformly (rejected — see point 2 above: conflates "ran once" with
+  "was selected among alternatives"); storing experiment records in the
+  same `data/versions/` tree as dataset versions (rejected — an
+  experiment record and a dataset version are different identities with
+  different lifecycles; a shared directory would couple two unrelated
+  stores' file-naming schemes for no benefit); eagerly validating MLflow
+  connectivity at `mlflow_availability()` time (rejected — availability
+  only answers "is the package importable," exactly like `torch_availability`;
+  a broken tracking URI is a `log_experiment_to_mlflow`-time failure, not
+  an availability concern).
+- **Consequence:** Phase 9 is complete — `ExperimentRecord` capture
+  (9.1), persistent storage (9.2), deterministic comparison (9.3), and
+  optional MLflow logging (9.4) all exist, all opt-in, none wired
+  automatically into `run_modeling_pipeline` / `run_mlp_modeling` /
+  `select_dl_models`. Quality gates: `pytest` full suite 1982 passed / 3
+  skipped, 0 failed; `ruff` / `ruff format` / `mypy` (142 source files)
+  all green.
+
 ## 0089 — Fix: genuinely clean `mypy`, not just zero-*visible*-errors
 
 - **Decision:** every prior phase's "quality gates: ... `mypy` ...

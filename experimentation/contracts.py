@@ -41,7 +41,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from data_engine.modeling import ModelingSpec
+from data_engine.modeling import ModelingSpec, TrainingRunStatus
 from dl_engine import DLModelingResult, DLSelectionResult
 
 EXPERIMENTATION_ENGINE_VERSION = "1"
@@ -266,12 +266,113 @@ def record_experiment(
     )
 
 
+class ExperimentComparisonEntry(BaseModel):
+    """One record's place in an :class:`ExperimentComparisonResult`'s ranking.
+
+    Mirrors :class:`~data_engine.modeling.ModelSelectionRank` /
+    :class:`~dl_engine.DLCandidateRank`'s exact eligible/ineligible
+    convention: ``rank`` is ``1``-based for an eligible record, ``None``
+    for one that is not (no established selection metric, or a
+    metric/direction mismatch against the rest of the compared set).
+    """
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    experiment_id: str
+    source: ExperimentSource
+    created_at: datetime
+    score: float | None = Field(
+        default=None, description="The record's own selection-metric value; None if ineligible."
+    )
+    rank: int | None = Field(default=None, description="1-based rank among eligible records.")
+    reason: str = Field(description="Why this record is eligible, or why it is not comparable.")
+
+
+class ExperimentComparisonResult(BaseModel):
+    """A deterministic comparison of multiple already-recorded experiments.
+
+    Produced by :func:`compare_experiments`, which **executes, retrains,
+    and recomputes nothing** — it only reads each record's own
+    *already-established* selection metric. A ``CLASSICAL_MODELING``
+    record's metric/direction/score come from its nested
+    ``classical_result.selection`` (Phase 7's own ``ModelSelection``); a
+    ``DL_SELECTION`` record's come from its nested ``dl_selection_result``
+    directly (Phase 8's own ``DLSelectionResult``) — both already carry
+    ``selection_metric`` / ``selection_direction`` / ``selected_score``, so
+    this function reuses them verbatim rather than inventing a second
+    metric-extraction path. A ``DL_MODELING`` record (one single run, no
+    selection ever ran) has no established selection metric and is always
+    ineligible here — it remains visible in ``entries`` with ``rank =
+    None`` and an explicit reason, never silently dropped.
+
+    Every eligible record in one comparison must share the same
+    ``(metric, direction)`` pair — comparing e.g. one record's ``rmse``
+    against another's ``f1`` would be meaningless; a mismatch is reported
+    as ``status = failed`` with an explicit reason, exactly like
+    :func:`dl_engine.select_dl_models` rejects a mixed-task candidate set.
+    """
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    status: TrainingRunStatus = Field(
+        description="completed once a record was selected; failed when none was eligible, or "
+        "eligible records disagreed on (metric, direction)."
+    )
+    metric: str | None = Field(default=None, description="The shared selection metric compared.")
+    direction: str | None = Field(
+        default=None, description="'minimize' or 'maximize' for `metric`."
+    )
+    entries: list[ExperimentComparisonEntry] = Field(
+        default_factory=list,
+        description="Every supplied record's comparison standing (eligible first, by rank, "
+        "then ineligible).",
+    )
+    selected_experiment_id: str | None = Field(
+        default=None,
+        description="The winning record's experiment_id; None when nothing is comparable.",
+    )
+    selected_score: float | None = Field(default=None)
+    reason: str | None = Field(
+        default=None, description="Why status is failed / why nothing was selected."
+    )
+
+
+class MLflowLogResult(BaseModel):
+    """The structured result of logging one :class:`ExperimentRecord` to MLflow.
+
+    Produced by :func:`experimentation.mlflow_integration.log_experiment_to_mlflow`.
+    Contains only JSON primitives — no MLflow client object, run handle, or
+    active-run context. ``status`` reuses the existing
+    :class:`~data_engine.modeling.TrainingRunStatus` enum, the same
+    convention every other Phase-8/9 result contract already uses.
+    """
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    status: TrainingRunStatus = Field(
+        description="completed (logged), unavailable (MLflow not installed — nothing was "
+        "attempted), or failed (MLflow raised while logging)."
+    )
+    experiment_id: str = Field(description="The ExperimentRecord.experiment_id that was logged.")
+    mlflow_run_id: str | None = Field(
+        default=None, description="The MLflow run id created; None unless status is completed."
+    )
+    mlflow_experiment_name: str | None = Field(default=None)
+    logged_metrics: dict[str, float] = Field(default_factory=dict)
+    reason: str | None = Field(
+        default=None, description="Why status is unavailable / failed; None when completed."
+    )
+
+
 __all__ = [
     "EXPERIMENTATION_ENGINE_VERSION",
     "EnvironmentSnapshot",
+    "ExperimentComparisonEntry",
+    "ExperimentComparisonResult",
     "ExperimentRecord",
     "ExperimentSource",
     "ExperimentStatus",
+    "MLflowLogResult",
     "capture_environment",
     "record_experiment",
 ]
