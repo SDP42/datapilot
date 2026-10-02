@@ -16,7 +16,7 @@ future phases are not anticipated in code.
 | 8 | Deep Learning | **In progress — 8.8 (CNN/LSTM/Transformer training/evaluation/selection integration) done; classical-vs-DL comparison and experiment tracking not started.** 8.1: `dl_engine` package + PyTorch optional-dependency boundary + `DLTrainingConfig`. 8.2: deterministic seeding/device resolution, the dataset-to-tensor boundary, and a minimal deterministic training loop (`train_model`, `DLTrainingResult`). 8.3: the first Phase-8 architecture — a small feed-forward MLP (`MLPArchitectureConfig`, `build_mlp`) for regression / binary / multiclass classification. 8.4: `evaluate_model` — evaluates an already-trained model on explicitly supplied evaluation data, reusing the exact Phase-7 metric vocabulary (`DLEvaluationResult`). 8.5: `run_mlp_modeling` — chains build → train → evaluate into one deterministic single-model run (`DLModelingResult`). 8.6: `select_dl_models` — executes multiple `DLCandidate` configurations (each exactly once) and deterministically ranks them by the exact Phase-7 selection metric per task (`rmse`/minimize, `f1`/maximize), comparing DL candidates against each other only (`DLSelectionResult`). 8.7: `CNNArchitectureConfig` / `LSTMArchitectureConfig` / `TransformerArchitectureConfig` + `build_cnn` / `build_lstm` / `build_transformer` — architecture foundations. 8.8: `run_cnn_modeling` / `run_lstm_modeling` / `run_transformer_modeling` + `to_sequence_tensors` wire those three architectures into real training/evaluation; `select_dl_models` now dispatches across all four architecture families. No classical-vs-DL comparison, no experiment tracking; every Phase 0-7 capability works without PyTorch installed |
 | 9 | Experiment Tracking | **Done.** 9.1: `ExperimentRecord` contract (the first deliberately non-deterministic contract — timestamp + UUID), `capture_environment`, `record_experiment`. 9.2: `ExperimentStore` — a filesystem registry (one read-only JSON file per record), mirroring `DatasetVersionStore`. 9.3: `compare_experiments` — deterministic ranking of recorded experiments by each one's own already-established selection metric (never recomputes one); mismatched metrics across records fail safely. 9.4: optional MLflow logging (`log_experiment_to_mlflow`), detected via the same lazy-import optional-dependency boundary as Phase 8's `torch`. Nothing is wired into `run_modeling_pipeline` / `run_mlp_modeling` / `select_dl_models` automatically — every Phase-9 capability is an explicit, opt-in call. |
 | 10 | Explainable AI | **Done.** 10.1: `ExplanationRequest` / `ExplanationReport` foundation (all `not_yet_inferred`). 10.2: `compute_permutation_importance` (`sklearn.inspection.permutation_importance`). 10.3: optional `compute_shap_importance` (model-agnostic `shap.Explainer`, the `explain` extra). 10.4: `compute_partial_dependence` (`sklearn.inspection.partial_dependence`). Every function takes an **already-fitted** estimator — no fitted model is ever persisted anywhere in this codebase (Phase 7/8's own result contracts hold only JSON primitives), so explainability never fits, re-fits, or mutates one; the caller supplies it, mirroring `dl_engine.evaluate_model`'s own "already-trained model" convention. |
-| 11 | AI Scientist / Agent | Not started |
+| 11 | AI Scientist / Agent | **Done.** 11.1: `build_analysis_context` / `render_context_as_text` — deterministic, generic bundling of any already-produced Phase 1-10 report into one `AnalysisContext`, never a raw dataframe or fitted model. 11.2: the fixed `TOOL_NAMES` vocabulary — JSON-schema-described deterministic capabilities an LLM may reference by name, never invent. 11.3: `AnthropicProvider`, the first concrete `LLMProvider` (Phase 0's decision 0004 deferred this); `anthropic` is an optional `ai` extra, detected via the same lazy-import boundary as `torch` / `mlflow` / `shap`. 11.4: `interpret_results` (natural-language summary) and `recommend_next_steps` (structured, tool-name-validated recommendations — an unrecognised tool is dropped with an explicit reason, never silently kept, per architecture principle #6). Nothing here executes a recommended tool — that's Phase 12. |
 | 12 | Autonomous Experimentation | Not started |
 | 13 | Backend API | Not started |
 | 14 | Frontend | Not started |
@@ -1806,12 +1806,115 @@ Phase-7/8 entry point.
 
 **Phase 10 is now complete end to end.**
 
-### Phase 11 — AI Scientist / Agent
+### Phase 11 — AI Scientist / Agent — **Done**
 - **Objective:** LLM reasoning over structured results.
 - **Components:** `ai_engine` concrete providers, prompt/context builders,
   interpretation of profiles/reports, experiment recommendations, tool
   schema definitions.
 - **Output:** natural-language analysis + ranked recommended next steps.
+
+#### Phase 11.1 — Deterministic Context Building — **Done**
+- **Scope:** bundle any number of already-produced Phase 1-10 reports
+  into one structured, LLM-readable context — no new computation, no LLM
+  call, no dataset or fitted-model access (architecture principle #11).
+- **`ai_engine/context.py` — `AnalysisContext`, `build_analysis_context(dataset_id,
+  **reports)`, `render_context_as_text(context)`.** Generic over *any*
+  Pydantic report via `model_dump(mode="json")` — never hardcodes a
+  report's field names, so adding a new report type to an earlier phase
+  needs no change here. A `None`-valued keyword report is skipped (the
+  caller may not have run every phase). `render_context_as_text` renders
+  sections in sorted-name order with `sort_keys=True` JSON — the same
+  context always renders to byte-identical text regardless of the order
+  reports were supplied in.
+- **Quality gates:** see 11.4 below for the combined final count.
+
+#### Phase 11.2 — Tool Schema Vocabulary — **Done**
+- **Scope:** a fixed, closed set of named, JSON-schema-described
+  deterministic DataPilot capabilities an LLM may *reference by name* —
+  declarative only, nothing here is ever executed (architecture
+  principles #6 and #11).
+- **`ai_engine/tools.py` — `ToolSchema`, `TOOLS_BY_NAME`, `TOOL_NAMES`,
+  `get_tool_schema`, `list_tools`.** Seven tools spanning Phase 2
+  (`analyze_quality`) through Phase 10 (`compare_experiments`,
+  `compute_permutation_importance`), each with a JSON Schema
+  `parameters` object (the same shape both Anthropic and OpenAI's
+  function-calling APIs already expect).
+- **OUT (this increment):** actually invoking one of these tools
+  (Phase 12's planner -> executor -> critic loop).
+
+#### Phase 11.3 — The Anthropic Concrete Provider — **Done**
+- **Scope:** the first concrete implementation of Phase 0's
+  `LLMProvider` interface (decision 0004 deferred this to Phase 11).
+  `anthropic` is an **optional** dependency.
+- **`ai_engine/providers/availability.py` — `anthropic_availability()` /
+  `is_anthropic_available()`.** Byte-for-byte mirrors
+  `dl_engine.availability` / `experimentation.availability` /
+  `explainability.availability`'s own lazy-import boundary.
+- **`ai_engine/providers/anthropic_provider.py` — `AnthropicProvider(LLMProvider)`.**
+  Translates the provider-agnostic `LLMMessage` list into the Anthropic
+  Messages API's own shape (a `system`-role message becomes the API's
+  top-level `system` parameter — the Messages API has no `system` role
+  inside its `messages` array — and is omitted entirely when absent,
+  rather than passed as `None`); wraps the response's text content
+  blocks into one `LLMResponse.text`, with `LLMResponse.raw` holding the
+  SDK's own response object unmodified. `model` / `max_tokens` default to
+  `DEFAULT_ANTHROPIC_MODEL` / `DEFAULT_MAX_TOKENS` and may be overridden
+  per call via `complete(..., model=..., max_tokens=...)`.
+- **Never exercised end-to-end against the real API in tests** —
+  unlike `torch` / `shap` (free to run locally once installed), a real
+  Anthropic API call costs money and needs a secret key, so tests cover
+  construction failure (SDK missing, via the injectable `_import` seam)
+  and message-translation logic (via a hand-built fake `anthropic`
+  module, also through `_import`) — never a real network request.
+- **`pyproject.toml` gains the optional `ai` extra**
+  (`pip install 'datapilot[ai]'`, `anthropic>=0.40`) — verified by a
+  subprocess-level test that imports `ai_engine` and asserts `anthropic`
+  never lands in `sys.modules`.
+
+#### Phase 11.4 — Interpretation & Recommendations — **Done**
+- **Scope:** the two LLM-calling entry points, both taking an
+  already-constructed `LLMProvider` and an `AnalysisContext` — neither
+  constructs a provider, builds a context, or reads a dataframe /
+  fitted model itself.
+- **`ai_engine/analysis.py` — `interpret_results(provider, context)` ->
+  `AnalysisResult`.** A freeform natural-language summary — no
+  structured-action risk, so no validation beyond "did the call
+  succeed." `status = failed` (never raises) for a provider-level
+  failure (network error, invalid key, malformed SDK response), with
+  `reason` naming the underlying error.
+- **`recommend_next_steps(provider, context, *, tools=None)` ->
+  `RecommendationResult`.** Per architecture principle #6 ("An LLM
+  recommendation is executed only after translation into a typed,
+  parameterised call to a deterministic tool, followed by validation"):
+  the LLM is instructed (via the system prompt) to respond with
+  `{"recommendations": [{"tool": ..., "rationale": ..., "parameters":
+  {...}}]}`; every proposed `tool` name is checked against the supplied
+  `tools`' own names (default: every `list_tools()` entry) and a
+  malformed entry or an unrecognised tool is **dropped** — never
+  silently kept — with a corresponding `RecommendationResult.dropped`
+  entry. `status = failed` for a provider-level failure or an
+  unparseable / wrong-shaped response, with `raw_response` preserving
+  the text that failed to parse (never lost). Zero valid recommendations
+  from an otherwise-successful call is still `status = completed` — the
+  LLM legitimately found nothing to recommend, which is not a failure.
+- **Both contracts (`AnalysisResult`, `RecommendationResult`) reuse
+  `TrainingRunStatus`** — the same completed/unavailable/failed
+  vocabulary `dl_engine` / `experimentation` / `explainability` already
+  established, not a new parallel one.
+- **New tests:** `tests/ai_engine/test_context.py`, `test_tools.py`,
+  `test_analysis.py` (an in-memory fake `LLMProvider`, no network),
+  `tests/ai_engine/providers/test_availability.py`,
+  `test_anthropic_provider.py` (fake-SDK message-translation checks),
+  `test_package.py`.
+- **OUT (this increment and until explicitly implemented):** actually
+  executing a recommended tool (Phase 12); a second concrete provider
+  (OpenAI, local models); multi-turn conversation / tool-use loops;
+  natural-language-to-SQL or any other raw-data access path for the LLM.
+- **Quality gates (11.1 + 11.2 + 11.3 + 11.4 combined):** `pytest` full
+  suite — 2054 passed / 3 skipped, 0 failed. `ruff` / `ruff format` /
+  `mypy` (156 source files) all green; decision 0092.
+
+**Phase 11 is now complete end to end.**
 
 ### Phase 12 — Autonomous Experimentation
 - **Objective:** planner → executor → critic loop under budgets.

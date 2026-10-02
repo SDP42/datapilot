@@ -4,6 +4,78 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0092 — Phase 11.1-11.4: AI Scientist / Agent — generic context building, a closed tool vocabulary with mandatory validation, and never exercising the real Anthropic API in tests
+
+- **Decision:** implement Phase 11 (closing Phase 0's decision 0004,
+  which deferred concrete `LLMProvider` implementations to this phase)
+  as four small increments landed together:
+  1. **`build_analysis_context` is generic over any Pydantic report via
+     `model_dump`, never hardcoding a report's own field names.** The
+     alternative — a dedicated `summarize_X(report) -> str` function per
+     report type (profile, quality, EDA, problem, feature engineering,
+     modeling, DL, explanation, experiment — nine and counting) — was
+     rejected: it would need a new function every time an earlier phase
+     adds a report type, and each one risks the exact kind of
+     field-name guessing that caused real mistakes earlier in this
+     session's own manual smoke-testing. Passing the report's own
+     already-correct JSON structure through verbatim cannot go stale.
+  2. **`recommend_next_steps` validates every LLM-proposed `tool` name
+     against a closed, fixed vocabulary (`ai_engine.tools.TOOL_NAMES`)
+     and drops anything else**, directly implementing architecture
+     principle #6 ("An LLM recommendation is executed only after
+     translation into a typed, parameterised call to a deterministic
+     tool, followed by validation") and #11 ("AI agents use tools, not
+     internal state"). A dropped recommendation is never silently
+     discarded — `RecommendationResult.dropped` names exactly what was
+     rejected and why, the same "never lose information, always leave a
+     reason" convention this project applies everywhere else.
+  3. **`AnthropicProvider` is never called against the real API in any
+     test — not even behind `pytest.importorskip("anthropic")`.** Every
+     other optional-dependency boundary in this codebase (`torch`,
+     `mlflow`, `shap`) is free to exercise for real once installed; a
+     real Anthropic API call costs money and needs a secret credential,
+     so it is categorically different. Instead: construction-failure
+     tests use the existing injectable `_import` seam (no real package
+     needed), and message-translation logic (the `system`-role
+     extraction, the `model` / `max_tokens` defaults, keyword
+     passthrough) is verified against a **hand-built fake `anthropic`
+     module** — a `SimpleNamespace` standing in for the SDK's `Anthropic`
+     client and `messages.create` — injected through that same
+     `_import` seam. This tests 100% of this module's own logic (the
+     translation) without ever touching the one thing that's actually
+     untestable for free (the API itself).
+  4. **`interpret_results` returns freeform text with no validation
+     beyond "did the call succeed," while `recommend_next_steps` is
+     fully structured and validated.** This asymmetry is deliberate, not
+     an oversight: principle #6 constrains *executable* proposals — a
+     natural-language summary is never executed, so constraining its
+     shape would add complexity principle #6 doesn't actually require.
+- **Reason:** every choice here either closes a gap this project
+  explicitly flagged in advance (Phase 0's own decision 0004 named Phase
+  11 as the destination for concrete providers) or directly implements a
+  binding architecture principle rather than a new ad-hoc convention.
+- **Alternatives considered:** per-report-type summary functions
+  (rejected — see point 1); allowing an LLM to name an arbitrary
+  `function_name` string executed via `getattr`-style dispatch (rejected
+  outright — exactly the "AI agents... never read or write engine
+  internals directly" principle #11 forbids, and principle #6's
+  "translation into a typed, parameterised call... followed by
+  validation" requires a known, closed vocabulary, not an open one);
+  mocking the `anthropic` package via a test framework's generic
+  mock-patching instead of the existing `_import` seam (rejected — the
+  `_import` injection point already exists and is already the
+  established pattern for every other optional dependency; introducing
+  a second testing mechanism for one provider would be inconsistent for
+  no benefit).
+- **Consequence:** Phase 11 is complete — context building, a closed
+  tool vocabulary, the first concrete provider, and both LLM-calling
+  entry points all exist, fully tested without any network access or
+  API key. A second concrete provider (OpenAI, local models) and actual
+  tool execution (Phase 12's planner -> executor -> critic loop) remain
+  explicitly out of scope. Quality gates: `pytest` full suite 2054
+  passed / 3 skipped, 0 failed; `ruff` / `ruff format` / `mypy` (156
+  source files) all green.
+
 ## 0091 — Phase 10.1-10.4: Explainable AI — caller supplies the fitted model, one shared result contract for two importance methods, and a model-agnostic SHAP path
 
 - **Decision:** before writing any Phase 10 code, resolve a real

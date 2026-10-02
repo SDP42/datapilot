@@ -76,6 +76,15 @@ mlflow = [
 explain = [
     "shap>=0.44",
 ]
+# Phase 11.3 — the Anthropic concrete LLMProvider (ai_engine.providers.anthropic_provider).
+# Optional: ai_engine.providers.availability detects its absence
+# deterministically, and every other Phase 11 capability (the LLMProvider
+# interface, context building, tool schemas, interpret_results /
+# recommend_next_steps against a test-double provider) is fully usable
+# without installing it.
+ai = [
+    "anthropic>=0.40",
+]
 
 [project.urls]
 Documentation = "https://github.com/your-org/datapilot/tree/main/docs"
