@@ -12,6 +12,7 @@ import {
   Database,
   LogOut,
   Sparkles,
+  LayoutGrid,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
@@ -22,6 +23,7 @@ const NAV = [
   { href: "/dashboard/upload", label: "Ingest", icon: UploadCloud },
   { href: "/dashboard/quality", label: "Quality", icon: ShieldCheck },
   { href: "/dashboard/eda", label: "EDA", icon: LineChart },
+  { href: "/dashboard/dashboards", label: "Dashboards", icon: LayoutGrid },
   { href: "/dashboard/modeling", label: "Modeling", icon: Cpu },
   { href: "/dashboard/jobs", label: "Jobs", icon: ListChecks },
   { href: "/dashboard/analytics", label: "Analytics", icon: Database },

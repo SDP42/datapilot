@@ -146,8 +146,105 @@ export interface QualityReport {
   findings: QualityFinding[];
 }
 
+export interface QuantileValue {
+  quantile: number;
+  value: number | null;
+}
+
+export interface NumericColumnAnalysis {
+  column: string;
+  count: number;
+  missing_count: number;
+  missing_percentage: number;
+  mean: number | null;
+  median: number | null;
+  std: number | null;
+  minimum: number | null;
+  maximum: number | null;
+  quantiles: QuantileValue[];
+}
+
+export interface TopValue {
+  value: string;
+  count: number;
+  frequency: number;
+}
+
+export interface CategoricalColumnAnalysis {
+  column: string;
+  count: number;
+  missing_count: number;
+  missing_percentage: number;
+  unique_count: number;
+  cardinality_ratio: number | null;
+  top_values: TopValue[];
+}
+
+export interface DatetimeColumnAnalysis {
+  column: string;
+  count: number;
+  missing_count: number;
+  missing_percentage: number;
+  minimum: string | null;
+  maximum: string | null;
+  unique_count: number;
+}
+
+export interface MissingnessAnalysis {
+  total_cells: number;
+  total_missing_cells: number;
+  missing_percentage: number;
+  columns: { column: string; missing_count: number; missing_percentage: number }[];
+}
+
+export interface UnivariateAnalysis {
+  numeric: NumericColumnAnalysis[];
+  categorical: CategoricalColumnAnalysis[];
+  datetime: DatetimeColumnAnalysis[];
+  missingness: MissingnessAnalysis;
+}
+
+export interface HistogramBin {
+  left_edge: number;
+  right_edge: number;
+  count: number;
+}
+
+export interface Histogram {
+  status: "completed" | "unavailable";
+  reason?: string | null;
+  n_bins: number | null;
+  bin_edges: number[];
+  bins: HistogramBin[];
+  total_count: number | null;
+}
+
+export interface NumericDistribution {
+  column: string;
+  status: "completed" | "unavailable";
+  reason?: string | null;
+  count: number;
+  minimum: number | null;
+  maximum: number | null;
+  mean: number | null;
+  median: number | null;
+  std: number | null;
+  histogram: Histogram;
+}
+
+export interface DistributionAnalysis {
+  columns: NumericDistribution[];
+  notes: string[];
+}
+
 export interface EdaReport {
   dataset_id: string;
+  n_rows: number;
+  n_columns: number;
+  column_names: string[];
+  column_kinds: Record<string, "numeric" | "categorical" | "datetime">;
+  univariate: UnivariateAnalysis;
+  distribution: DistributionAnalysis;
   [key: string]: unknown;
 }
 

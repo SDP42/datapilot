@@ -23,9 +23,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }
 
   return (
-    <div className="min-h-screen bg-background bg-grid">
+    <div className="relative min-h-screen overflow-hidden bg-background bg-grid">
+      <div className="aurora-field opacity-40" />
+      <div className="noise-overlay" />
       <Sidebar />
-      <main className="min-h-screen lg:pl-64">
+      <main className="relative z-10 min-h-screen lg:pl-64">
         <div className="mx-auto max-w-6xl px-6 py-8 sm:px-8">{children}</div>
       </main>
     </div>
