@@ -43,12 +43,14 @@ new contracts; :class:`MLPArchitectureConfig` itself is untouched
 (unchanged code, unchanged public semantics) — the shared helpers are
 new, used only by the new classes.
 
-None of the three Phase-8.7 architectures are wired into
-:func:`dl_engine.training_loop.train_model`,
-:func:`dl_engine.execution.run_mlp_modeling`, or
-:func:`dl_engine.selection.select_dl_models` — that integration is
-explicitly deferred to a later increment. Constructing one of these
-configs, or calling its builder, trains and selects nothing.
+Since Phase 8.8, all three are wired into
+:func:`dl_engine.training_loop.train_model` (via
+:func:`dl_engine.execution.run_cnn_modeling` /
+:func:`~dl_engine.execution.run_lstm_modeling` /
+:func:`~dl_engine.execution.run_transformer_modeling`) and into
+:func:`dl_engine.selection.select_dl_models`. Constructing one of these
+configs, or calling its builder, still trains and selects nothing by
+itself.
 """
 
 from __future__ import annotations

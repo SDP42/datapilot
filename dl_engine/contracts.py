@@ -99,7 +99,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from data_engine.modeling import ModelFamily, TrainingRunStatus
 from data_engine.problem_understanding import TaskType
 
-from .architectures import MLPArchitectureConfig
+from .architectures import (
+    CNNArchitectureConfig,
+    LSTMArchitectureConfig,
+    MLPArchitectureConfig,
+    TransformerArchitectureConfig,
+)
 
 DL_ENGINE_VERSION = "1"
 
@@ -369,18 +374,29 @@ class DLModelingResult(BaseModel):
 class DLCandidate(BaseModel):
     """One concrete Phase-8 model configuration to execute and compare.
 
-    Pairs an existing :class:`~dl_engine.architectures.MLPArchitectureConfig`
-    with an existing :class:`DLTrainingConfig` — no new configuration
-    vocabulary is introduced. ``candidate_id`` is a deterministic digest
-    of both configs' own JSON (never a random UUID or experiment id), so
-    the same configuration always yields the same identity and two
-    candidates with identical configuration are indistinguishable by
-    design — exactly as they should be.
+    Pairs an existing architecture config — any of
+    :class:`~dl_engine.architectures.MLPArchitectureConfig`,
+    :class:`~dl_engine.architectures.CNNArchitectureConfig`,
+    :class:`~dl_engine.architectures.LSTMArchitectureConfig`, or
+    :class:`~dl_engine.architectures.TransformerArchitectureConfig`
+    (Phase 8.8 broadens this field from MLP-only; each config's own fixed
+    ``architecture_name`` discriminator, not a new field here, says which
+    one a given candidate is) — with an existing :class:`DLTrainingConfig`.
+    No new configuration vocabulary is introduced. ``candidate_id`` is a
+    deterministic digest of both configs' own JSON (never a random UUID or
+    experiment id), so the same configuration always yields the same
+    identity and two candidates with identical configuration are
+    indistinguishable by design — exactly as they should be.
     """
 
     model_config = ConfigDict(protected_namespaces=())
 
-    architecture: MLPArchitectureConfig
+    architecture: (
+        MLPArchitectureConfig
+        | CNNArchitectureConfig
+        | LSTMArchitectureConfig
+        | TransformerArchitectureConfig
+    )
     training_config: DLTrainingConfig
 
     @property

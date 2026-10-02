@@ -4,6 +4,82 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0087 — Phase 8.8: Advanced Architecture Training/Evaluation/Selection Integration — one shared composition helper, a 3D tensor boundary, and name-based dispatch in `select_dl_models`
+
+- **Decision:** wire the three Phase-8.7 architecture foundations (CNN,
+  LSTM, Transformer) into real training, evaluation, and selection
+  without duplicating any existing logic:
+  1. **`dl_engine/tensors.py` gains `to_sequence_tensors`,** the 3D
+     counterpart of `to_tensors`, rather than generalising `to_tensors`
+     itself to accept both 2D and 3D input. `to_tensors` is one of the
+     most heavily-tested, earliest Phase-8 contracts (Phase 8.2); adding
+     an `expected_ndim` branch to its own signature risked a subtle
+     behavior change for every existing MLP caller for a shape case it
+     never needs. Instead, `_validate_inputs` gained an `expected_ndim`
+     keyword-only parameter shared by both functions, and `to_tensors`'s
+     own call site (`expected_ndim=2`) is unchanged — confirmed via its
+     existing test suite (`tests/dl_engine/test_tensors.py`) passing
+     without a single edit to an existing assertion. One real backward-
+     compatibility trap was caught during review: the first draft's
+     empty-dimension error message changed for the existing 2D case
+     (`"no rows or an empty dimension"` vs. the original `"no rows or no
+     features"`), which would have silently broken
+     `test_zero_feature_columns_rejected`'s `pytest.raises(..., match=...)`
+     — fixed by branching the message text on `expected_ndim` so the 2D
+     message is byte-identical to before.
+  2. **`dl_engine/execution.py`'s four `run_*_modeling` functions share
+     one private `_run_dl_modeling` helper,** parameterised by
+     `build_fn`, `to_tensors_fn`, and the architecture-specific "PyTorch
+     missing" message — rather than three new, separate near-duplicates
+     of `run_mlp_modeling`'s ~90-line body. `run_mlp_modeling` itself was
+     refactored to call the same helper, with its own public signature,
+     docstring guarantees, and behavior unchanged (confirmed: its
+     existing `tests/dl_engine/test_execution.py` suite passes
+     unmodified).
+  3. **`DLCandidate.architecture` broadens to a `Union` of all four
+     architecture configs** (`dl_engine/contracts.py`) rather than adding
+     a second candidate contract per architecture family. Each config's
+     own existing fixed `architecture_name` `Literal` (from Phase 8.3 /
+     8.7) already uniquely identifies which one a candidate is, so no new
+     field was needed.
+  4. **`select_dl_models` dispatches by resolving a function *name*
+     through `globals()` at call time**, not a dict built at import time
+     mapping directly to the four imported function objects. The second,
+     more obvious approach was tried first and broken by the module's own
+     existing test
+     `test_selection_calls_run_mlp_modeling_exactly_once_per_candidate`,
+     which monkeypatches `dl_engine.selection.run_mlp_modeling` after
+     import — a dict of captured references would silently call the
+     original function instead of the patched one, since Python captures
+     the object, not the name, when a dict literal is built. Resolving by
+     name through `globals()` on every call reproduces a plain
+     `run_mlp_modeling(...)` call site's own late-binding behavior, so the
+     existing test needed zero changes.
+- **Reason:** every one of these choices follows the same rule this
+  project has applied at every Phase-8 increment — extend by addition,
+  never by editing a shipped, tested contract's existing behavior, and
+  never duplicate logic that already exists once.
+- **Alternatives considered:** generalising `to_tensors` directly
+  (rejected — behavior-change risk to a stable, heavily-tested contract
+  for no benefit); one combined `run_dl_modeling(architecture, ...)`
+  dispatching internally on `type(architecture)` instead of four public
+  functions (rejected — Phase 8.5 established `run_mlp_modeling` as the
+  public per-architecture entry point; four named functions mirror the
+  four named builders `build_mlp` / `build_cnn` / `build_lstm` /
+  `build_transformer` the project already has, rather than introducing an
+  asymmetry); a dict of captured function references for selection
+  dispatch (rejected — breaks an existing monkeypatch-based test, as
+  above).
+- **Consequence:** `select_dl_models` can now rank a mix of MLP, CNN,
+  LSTM, and Transformer candidates in one call — MLP mixed with any 3D
+  architecture fails safely per-candidate (wrong-ndim tensor conversion
+  error, reported as ineligible); CNN mixed with LSTM/Transformer on a
+  shared array is a caller responsibility (documented, not separately
+  validated — the two 3D conventions use different axis semantics that
+  this function cannot distinguish from shape alone). Quality gates:
+  `pytest` full suite 1935 passed / 2 skipped, 0 failed; `ruff` / `ruff
+  format` / `mypy` (`data_engine`, `datapilot`, `dl_engine`) all green.
+
 ## 0086 — Phase 8.7: Advanced Deep Learning Architecture Foundation — CNN/LSTM/Transformer contracts + builders, shared validation without touching `MLPArchitectureConfig`, and a session-local `sympy` environment defect
 
 - **Decision:** add architecture *foundations only* — Pydantic contracts

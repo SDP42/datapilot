@@ -181,14 +181,37 @@ three advanced architectures — contracts and lazy-PyTorch builders, with
   :func:`dl_engine.selection.select_dl_models` — that integration, and
   classical-vs-DL comparison, remain future work.
 
-Out of scope for Phase 8.7 (and every later increment in this package
-until explicitly implemented): CNN / LSTM / Transformer training loops,
-modeling execution, evaluation integration, or candidate selection;
-comparison between classical and DL models; automatic model selection
-*within* the Phase-7 pipeline; attention-based architectures beyond the
-compact Transformer foundation; experiment tracking /
-``ExperimentRecord`` (Phase 9); hyperparameter optimization; SHAP;
-deployment; and general feature-engineering execution.
+**Phase 8.8 (this increment)** wires the three Phase-8.7 architecture
+foundations into real training / evaluation / selection — no architecture
+change, no new metric, no classical-vs-DL comparison:
+
+* :mod:`dl_engine.tensors` gains :func:`to_sequence_tensors` — the 3D
+  counterpart of :func:`to_tensors` for CNN ``(batch, input_channels,
+  sequence_length)`` / LSTM & Transformer ``(batch, seq_len,
+  input_size)`` input; it never reshapes a caller's array, exactly like
+  every Phase-8.7 builder's own ``forward()``.
+* :mod:`dl_engine.execution` gains :func:`run_cnn_modeling`,
+  :func:`run_lstm_modeling`, and :func:`run_transformer_modeling` —
+  architecture-specific counterparts of :func:`run_mlp_modeling` with
+  identical guarantees (separate train/eval data, task-type agreement,
+  structured ``unavailable`` / ``failed`` results, no retry, no device
+  fallback). All four now share one private composition helper so none
+  of their build → train → evaluate logic is duplicated.
+* :class:`DLCandidate.architecture <dl_engine.contracts.DLCandidate>`
+  broadens from MLP-only to any of the four architecture configs.
+  :func:`select_dl_models` dispatches each candidate to its matching
+  ``run_*_modeling`` function by the architecture config's own fixed
+  ``architecture_name`` — a candidate list may freely mix architecture
+  families, with the same shared-array axis-layout caveat documented on
+  :func:`dl_engine.selection.select_dl_models` itself.
+
+Out of scope for Phase 8.8 (and every later increment in this package
+until explicitly implemented): comparison between classical and DL
+models; automatic model selection *within* the Phase-7 pipeline;
+attention-based architectures beyond the compact Transformer foundation;
+experiment tracking / ``ExperimentRecord`` (Phase 9); hyperparameter
+optimization; SHAP; deployment; and general feature-engineering
+execution.
 """
 
 from __future__ import annotations
@@ -217,12 +240,17 @@ from .contracts import (
     DLTrainingStatus,
 )
 from .evaluation import evaluate_model
-from .execution import run_mlp_modeling
+from .execution import (
+    run_cnn_modeling,
+    run_lstm_modeling,
+    run_mlp_modeling,
+    run_transformer_modeling,
+)
 from .lstm import build_lstm
 from .mlp import build_mlp
 from .runtime import DeviceResolution, resolve_device, seed_everything
 from .selection import select_dl_models
-from .tensors import TensorBatch, to_tensors
+from .tensors import TensorBatch, to_sequence_tensors, to_tensors
 from .training_loop import train_model
 from .transformer import build_transformer
 
@@ -254,9 +282,13 @@ __all__ = [
     "evaluate_model",
     "is_torch_available",
     "resolve_device",
+    "run_cnn_modeling",
+    "run_lstm_modeling",
     "run_mlp_modeling",
+    "run_transformer_modeling",
     "seed_everything",
     "select_dl_models",
+    "to_sequence_tensors",
     "to_tensors",
     "torch_availability",
     "train_model",

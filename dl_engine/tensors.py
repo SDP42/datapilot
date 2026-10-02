@@ -64,17 +64,29 @@ class TensorBatch:
     n_features: int
 
 
-def _validate_inputs(X: np.ndarray, y: np.ndarray, task_type: TaskType) -> None:
+def _validate_inputs(
+    X: np.ndarray, y: np.ndarray, task_type: TaskType, *, expected_ndim: int
+) -> None:
     if not isinstance(X, np.ndarray):
         raise TypeError(f"X must be a numpy.ndarray, got {type(X).__name__}")
     if not isinstance(y, np.ndarray):
         raise TypeError(f"y must be a numpy.ndarray, got {type(y).__name__}")
-    if X.ndim != 2:
-        raise ValueError(f"X must be a 2D feature matrix (n_rows, n_features); got shape {X.shape}")
+    if X.ndim != expected_ndim:
+        if expected_ndim == 2:
+            raise ValueError(
+                f"X must be a 2D feature matrix (n_rows, n_features); got shape {X.shape}"
+            )
+        raise ValueError(
+            f"X must be a 3D sequence tensor (n_rows, dim1, dim2); got shape {X.shape}"
+        )
     if y.ndim != 1:
         raise ValueError(f"y must be a 1D target vector; got shape {y.shape}")
-    if X.shape[0] == 0 or X.shape[1] == 0:
-        raise ValueError(f"X has no rows or no features (shape {X.shape}); nothing to convert")
+    if X.shape[0] == 0 or any(dim == 0 for dim in X.shape[1:]):
+        if expected_ndim == 2:
+            raise ValueError(f"X has no rows or no features (shape {X.shape}); nothing to convert")
+        raise ValueError(
+            f"X has no rows or an empty dimension (shape {X.shape}); nothing to convert"
+        )
     if X.shape[0] != y.shape[0]:
         raise ValueError(
             f"X has {X.shape[0]} rows but y has {y.shape[0]} rows; row counts must match"
@@ -101,6 +113,15 @@ def _validate_inputs(X: np.ndarray, y: np.ndarray, task_type: TaskType) -> None:
         )
 
 
+def _build_targets(torch_module: ModuleType, y: np.ndarray, task_type: TaskType) -> torch.Tensor:
+    if task_type is TaskType.REGRESSION:
+        return torch_module.as_tensor(
+            np.array(y, dtype=np.float32, copy=True), dtype=torch_module.float32
+        ).unsqueeze(1)
+    # binary_classification / multiclass_classification
+    return torch_module.as_tensor(np.array(y, dtype=np.int64, copy=True), dtype=torch_module.long)
+
+
 def to_tensors(
     X: np.ndarray,
     y: np.ndarray,
@@ -110,9 +131,12 @@ def to_tensors(
 ) -> TensorBatch:
     """Convert an already-prepared numeric ``(X, y)`` pair into a :class:`TensorBatch`.
 
-    Row order is preserved exactly — nothing here shuffles or reorders.
-    ``X`` / ``y`` are copied before conversion, so the returned tensors
-    never alias (and therefore never mutate) the caller's arrays.
+    ``X`` must be a 2D feature matrix ``(n_rows, n_features)`` — see
+    :func:`to_sequence_tensors` for 3D sequence input (CNN / LSTM /
+    Transformer). Row order is preserved exactly — nothing here shuffles
+    or reorders. ``X`` / ``y`` are copied before conversion, so the
+    returned tensors never alias (and therefore never mutate) the
+    caller's arrays.
 
     Raises ``TypeError`` / ``ValueError`` for invalid input — empty input,
     a shape / row-count mismatch, a non-numeric dtype, or non-finite
@@ -120,7 +144,7 @@ def to_tensors(
     pure NumPy). Raises ``RuntimeError`` only once validation has passed,
     if PyTorch is not installed to actually build the tensors.
     """
-    _validate_inputs(X, y, task_type)
+    _validate_inputs(X, y, task_type, expected_ndim=2)
 
     availability = torch_availability(_import=_import)
     if not availability.available:
@@ -131,15 +155,7 @@ def to_tensors(
     features = torch_module.as_tensor(
         np.array(X, dtype=np.float32, copy=True), dtype=torch_module.float32
     )
-
-    if task_type is TaskType.REGRESSION:
-        targets = torch_module.as_tensor(
-            np.array(y, dtype=np.float32, copy=True), dtype=torch_module.float32
-        ).unsqueeze(1)
-    else:  # binary_classification / multiclass_classification
-        targets = torch_module.as_tensor(
-            np.array(y, dtype=np.int64, copy=True), dtype=torch_module.long
-        )
+    targets = _build_targets(torch_module, y, task_type)
 
     return TensorBatch(
         features=features,
@@ -147,4 +163,60 @@ def to_tensors(
         task_type=task_type,
         n_rows=int(X.shape[0]),
         n_features=int(X.shape[1]),
+    )
+
+
+def to_sequence_tensors(
+    X: np.ndarray,
+    y: np.ndarray,
+    task_type: TaskType,
+    *,
+    _import: Callable[[str], ModuleType] = import_module,
+) -> TensorBatch:
+    """Convert an already-prepared numeric, 3D ``(X, y)`` pair into a :class:`TensorBatch`.
+
+    The sequence-shaped counterpart of :func:`to_tensors`, for the
+    Phase-8.7 CNN / LSTM / Transformer architectures: ``X`` must already
+    be a 3D array — ``(n_rows, input_channels, sequence_length)`` for
+    :func:`dl_engine.cnn.build_cnn`, or ``(n_rows, seq_len, input_size)``
+    for :func:`dl_engine.lstm.build_lstm` /
+    :func:`dl_engine.transformer.build_transformer`. This boundary never
+    reshapes ``X`` to fit an architecture — a caller that needs a
+    different layout reshapes before calling this function, exactly as
+    every Phase-8.7 builder's own ``forward`` already requires and
+    rejects a mismatch for.
+
+    Row order is preserved exactly; ``X`` / ``y`` are copied before
+    conversion, so the returned tensors never alias the caller's arrays.
+    ``TensorBatch.n_features`` holds ``X.shape[-1]`` (the trailing
+    dimension) — for CNN that is ``sequence_length``, not
+    ``input_channels``; it is informational only and never consumed by
+    :func:`dl_engine.training_loop.train_model` or
+    :func:`dl_engine.evaluation.evaluate_model`.
+
+    Raises ``TypeError`` / ``ValueError`` for invalid input — non-3D
+    shape, empty input, a shape / row-count mismatch, a non-numeric
+    dtype, or non-finite values — **without requiring PyTorch to be
+    installed**. Raises ``RuntimeError`` only once validation has passed,
+    if PyTorch is not installed to actually build the tensors.
+    """
+    _validate_inputs(X, y, task_type, expected_ndim=3)
+
+    availability = torch_availability(_import=_import)
+    if not availability.available:
+        raise RuntimeError(availability.reason)
+
+    torch_module = _import("torch")
+
+    features = torch_module.as_tensor(
+        np.array(X, dtype=np.float32, copy=True), dtype=torch_module.float32
+    )
+    targets = _build_targets(torch_module, y, task_type)
+
+    return TensorBatch(
+        features=features,
+        targets=targets,
+        task_type=task_type,
+        n_rows=int(X.shape[0]),
+        n_features=int(X.shape[-1]),
     )

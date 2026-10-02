@@ -5,11 +5,10 @@ of ``nn.Conv1d`` + activation (+ optional ``nn.Dropout``) blocks, sized
 by :class:`~dl_engine.architectures.CNNArchitectureConfig`, ending in a
 single ``nn.Linear`` output layer. Like :func:`dl_engine.mlp.build_mlp`,
 it contains **no training logic** and **no evaluation logic** — those
-stay in :mod:`dl_engine.training_loop` / :mod:`dl_engine.evaluation`,
-and this architecture is **not yet wired into either** (nor into
-:func:`dl_engine.execution.run_mlp_modeling` or
-:func:`dl_engine.selection.select_dl_models`) — that integration is
-explicitly deferred to a later increment. ``forward`` returns raw
+stay in :mod:`dl_engine.training_loop` / :mod:`dl_engine.evaluation`.
+Since Phase 8.8, this architecture is wired into both via
+:func:`dl_engine.execution.run_cnn_modeling` and
+:func:`dl_engine.selection.select_dl_models`. ``forward`` returns raw
 logits; no softmax / sigmoid is applied.
 
 Expected input tensor shape: ``(batch, input_channels, sequence_length)``

@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 
 from data_engine.problem_understanding import TaskType
-from dl_engine.tensors import to_tensors
+from dl_engine.tensors import to_sequence_tensors, to_tensors
 
 
 def _raise_import_error(name: str):
@@ -206,3 +206,61 @@ def test_deterministic_repeated_conversion():
 
     assert torch.equal(a.features, b.features)
     assert torch.equal(a.targets, b.targets)
+
+
+# --- to_sequence_tensors (Phase 8.8): the 3D counterpart for CNN/LSTM/Transformer --
+
+
+def _Xy_sequence(n=6, dim1=2, dim2=5):
+    rng = np.random.default_rng(1)
+    X = rng.normal(size=(n, dim1, dim2)).astype(np.float64)
+    y = rng.normal(size=n).astype(np.float64)
+    return X, y
+
+
+def test_sequence_2d_features_rejected():
+    _, y = _Xy_sequence()
+    X_2d = np.zeros((6, 4))
+    with pytest.raises(ValueError, match="3D sequence tensor"):
+        to_sequence_tensors(X_2d, y, TaskType.REGRESSION)
+
+
+def test_sequence_empty_dimension_rejected():
+    X = np.empty((5, 0, 3))
+    y = np.zeros(5)
+    with pytest.raises(ValueError, match="empty dimension"):
+        to_sequence_tensors(X, y, TaskType.REGRESSION)
+
+
+def test_sequence_validation_runs_without_torch_installed():
+    X, y = _Xy_sequence()
+    with pytest.raises(RuntimeError, match="PyTorch"):
+        to_sequence_tensors(X, y, TaskType.REGRESSION, _import=_raise_import_error)
+
+
+def test_sequence_tensor_shapes_and_dtypes():
+    torch = pytest.importorskip("torch")
+    X, y = _Xy_sequence(n=6, dim1=2, dim2=5)
+    batch = to_sequence_tensors(X, y, TaskType.REGRESSION)
+    assert batch.features.shape == (6, 2, 5)
+    assert batch.features.dtype == torch.float32
+    assert batch.targets.shape == (6, 1)
+    assert batch.n_rows == 6
+    assert batch.n_features == 5  # trailing dimension, documented as informational only
+    assert batch.task_type is TaskType.REGRESSION
+
+
+def test_sequence_row_order_preserved():
+    pytest.importorskip("torch")
+    X, y = _Xy_sequence(n=4, dim1=2, dim2=3)
+    batch = to_sequence_tensors(X, y, TaskType.REGRESSION)
+    np.testing.assert_array_equal(batch.features.numpy(), X.astype(np.float32))
+
+
+def test_sequence_classification_targets():
+    torch = pytest.importorskip("torch")
+    X, _ = _Xy_sequence(n=4, dim1=2, dim2=3)
+    y = np.array([0, 1, 1, 0], dtype=np.int64)
+    batch = to_sequence_tensors(X, y, TaskType.BINARY_CLASSIFICATION)
+    assert batch.targets.shape == (4,)
+    assert batch.targets.dtype == torch.int64

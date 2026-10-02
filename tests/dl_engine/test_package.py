@@ -1,5 +1,5 @@
-"""Phase 8.1 / 8.2 / 8.3 / 8.4 / 8.5 / 8.6 / 8.7 — package-level sanity:
-imports, exports, no circular imports, and the PyTorch-optional
+"""Phase 8.1 / 8.2 / 8.3 / 8.4 / 8.5 / 8.6 / 8.7 / 8.8 — package-level
+sanity: imports, exports, no circular imports, and the PyTorch-optional
 boundary at the process level.
 """
 
@@ -46,9 +46,13 @@ def test_public_exports_are_intentional():
         "evaluate_model",
         "is_torch_available",
         "resolve_device",
+        "run_cnn_modeling",
+        "run_lstm_modeling",
         "run_mlp_modeling",
+        "run_transformer_modeling",
         "seed_everything",
         "select_dl_models",
+        "to_sequence_tensors",
         "to_tensors",
         "torch_availability",
         "train_model",
@@ -64,9 +68,10 @@ def test_public_exports_are_intentional():
     assert not any("outcome" in name.lower() for name in dl_engine.__all__)
     assert not any("trainingrun" in name.lower() for name in dl_engine.__all__)
     assert "ModelSelection" not in dl_engine.__all__
-    # Phase 8.8+ (classical-vs-DL comparison, experiment tracking,
-    # hyperparameter search, advanced-architecture training/selection) is
-    # not implemented
+    # Phase 8.8 wired CNN/LSTM/Transformer into training/evaluation/selection
+    # (run_cnn_modeling / run_lstm_modeling / run_transformer_modeling,
+    # to_sequence_tensors, above) — classical-vs-DL comparison, experiment
+    # tracking, and hyperparameter search remain not implemented
     for forbidden in ("experiment", "mlflow", "hyperparameter", "compare", "comparison"):
         assert not any(forbidden in name.lower() for name in dl_engine.__all__)
     # CNN/LSTM/Transformer are contracts + builders only (Phase 8.7) — no

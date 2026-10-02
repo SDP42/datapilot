@@ -10,8 +10,12 @@ Phase-7 pipeline (``run_modeling_pipeline`` and
 It is selection only, mirroring
 :mod:`data_engine.modeling.selection`'s own boundary exactly::
 
-* it retrains nothing — every candidate is executed **once**, via the
-  existing :func:`dl_engine.execution.run_mlp_modeling`;
+* it retrains nothing — every candidate is executed **once**, via
+  whichever existing ``dl_engine.execution.run_*_modeling`` function
+  matches its own architecture (Phase 8.8 dispatches by each
+  architecture config's fixed ``architecture_name`` discriminator —
+  ``mlp`` / ``cnn`` / ``lstm`` / ``transformer`` — so a candidate list
+  may freely mix architecture families);
 * it recomputes no metric — the selection metric is read from the
   candidate's own :class:`~dl_engine.contracts.DLEvaluationResult`;
 * it introduces no new metric semantic — the (metric, direction) pair
@@ -37,8 +41,41 @@ import numpy as np
 from data_engine.modeling import TrainingRunStatus
 from data_engine.problem_understanding import TaskType
 
-from .contracts import DLCandidate, DLCandidateRank, DLSelectionResult
-from .execution import run_mlp_modeling
+from .contracts import DLCandidate, DLCandidateRank, DLModelingResult, DLSelectionResult
+
+# Imported for their *names* to exist in this module's globals() — see
+# `_run_modeling_for` below, which resolves one of these by name at call
+# time (not by the imported reference itself) so monkeypatching e.g.
+# `dl_engine.selection.run_mlp_modeling` keeps working.
+from .execution import (  # noqa: F401
+    run_cnn_modeling,
+    run_lstm_modeling,
+    run_mlp_modeling,
+    run_transformer_modeling,
+)
+
+# Dispatch by each architecture config's own fixed `architecture_name`
+# discriminator (Phase 8.8) — every candidate is still executed via exactly
+# one of these existing run_*_modeling functions, never a duplicated
+# build/train/evaluate sequence. Maps to the function's *name*, not the
+# function object itself, so the lookup in `_run_modeling_for` re-reads this
+# module's current global (via `globals()`) on every call — exactly like a
+# plain `run_mlp_modeling(...)` call site would — so a test (or caller) that
+# monkeypatches e.g. `dl_engine.selection.run_mlp_modeling` is honoured, the
+# same way it already is for the plain-MLP path.
+_RUN_MODELING_NAME_BY_ARCHITECTURE: dict[str, str] = {
+    "mlp": "run_mlp_modeling",
+    "cnn": "run_cnn_modeling",
+    "lstm": "run_lstm_modeling",
+    "transformer": "run_transformer_modeling",
+}
+
+
+def _run_modeling_for(architecture_name: str) -> Callable[..., DLModelingResult]:
+    function_name = _RUN_MODELING_NAME_BY_ARCHITECTURE[architecture_name]
+    result: Callable[..., DLModelingResult] = globals()[function_name]
+    return result
+
 
 # The exact (metric, direction) pair data_engine.modeling.selection already
 # established per task — reused verbatim, never a DL-specific substitute.
@@ -49,9 +86,10 @@ _TASK_SELECTION_METRIC: dict[TaskType, tuple[str, str]] = {
 }
 
 _NOTE_SELECTION_ONLY = (
-    "DL model selection is based only on each candidate's own run_mlp_modeling result; no "
-    "candidate was retrained, no metric was recomputed, and this compares Phase-8 DL candidates "
-    "against each other only — never against a Phase-7 classical model"
+    "DL model selection is based only on each candidate's own run_*_modeling result (dispatched "
+    "by its architecture_name); no candidate was retrained, no metric was recomputed, and this "
+    "compares Phase-8 DL candidates against each other only — never against a Phase-7 classical "
+    "model"
 )
 
 
@@ -75,7 +113,7 @@ def select_dl_models(
     *,
     _import: Callable[[str], ModuleType] = import_module,
 ) -> DLSelectionResult:
-    """Execute every candidate once via :func:`run_mlp_modeling` and rank the results.
+    """Execute every candidate once via the matching ``run_*_modeling`` function and rank the results.
 
     ``X_train`` / ``y_train`` / ``X_eval`` / ``y_eval`` are shared across
     every candidate — this compares configurations on the **same**
@@ -87,9 +125,27 @@ def select_dl_models(
     structured failure, since no single selection metric could compare
     candidates from different tasks meaningfully.
 
+    Candidates may freely mix architecture families (``mlp`` / ``cnn`` /
+    ``lstm`` / ``transformer``) — each is dispatched to its own
+    ``dl_engine.execution.run_*_modeling`` function by its
+    ``architecture.architecture_name``. Because ``X_train`` / ``X_eval``
+    are the **same** raw arrays passed through to every candidate,
+    mixing architectures whose tensor boundary expects a **different
+    ndim** fails safely (that candidate's tensor conversion raises
+    ``ValueError``, caught and reported as an ineligible, ``failed``
+    candidate — never a crash or a silently wrong metric). Mixing
+    **same-ndim** 3D architectures with genuinely different axis
+    semantics (CNN's ``(batch, input_channels, sequence_length)`` vs.
+    LSTM/Transformer's ``(batch, seq_len, input_size)``) is **not**
+    separately validated here — this function does not inspect or
+    transpose axis meaning, only each architecture's own ``forward()``
+    shape check runs; callers mixing CNN with LSTM/Transformer must
+    ensure ``X_train`` / ``X_eval``'s axis order already matches every
+    candidate's own convention.
+
     Eligibility
     -----------
-    A candidate is eligible only when its ``run_mlp_modeling`` result is
+    A candidate is eligible only when its dispatched modeling result is
     ``completed`` (both training and evaluation completed), the task's
     selection metric is present in its evaluation metrics, and that
     value is finite. An ineligible candidate remains visible in
@@ -108,8 +164,8 @@ def select_dl_models(
     (without the metric) and appended after every eligible one.
 
     Never retrains: each candidate is executed **exactly once**, via one
-    call to ``run_mlp_modeling``; ranking only reads the results already
-    produced.
+    call to its matching ``run_*_modeling`` function; ranking only reads
+    the results already produced.
     """
     if not candidates:
         return _no_candidates("no candidates were supplied for selection")
@@ -140,7 +196,8 @@ def select_dl_models(
     for candidate in candidates:
         candidate_id = candidate.candidate_id
         architecture_name = candidate.training_config.architecture_name
-        modeling_result = run_mlp_modeling(
+        run_modeling = _run_modeling_for(candidate.architecture.architecture_name)
+        modeling_result = run_modeling(
             X_train,
             y_train,
             X_eval,

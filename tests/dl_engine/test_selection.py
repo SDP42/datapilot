@@ -15,7 +15,11 @@ import pytest
 
 from data_engine.modeling import TrainingRunStatus
 from data_engine.problem_understanding import TaskType
-from dl_engine.architectures import MLPArchitectureConfig
+from dl_engine.architectures import (
+    LSTMArchitectureConfig,
+    MLPArchitectureConfig,
+    TransformerArchitectureConfig,
+)
 from dl_engine.contracts import DLCandidate, DLDevice, DLLoss, DLOptimizer, DLTrainingConfig
 from dl_engine.selection import select_dl_models
 
@@ -414,3 +418,65 @@ def test_selection_calls_run_mlp_modeling_exactly_once_per_candidate():
         selection_module.run_mlp_modeling = original_run
 
     assert call_count == len(candidates)
+
+
+# --- Phase 8.8: mixed-architecture candidate lists ------------------------
+
+
+def _lstm_candidate(**overrides: object) -> DLCandidate:
+    arch_defaults: dict[str, object] = {
+        "task_type": TaskType.REGRESSION,
+        "input_size": 4,
+        "hidden_size": 8,
+        "num_layers": 1,
+        "output_dim": 1,
+    }
+    architecture = overrides.pop("architecture", None) or LSTMArchitectureConfig.model_validate(
+        arch_defaults
+    )
+    defaults: dict[str, object] = {
+        "architecture": architecture,
+        "training_config": _config(architecture_name="lstm"),
+    }
+    defaults.update(overrides)
+    return DLCandidate.model_validate(defaults)
+
+
+def _transformer_candidate(**overrides: object) -> DLCandidate:
+    arch_defaults: dict[str, object] = {
+        "task_type": TaskType.REGRESSION,
+        "input_size": 4,
+        "d_model": 8,
+        "num_heads": 2,
+        "num_encoder_layers": 1,
+        "dim_feedforward": 16,
+        "output_dim": 1,
+    }
+    architecture = overrides.pop(
+        "architecture", None
+    ) or TransformerArchitectureConfig.model_validate(arch_defaults)
+    defaults: dict[str, object] = {
+        "architecture": architecture,
+        "training_config": _config(architecture_name="transformer"),
+    }
+    defaults.update(overrides)
+    return DLCandidate.model_validate(defaults)
+
+
+def test_mixed_lstm_and_transformer_candidates_are_dispatched_and_ranked():
+    # LSTM and Transformer share the identical (batch, seq_len, input_size)
+    # tensor convention, so the same 3D X_train/X_eval is valid for both —
+    # the documented safe case for mixing architecture families in one call.
+    pytest.importorskip("torch")
+    rng = np.random.default_rng(2)
+    X_train = rng.normal(size=(24, 3, 4)).astype(np.float64)
+    y_train = X_train.sum(axis=(1, 2))
+    X_eval = rng.normal(size=(10, 3, 4)).astype(np.float64)
+    y_eval = X_eval.sum(axis=(1, 2))
+
+    candidates = [_lstm_candidate(), _transformer_candidate()]
+    result = select_dl_models(X_train, y_train, X_eval, y_eval, candidates)
+
+    assert result.status is TrainingRunStatus.COMPLETED
+    assert {r.architecture_name for r in result.ranking} == {"lstm", "transformer"}
+    assert result.selected_candidate_id in {c.candidate_id for c in candidates}

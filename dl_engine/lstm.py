@@ -5,11 +5,10 @@
 :class:`~dl_engine.architectures.LSTMArchitectureConfig`, followed by a
 single ``nn.Linear`` output layer applied to the final timestep's hidden
 state. Like :func:`dl_engine.mlp.build_mlp`, it contains **no training
-logic** and **no evaluation logic**, and is **not yet wired into**
-:func:`dl_engine.training_loop.train_model`,
-:func:`dl_engine.execution.run_mlp_modeling`, or
-:func:`dl_engine.selection.select_dl_models` — that integration is
-explicitly deferred to a later increment. ``forward`` returns raw
+logic** and **no evaluation logic** of its own. Since Phase 8.8, this
+architecture is wired into :func:`dl_engine.training_loop.train_model`
+via :func:`dl_engine.execution.run_lstm_modeling`, and into
+:func:`dl_engine.selection.select_dl_models`. ``forward`` returns raw
 logits; no softmax / sigmoid is applied.
 
 Expected input tensor shape: ``(batch, seq_len, config.input_size)``
