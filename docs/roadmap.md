@@ -2341,6 +2341,69 @@ Phase-7/8 entry point.
   "Inventory & Stock".
 - **Decision:** 0097.
 
+#### Phase 14.3 — Expanded Model Search (Phase 7.7) + Real BI Dashboard Rows — **Done**
+- **Scope:** direct response to two more concrete complaints — "backend
+  is only 25%" (the modeling pipeline fit exactly one baseline estimator
+  per family, ~6 candidates total, never tuned a hyperparameter) and the
+  Dashboard Builder's charts being a flat grid with no KPIs, no filters,
+  no trend view, and no stated conclusion — not "a proper BI dashboard".
+- **Phase 7.7 — expanded multi-model search
+  (`data_engine.modeling.training.run_expanded_search`,
+  `_expanded_catalog`, `data_engine.modeling.pipeline.run_expanded_model_search`).**
+  A fixed, documented (estimator, hyperparameter) catalog — 21 regression
+  candidates, 22 classification candidates (Linear/Ridge/Lasso/ElasticNet,
+  DecisionTree at 4 depths, RandomForest/GradientBoosting/ExtraTrees at
+  several configurations, KNN at several k, GaussianNB, MLP at two
+  architectures) — each fit once on the same train/test split
+  `train_and_evaluate_models` would use, evaluated with the exact same
+  metric functions, and ranked by the same per-task selection metric
+  `select_model` uses. Still a **fixed grid, never a randomized or
+  adaptive search** — the same reproducibility guarantee as everything
+  else in this engine. Returns every candidate's result, not just the
+  winner (`ExpandedSearchResult.candidates`, each an
+  `ExpandedCandidateResult` with its exact hyperparameters and metrics).
+  `fit_final_pipeline`'s feature/category resolution was factored into a
+  shared `_resolve_task_and_features` helper so this doesn't duplicate
+  that logic a third time.
+- **Backend: `POST /api/v1/modeling/search`.** Ingests a CSV, runs the
+  full search, records one `search` activity-log row. Frontend: the
+  Modeling page gained a "Run full model search (20+ candidates)" button
+  next to the existing single-pipeline run, showing every ranked
+  candidate (family, estimator, exact hyperparameters, metrics) in a
+  scrollable table with the winner highlighted.
+- **Dashboard Builder: each generated dashboard is now a real BI report,
+  not a flat chart grid.** Five rows, in order: **KPIs** (row count,
+  live-computed averages for the dashboard's own numeric columns, top
+  category for its first categorical column) → **slicers** (one
+  multi-select chip filter per categorical column in that dashboard,
+  shared across all generated dashboards so they stay in sync like
+  Power BI's own synced slicers) → **trend** (a line chart over time,
+  shown only when the dataset actually has a datetime column — never
+  fabricated) → **charts** (the existing histogram/bar tiles) →
+  **conclusion** (an auto-generated insight naming the two most
+  correlated numeric columns in that dashboard and the strength/
+  direction of the relationship).
+- **`frontend/src/lib/csv-parse.ts` + `frontend/src/lib/bi-stats.ts`.**
+  The slicers needed to actually filter data, not just look clickable —
+  so the uploaded CSV is now also parsed client-side (a small
+  dependency-free parser) into raw rows, and `bi-stats.ts` recomputes
+  histograms / category counts / correlations / monthly trends from
+  whatever subset the active slicers leave — every KPI, chart, and the
+  conclusion's correlation all react to the current filter, verified
+  live (toggling an HR-department slicer changed "Avg age" 41.08 ->
+  41.22, "Avg tenure_years" 9.49 -> 10.45, "Top gender" Male -> Female,
+  and every chart and the conclusion text updated to match).
+- **Quality gates:** `pytest` full suite 2152 passed / 3 skipped (9 new
+  tests — `tests/data_engine/modeling/test_expanded_search.py` plus two
+  backend endpoint tests); `ruff` / `ruff format` / `mypy` (176 source
+  files) all green. Frontend: `tsc --noEmit` clean, `eslint` clean,
+  `next build` succeeds (13 static routes — this phase reworked existing
+  pages, no new routes). Verified end to end in a real browser: a
+  22-candidate classification search ranked and displayed correctly; an
+  HR dashboard's slicer genuinely filtered KPIs, charts, and the
+  conclusion insight.
+- **Decision:** 0098.
+
 ### Phase 15 — MLOps / Monitoring
 - **Objective:** operate models in production.
 - **Components:** model/data versioning, drift and performance monitoring,

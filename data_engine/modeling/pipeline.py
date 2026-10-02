@@ -53,6 +53,7 @@ from .evaluation import summarize_evaluation
 from .models import (
     DataSplitPlan,
     EvaluationResults,
+    ExpandedSearchResult,
     ModelCandidates,
     ModelFamily,
     ModelingRequest,
@@ -66,7 +67,7 @@ from .persistence import PersistedModelMetadata, save_model
 from .readiness import assess_model_readiness
 from .selection import select_model
 from .split_planning import recommend_data_split
-from .training import fit_final_pipeline, train_and_evaluate_models
+from .training import fit_final_pipeline, run_expanded_search, train_and_evaluate_models
 from .understanding import understand_modeling
 
 _NOTE_COMPOSED = (
@@ -331,3 +332,26 @@ def train_and_persist_model(
         root=root,
     )
     return spec, metadata
+
+
+def run_expanded_model_search(df: pd.DataFrame, request: ModelingRequest) -> ExpandedSearchResult:
+    """Phase 7.7: fit and rank every candidate in the expanded catalog
+    (20+ (estimator, hyperparameter) combinations) for this dataset.
+
+    A **composition layer only**: reuses this module's own
+    ``_build_problem_spec`` / ``_build_feature_engineering_spec`` (the
+    same two calls :func:`run_modeling_pipeline` makes) plus the existing
+    Phase-7.2/7.3 ``assess_model_readiness`` / ``recommend_data_split``,
+    then hands off to :func:`data_engine.modeling.training.run_expanded_search`
+    for the actual fitting/evaluation/ranking — nothing here is
+    reimplemented.
+    """
+    problem = _build_problem_spec(df, request)
+    feature_engineering = _build_feature_engineering_spec(df, request, problem)
+    readiness = assess_model_readiness(
+        df, problem, feature_engineering, objective=request.objective
+    )
+    split = recommend_data_split(df, problem, feature_engineering, objective=request.objective)
+    return run_expanded_search(
+        df, problem, feature_engineering, readiness, split, objective=request.objective
+    )

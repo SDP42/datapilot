@@ -90,3 +90,27 @@ def test_modeling_run_rejects_invalid_forecast_horizon(client, auth_headers, sam
         headers=auth_headers,
     )
     assert response.status_code == 422
+
+
+def test_modeling_search_returns_more_than_20_ranked_candidates(
+    client, auth_headers, sample_csv_bytes
+):
+    files = {"file": ("data.csv", io.BytesIO(sample_csv_bytes), "text/csv")}
+    response = client.post(
+        "/api/v1/modeling/search",
+        files=files,
+        data={"objective": "predict y"},
+        headers=auth_headers,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "completed"
+    assert body["candidate_count"] > 20
+    assert len(body["candidates"]) == body["candidate_count"]
+    assert body["candidates"][0]["rank"] == 1
+
+
+def test_modeling_search_requires_auth(client, sample_csv_bytes):
+    files = {"file": ("data.csv", io.BytesIO(sample_csv_bytes), "text/csv")}
+    response = client.post("/api/v1/modeling/search", files=files, data={"objective": "predict y"})
+    assert response.status_code == 401

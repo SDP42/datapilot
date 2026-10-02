@@ -87,6 +87,13 @@ export async function runModeling(file: File, objective: string, forecastHorizon
   return uploadForm<ModelingSpec>("/api/v1/modeling/run", form);
 }
 
+export async function runModelSearch(file: File, objective: string) {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("objective", objective);
+  return uploadForm<ExpandedSearchResult>("/api/v1/modeling/search", form);
+}
+
 export async function submitModelingJob(file: File, objective: string, forecastHorizon = 1) {
   const form = new FormData();
   form.append("file", file);
@@ -294,6 +301,26 @@ export interface ModelingSpec {
     status: string;
     runs: { family: string; status: string; metrics: Record<string, number> }[];
   };
+}
+
+export interface ExpandedCandidateResult {
+  rank: number;
+  family: string;
+  estimator_name: string;
+  hyperparameters: Record<string, string | number | boolean | number[] | null>;
+  status: "completed" | "failed" | "unavailable";
+  metrics: Record<string, number>;
+  reason?: string | null;
+}
+
+export interface ExpandedSearchResult {
+  status: string;
+  reason?: string | null;
+  task_type?: string | null;
+  selection_metric?: string | null;
+  candidate_count: number;
+  candidates: ExpandedCandidateResult[];
+  notes: string[];
 }
 
 export interface JobRecord {

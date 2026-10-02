@@ -40,6 +40,8 @@ from datapilot.contracts import ColumnType
 from .models import (
     DataSplitPlan,
     DataSplitStrategy,
+    ExpandedCandidateResult,
+    ExpandedSearchResult,
     ModelCandidates,
     ModelFamily,
     ModelingStatus,
@@ -48,6 +50,7 @@ from .models import (
     TrainingRun,
     TrainingRunStatus,
 )
+from .selection import _TASK_SELECTION_METRIC
 from .temporal_execution import (
     build_calendar_features,
     build_temporal_features,
@@ -1065,6 +1068,82 @@ def _run_candidate(
 
 
 @dataclass(frozen=True)
+class _ResolvedContext:
+    """The category/target/feature resolution shared by every Phase-7.6/7.7
+    function that fits an estimator on the *full* dataset (as opposed to
+    :func:`train_and_evaluate_models`'s own train/test-split-scoped copy
+    of this same resolution)."""
+
+    category: str
+    target_column: str | None
+    feature_cols: list[str]
+    numeric_cols: list[str]
+    categorical_cols: list[str]
+
+
+def _resolve_task_and_features(
+    df: pd.DataFrame, problem: ProblemSpec, feature_engineering: FeatureEngineeringSpec
+) -> _ResolvedContext:
+    """Resolve the task category, target column, and feature columns for a
+    full-dataset fit. Raises ``ValueError`` when that is not possible —
+    the same preconditions :func:`train_and_evaluate_models` checks,
+    surfaced as an exception since there is no ``TrainingRun`` to carry an
+    ``unavailable`` status here.
+    """
+    if not _SKLEARN_AVAILABLE:
+        raise ValueError("scikit-learn is not available in this environment")
+
+    task_inference = problem.task_type
+    if task_inference.status is not _PU_COMPLETED or task_inference.task_type is None:
+        raise ValueError("task-type inference is not completed")
+    task = task_inference.task_type
+    if task in _UNSUPPORTED_TASKS:
+        raise ValueError(f"model training does not support task type '{task.value}'")
+    category = _TASK_CATEGORY[task]
+    is_supervised = category in {"regression", "classification"}
+
+    column_set = {str(c) for c in df.columns}
+    target_column = problem.target.target_column if is_supervised else None
+
+    col_type = {c.column: c.column_type for c in feature_engineering.inventory.candidates}
+    eligible = [
+        c for c in _eligible_features(feature_engineering) if c in column_set and c != target_column
+    ]
+    numeric_cols = sorted(
+        c for c in eligible if col_type.get(c) in (ColumnType.NUMERIC, ColumnType.BOOLEAN)
+    )
+    categorical_cols = sorted(c for c in eligible if col_type.get(c) is ColumnType.CATEGORICAL)
+    feature_cols = sorted(numeric_cols + categorical_cols)
+    if not feature_cols:
+        raise ValueError("no usable numeric / categorical feature columns are available")
+
+    return _ResolvedContext(
+        category=category,
+        target_column=target_column,
+        feature_cols=feature_cols,
+        numeric_cols=numeric_cols,
+        categorical_cols=categorical_cols,
+    )
+
+
+def _build_preprocessor_for(
+    feature_engineering: FeatureEngineeringSpec, ctx: _ResolvedContext
+) -> Any:
+    """`_build_preprocessor` given an already-resolved `_ResolvedContext`.
+    Raises ``ValueError`` with the preprocessor's own reason on failure.
+    """
+    req_by_col: dict[str, set[str]] = {}
+    for requirement in feature_engineering.preprocessing.requirements:
+        req_by_col.setdefault(requirement.column, set()).add(requirement.description)
+    preprocessor, preproc_error = _build_preprocessor(
+        ctx.numeric_cols, ctx.categorical_cols, req_by_col
+    )
+    if preproc_error is not None:
+        raise ValueError(preproc_error)
+    return preprocessor
+
+
+@dataclass(frozen=True)
 class FittedPipeline:
     """A fitted, ready-to-persist scikit-learn pipeline plus the metadata
     :func:`data_engine.modeling.persistence.save_model` needs to run it
@@ -1112,52 +1191,20 @@ def fit_final_pipeline(
     checks, surfaced as an exception here since there is no ``TrainingRun``
     to carry an ``unavailable`` status).
     """
-    if not _SKLEARN_AVAILABLE:
-        raise ValueError("scikit-learn is not available in this environment")
+    ctx = _resolve_task_and_features(df, problem, feature_engineering)
 
-    task_inference = problem.task_type
-    if task_inference.status is not _PU_COMPLETED or task_inference.task_type is None:
-        raise ValueError("task-type inference is not completed")
-    task = task_inference.task_type
-    if task in _UNSUPPORTED_TASKS:
-        raise ValueError(f"model training does not support task type '{task.value}'")
-    category = _TASK_CATEGORY[task]
-    is_supervised = category in {"regression", "classification"}
-
-    df_columns = [str(c) for c in df.columns]
-    column_set = set(df_columns)
-    target_column = problem.target.target_column if is_supervised else None
-
-    col_type = {c.column: c.column_type for c in feature_engineering.inventory.candidates}
-    eligible = [
-        c for c in _eligible_features(feature_engineering) if c in column_set and c != target_column
-    ]
-    numeric_cols = sorted(
-        c for c in eligible if col_type.get(c) in (ColumnType.NUMERIC, ColumnType.BOOLEAN)
-    )
-    categorical_cols = sorted(c for c in eligible if col_type.get(c) is ColumnType.CATEGORICAL)
-    feature_cols = sorted(numeric_cols + categorical_cols)
-    if not feature_cols:
-        raise ValueError("no usable numeric / categorical feature columns are available")
-
-    built = _build_estimator(family, category)
+    built = _build_estimator(family, ctx.category)
     if built is None:
         raise ValueError(
             f"no dependency-light baseline estimator is defined for the '{family.value}' "
-            f"family on a {category} task"
+            f"family on a {ctx.category} task"
         )
     estimator_name, estimator = built
-
-    req_by_col: dict[str, set[str]] = {}
-    for requirement in feature_engineering.preprocessing.requirements:
-        req_by_col.setdefault(requirement.column, set()).add(requirement.description)
-    preprocessor, preproc_error = _build_preprocessor(numeric_cols, categorical_cols, req_by_col)
-    if preproc_error is not None:
-        raise ValueError(preproc_error)
+    preprocessor = _build_preprocessor_for(feature_engineering, ctx)
 
     from sklearn.pipeline import Pipeline
 
-    x_all = df[feature_cols]
+    x_all = df[ctx.feature_cols]
     pipeline = Pipeline([("preprocess", preprocessor), ("model", estimator)])
     notes = [
         f"refit on all {len(df)} available rows after family '{family.value}' was selected "
@@ -1165,20 +1212,427 @@ def fit_final_pipeline(
         "the metrics that justified it",
         f"random seed: {MODEL_TRAINING_RANDOM_SEED} (fixed)",
     ]
-    if category == "clustering":
+    if ctx.category == "clustering":
         pipeline.fit(x_all)
     else:
-        y_all = df[target_column].to_numpy()
+        y_all = df[ctx.target_column].to_numpy()
         pipeline.fit(x_all, y_all)
 
     return FittedPipeline(
         pipeline=pipeline,
         estimator_name=estimator_name,
         family=family,
-        category=category,
-        target_column=target_column,
-        feature_cols=feature_cols,
-        numeric_cols=numeric_cols,
-        categorical_cols=categorical_cols,
+        category=ctx.category,
+        target_column=ctx.target_column,
+        feature_cols=ctx.feature_cols,
+        numeric_cols=ctx.numeric_cols,
+        categorical_cols=ctx.categorical_cols,
         notes=notes,
+    )
+
+
+@dataclass(frozen=True)
+class _CandidateSpec:
+    family: ModelFamily
+    estimator_name: str
+    hyperparameters: dict[str, Any]
+    build: Any  # Callable[[], Any] — a zero-arg estimator factory
+
+
+def _expanded_catalog(category: str) -> list[_CandidateSpec]:
+    """Phase 7.7's expanded candidate catalog for one task category.
+
+    A **fixed, documented grid** — never a randomized search — so the
+    same data and the same fixed random seed always produce the same
+    ranked result. Each entry is a concrete scikit-learn estimator plus
+    the exact hyperparameters it was given; nothing here is tuned
+    adaptively from the data.
+    """
+    seed = MODEL_TRAINING_RANDOM_SEED
+    specs: list[_CandidateSpec] = []
+
+    if category == "regression":
+        from sklearn.ensemble import (
+            ExtraTreesRegressor,
+            GradientBoostingRegressor,
+            RandomForestRegressor,
+        )
+        from sklearn.linear_model import ElasticNet, Lasso, LinearRegression, Ridge
+        from sklearn.neighbors import KNeighborsRegressor
+        from sklearn.neural_network import MLPRegressor
+        from sklearn.tree import DecisionTreeRegressor
+
+        specs += [
+            _CandidateSpec(ModelFamily.LINEAR, "LinearRegression", {}, LinearRegression),
+            _CandidateSpec(
+                ModelFamily.LINEAR,
+                "Ridge",
+                {"alpha": 1.0},
+                lambda: Ridge(alpha=1.0, random_state=seed),
+            ),
+            _CandidateSpec(
+                ModelFamily.LINEAR,
+                "Ridge",
+                {"alpha": 10.0},
+                lambda: Ridge(alpha=10.0, random_state=seed),
+            ),
+            _CandidateSpec(
+                ModelFamily.LINEAR,
+                "Lasso",
+                {"alpha": 0.1},
+                lambda: Lasso(alpha=0.1, random_state=seed),
+            ),
+            _CandidateSpec(
+                ModelFamily.LINEAR,
+                "Lasso",
+                {"alpha": 1.0},
+                lambda: Lasso(alpha=1.0, random_state=seed),
+            ),
+            _CandidateSpec(
+                ModelFamily.LINEAR,
+                "ElasticNet",
+                {"alpha": 1.0, "l1_ratio": 0.5},
+                lambda: ElasticNet(alpha=1.0, l1_ratio=0.5, random_state=seed),
+            ),
+        ]
+        for depth in (3, 6, 10, None):
+            specs.append(
+                _CandidateSpec(
+                    ModelFamily.TREE_BASED,
+                    "DecisionTreeRegressor",
+                    {"max_depth": depth},
+                    lambda d=depth: DecisionTreeRegressor(max_depth=d, random_state=seed),
+                )
+            )
+        for n_estimators, max_depth in ((50, 6), (100, None), (200, 10)):
+            specs.append(
+                _CandidateSpec(
+                    ModelFamily.ENSEMBLE,
+                    "RandomForestRegressor",
+                    {"n_estimators": n_estimators, "max_depth": max_depth},
+                    lambda n=n_estimators, d=max_depth: RandomForestRegressor(
+                        n_estimators=n, max_depth=d, random_state=seed, n_jobs=1
+                    ),
+                )
+            )
+        for n_estimators, lr in ((100, 0.1), (200, 0.05)):
+            specs.append(
+                _CandidateSpec(
+                    ModelFamily.ENSEMBLE,
+                    "GradientBoostingRegressor",
+                    {"n_estimators": n_estimators, "learning_rate": lr},
+                    lambda n=n_estimators, r=lr: GradientBoostingRegressor(
+                        n_estimators=n, learning_rate=r, random_state=seed
+                    ),
+                )
+            )
+        specs.append(
+            _CandidateSpec(
+                ModelFamily.ENSEMBLE,
+                "ExtraTreesRegressor",
+                {"n_estimators": 100},
+                lambda: ExtraTreesRegressor(n_estimators=100, random_state=seed, n_jobs=1),
+            )
+        )
+        for k in (3, 5, 10):
+            specs.append(
+                _CandidateSpec(
+                    ModelFamily.DISTANCE_BASED,
+                    "KNeighborsRegressor",
+                    {"n_neighbors": k},
+                    lambda n=k: KNeighborsRegressor(n_neighbors=n, n_jobs=1),
+                )
+            )
+        for hidden in ((32,), (64, 32)):
+            specs.append(
+                _CandidateSpec(
+                    ModelFamily.NEURAL,
+                    "MLPRegressor",
+                    {"hidden_layer_sizes": list(hidden)},
+                    lambda h=hidden: MLPRegressor(
+                        hidden_layer_sizes=h,
+                        max_iter=MODEL_TRAINING_MLP_MAX_ITER,
+                        random_state=seed,
+                    ),
+                )
+            )
+
+    elif category == "classification":
+        from sklearn.ensemble import (
+            ExtraTreesClassifier,
+            GradientBoostingClassifier,
+            RandomForestClassifier,
+        )
+        from sklearn.linear_model import LogisticRegression
+        from sklearn.naive_bayes import GaussianNB
+        from sklearn.neighbors import KNeighborsClassifier
+        from sklearn.neural_network import MLPClassifier
+        from sklearn.tree import DecisionTreeClassifier
+
+        for c in (0.1, 1.0, 10.0, 100.0):
+            specs.append(
+                _CandidateSpec(
+                    ModelFamily.LINEAR,
+                    "LogisticRegression",
+                    {"C": c},
+                    lambda c_val=c: LogisticRegression(
+                        C=c_val, max_iter=MODEL_TRAINING_LOGREG_MAX_ITER, random_state=seed
+                    ),
+                )
+            )
+        for depth in (3, 6, 10, None):
+            specs.append(
+                _CandidateSpec(
+                    ModelFamily.TREE_BASED,
+                    "DecisionTreeClassifier",
+                    {"max_depth": depth},
+                    lambda d=depth: DecisionTreeClassifier(max_depth=d, random_state=seed),
+                )
+            )
+        for n_estimators, max_depth in ((50, 6), (100, None), (200, 10)):
+            specs.append(
+                _CandidateSpec(
+                    ModelFamily.ENSEMBLE,
+                    "RandomForestClassifier",
+                    {"n_estimators": n_estimators, "max_depth": max_depth},
+                    lambda n=n_estimators, d=max_depth: RandomForestClassifier(
+                        n_estimators=n, max_depth=d, random_state=seed, n_jobs=1
+                    ),
+                )
+            )
+        for n_estimators, lr in ((100, 0.1), (200, 0.05)):
+            specs.append(
+                _CandidateSpec(
+                    ModelFamily.ENSEMBLE,
+                    "GradientBoostingClassifier",
+                    {"n_estimators": n_estimators, "learning_rate": lr},
+                    lambda n=n_estimators, r=lr: GradientBoostingClassifier(
+                        n_estimators=n, learning_rate=r, random_state=seed
+                    ),
+                )
+            )
+        specs.append(
+            _CandidateSpec(
+                ModelFamily.ENSEMBLE,
+                "ExtraTreesClassifier",
+                {"n_estimators": 100},
+                lambda: ExtraTreesClassifier(n_estimators=100, random_state=seed, n_jobs=1),
+            )
+        )
+        for var_smoothing in (1e-9, 1e-7):
+            specs.append(
+                _CandidateSpec(
+                    ModelFamily.PROBABILISTIC,
+                    "GaussianNB",
+                    {"var_smoothing": var_smoothing},
+                    lambda v=var_smoothing: GaussianNB(var_smoothing=v),
+                )
+            )
+        for k in (3, 5, 10, 15):
+            specs.append(
+                _CandidateSpec(
+                    ModelFamily.DISTANCE_BASED,
+                    "KNeighborsClassifier",
+                    {"n_neighbors": k},
+                    lambda n=k: KNeighborsClassifier(n_neighbors=n, n_jobs=1),
+                )
+            )
+        for hidden in ((32,), (64, 32)):
+            specs.append(
+                _CandidateSpec(
+                    ModelFamily.NEURAL,
+                    "MLPClassifier",
+                    {"hidden_layer_sizes": list(hidden)},
+                    lambda h=hidden: MLPClassifier(
+                        hidden_layer_sizes=h,
+                        max_iter=MODEL_TRAINING_MLP_MAX_ITER,
+                        random_state=seed,
+                    ),
+                )
+            )
+
+    return specs
+
+
+def run_expanded_search(
+    df: pd.DataFrame,
+    problem: ProblemSpec,
+    feature_engineering: FeatureEngineeringSpec,
+    readiness: ModelReadiness,
+    split: DataSplitPlan,
+    *,
+    objective: str | None = None,
+) -> ExpandedSearchResult:
+    """Fit and evaluate every candidate in Phase 7.7's expanded catalog —
+    20+ concrete (estimator, hyperparameter) combinations, not one
+    baseline per family — and return every result, ranked.
+
+    This is the **hyperparameter-tuning entry point**: every candidate is
+    a fixed, documented (estimator, hyperparameter) pair (see
+    :func:`_expanded_catalog`), fit on the exact same train/test split
+    :func:`train_and_evaluate_models` would use (same `DataSplitPlan`,
+    same fixed random seed) and ranked by the exact same per-task
+    selection metric :func:`data_engine.modeling.selection.select_model`
+    uses. Unlike Phase 7.4/7.5 (one estimator per family, one winner
+    surfaced), this returns **every** candidate's result so a caller can
+    compare the full field, not just the one DataPilot would have picked.
+
+    Supervised tasks only (regression / classification) — clustering and
+    unsupported task types return ``status = unavailable``.
+    """
+    task_inference = problem.task_type
+    if task_inference.status is not _PU_COMPLETED or task_inference.task_type is None:
+        return ExpandedSearchResult(
+            status=ModelingStatus.UNAVAILABLE,
+            reason="task-type inference is not completed",
+        )
+    task = task_inference.task_type
+    if task in _UNSUPPORTED_TASKS:
+        return ExpandedSearchResult(
+            status=ModelingStatus.UNAVAILABLE,
+            reason=f"model training does not support task type '{task.value}'",
+            task_type=task.value,
+        )
+    category = _TASK_CATEGORY[task]
+    if category not in ("regression", "classification"):
+        return ExpandedSearchResult(
+            status=ModelingStatus.UNAVAILABLE,
+            reason="the expanded search covers regression and classification only",
+            task_type=task.value,
+        )
+    if readiness.status is not ModelingStatus.COMPLETED or readiness.ready is False:
+        first = (
+            readiness.blocking_issues[0]
+            if readiness.blocking_issues
+            else (readiness.reason or "the data is not ready for modeling")
+        )
+        return ExpandedSearchResult(
+            status=ModelingStatus.UNAVAILABLE,
+            reason=f"training is blocked by model-readiness issues: {first}",
+            task_type=task.value,
+        )
+    if split.status is not ModelingStatus.COMPLETED:
+        return ExpandedSearchResult(
+            status=ModelingStatus.UNAVAILABLE,
+            reason="the data-split plan is not completed",
+            task_type=task.value,
+        )
+    if not _SKLEARN_AVAILABLE:
+        return ExpandedSearchResult(
+            status=ModelingStatus.UNAVAILABLE,
+            reason="scikit-learn is not available in this environment",
+            task_type=task.value,
+        )
+
+    try:
+        ctx = _resolve_task_and_features(df, problem, feature_engineering)
+    except ValueError as exc:
+        return ExpandedSearchResult(
+            status=ModelingStatus.UNAVAILABLE, reason=str(exc), task_type=task.value
+        )
+
+    try:
+        preprocessor = _build_preprocessor_for(feature_engineering, ctx)
+    except ValueError as exc:
+        return ExpandedSearchResult(
+            status=ModelingStatus.UNAVAILABLE, reason=str(exc), task_type=task.value
+        )
+
+    catalog = _expanded_catalog(category)
+    if not catalog:
+        return ExpandedSearchResult(
+            status=ModelingStatus.UNAVAILABLE,
+            reason=f"no expanded-search catalog is defined for category '{category}'",
+            task_type=task.value,
+        )
+
+    from sklearn.pipeline import Pipeline
+
+    x_all = df[ctx.feature_cols]
+    y_all = df[ctx.target_column].to_numpy()
+    train_idx, _val_idx, test_idx, _split_notes = _split_indices(len(df), split, y_all)
+
+    selection_metric, direction = _TASK_SELECTION_METRIC.get(task, (None, None))
+
+    results: list[tuple[ExpandedCandidateResult, float | None]] = []
+    x_train, x_test = x_all.iloc[train_idx], x_all.iloc[test_idx]
+    y_train, y_test = y_all[train_idx], y_all[test_idx]
+
+    for spec in catalog:
+        try:
+            pipeline = Pipeline([("preprocess", preprocessor), ("model", spec.build())])
+            pipeline.fit(x_train, y_train)
+            y_pred = np.asarray(pipeline.predict(x_test))
+            if category == "regression":
+                metrics = _regression_metrics(y_test.astype(float), y_pred.astype(float))
+            else:
+                proba = None
+                model = pipeline.named_steps["model"]
+                if hasattr(model, "predict_proba"):
+                    try:
+                        proba_full = np.asarray(pipeline.predict_proba(x_test))
+                        if proba_full.ndim == 2 and proba_full.shape[1] == 2:
+                            proba = proba_full[:, 1]
+                    except (ValueError, AttributeError):
+                        proba = None
+                metrics = _classification_metrics(
+                    y_test, y_pred, proba, n_classes=len(np.unique(y_train))
+                )
+            score = metrics.get(selection_metric) if selection_metric else None
+            results.append(
+                (
+                    ExpandedCandidateResult(
+                        rank=0,
+                        family=spec.family,
+                        estimator_name=spec.estimator_name,
+                        hyperparameters=spec.hyperparameters,
+                        status=TrainingRunStatus.COMPLETED,
+                        metrics=metrics,
+                    ),
+                    score,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - deterministic, normalised failure record
+            results.append(
+                (
+                    ExpandedCandidateResult(
+                        rank=0,
+                        family=spec.family,
+                        estimator_name=spec.estimator_name,
+                        hyperparameters=spec.hyperparameters,
+                        status=TrainingRunStatus.FAILED,
+                        reason=f"{type(exc).__name__}: {_normalise_error(str(exc))}",
+                    ),
+                    None,
+                )
+            )
+
+    def _sort_key(item: tuple[ExpandedCandidateResult, float | None]) -> tuple[int, float]:
+        result, score = item
+        if score is None:
+            return (1, 0.0)
+        signed = -score if direction == "maximize" else score
+        return (0, signed)
+
+    results.sort(key=_sort_key)
+    ranked = [
+        result.model_copy(update={"rank": i + 1}) for i, (result, _score) in enumerate(results)
+    ]
+
+    return ExpandedSearchResult(
+        status=ModelingStatus.COMPLETED,
+        task_type=task.value,
+        selection_metric=selection_metric,
+        candidate_count=len(ranked),
+        candidates=ranked,
+        notes=[
+            f"{len(catalog)} (estimator, hyperparameter) candidates from the fixed Phase 7.7 "
+            "catalog, each fit once on a single train/test split (no cross-validation) — "
+            "see each candidate's own metrics for its test-partition performance",
+            f"ranked by '{selection_metric}' ({direction})" if selection_metric else "unranked",
+            f"random seed: {MODEL_TRAINING_RANDOM_SEED} (fixed)",
+            "no model artifact was persisted here; use "
+            "data_engine.modeling.persistence.save_model with fit_final_pipeline (or an "
+            "expanded-search-specific fit) to persist a chosen candidate",
+        ],
     )

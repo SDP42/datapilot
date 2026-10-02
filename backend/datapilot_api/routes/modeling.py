@@ -13,7 +13,13 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Form, UploadFile
 from sqlalchemy.orm import Session
 
-from data_engine.modeling import ModelingRequest, ModelingSpec, run_modeling_pipeline
+from data_engine.modeling import (
+    ExpandedSearchResult,
+    ModelingRequest,
+    ModelingSpec,
+    run_expanded_model_search,
+    run_modeling_pipeline,
+)
 
 from ..activity_store import ActivityStore
 from ..auth import get_current_user
@@ -50,6 +56,30 @@ async def run(
         ),
     )
     return spec
+
+
+@router.post("/search", response_model=ExpandedSearchResult)
+async def search(
+    file: UploadFile,
+    objective: str = Form(...),
+    session: Session = Depends(get_session),
+) -> ExpandedSearchResult:
+    """Ingest an uploaded CSV and fit + rank every candidate in the Phase 7.7
+    expanded catalog (20+ (estimator, hyperparameter) combinations), not
+    just one baseline per family. Slower than `/run` — every candidate is
+    its own fit — but returns the full ranked field for comparison.
+    """
+    reference, df = await ingest_upload(file)
+    request = ModelingRequest(dataset_id=reference.dataset_id, objective=objective)
+    result = run_expanded_model_search(df, request)
+    _activity.record(
+        session,
+        kind="search",
+        dataset_id=reference.dataset_id,
+        dataset_filename=reference.original_filename,
+        summary=f"status={result.status.value}; {result.candidate_count} candidates ranked",
+    )
+    return result
 
 
 __all__ = ["router"]

@@ -39,6 +39,8 @@ from .models import (
     DataSplitPlan,
     DataSplitStrategy,
     EvaluationResults,
+    ExpandedCandidateResult,
+    ExpandedSearchResult,
     ModelCandidate,
     ModelCandidates,
     ModelFamily,
@@ -61,7 +63,7 @@ from .persistence import (
     predict_with_model,
     save_model,
 )
-from .pipeline import run_modeling_pipeline, train_and_persist_model
+from .pipeline import run_expanded_model_search, run_modeling_pipeline, train_and_persist_model
 from .readiness import (
     MODEL_READINESS_MIN_ROWS,
     MODEL_READINESS_ROWS_WARNING,
@@ -94,6 +96,7 @@ from .training import (
     MODEL_TRAINING_TREE_MAX_DEPTH,
     FittedPipeline,
     fit_final_pipeline,
+    run_expanded_search,
     train_and_evaluate_models,
 )
 from .understanding import understand_modeling
@@ -123,6 +126,8 @@ __all__ = [
     "DataSplitPlan",
     "DataSplitStrategy",
     "EvaluationResults",
+    "ExpandedCandidateResult",
+    "ExpandedSearchResult",
     "FittedPipeline",
     "ModelCandidate",
     "ModelCandidates",
@@ -147,6 +152,8 @@ __all__ = [
     "load_model",
     "predict_with_model",
     "recommend_data_split",
+    "run_expanded_model_search",
+    "run_expanded_search",
     "run_modeling_pipeline",
     "save_model",
     "select_model",

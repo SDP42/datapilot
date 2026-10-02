@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { Cpu, Trophy } from "lucide-react";
+import { Cpu, Trophy, Layers } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 import { PageHeader } from "@/components/layout/page-header";
@@ -14,13 +14,22 @@ import { Label } from "@/components/ui/label";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
-import { runModeling, ApiError, ModelingSpec } from "@/lib/api";
+import {
+  runModeling,
+  runModelSearch,
+  ApiError,
+  ModelingSpec,
+  ExpandedSearchResult,
+} from "@/lib/api";
 
 export default function ModelingPage() {
   const [file, setFile] = useState<File | null>(null);
   const [objective, setObjective] = useState("");
   const [loading, setLoading] = useState(false);
   const [spec, setSpec] = useState<ModelingSpec | null>(null);
+
+  const [searching, setSearching] = useState(false);
+  const [search, setSearch] = useState<ExpandedSearchResult | null>(null);
 
   async function handleRun() {
     if (!file || !objective) return;
@@ -33,6 +42,24 @@ export default function ModelingPage() {
       toast.error(err instanceof ApiError ? err.message : "Modeling run failed");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleSearch() {
+    if (!file || !objective) return;
+    setSearching(true);
+    try {
+      const data = await runModelSearch(file, objective);
+      setSearch(data);
+      if (data.status === "completed") {
+        toast.success(`${data.candidate_count} candidates trained and ranked`);
+      } else {
+        toast.warning(data.reason ?? "Model search could not complete");
+      }
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Model search failed");
+    } finally {
+      setSearching(false);
     }
   }
 
@@ -67,11 +94,97 @@ export default function ModelingPage() {
               onChange={(e) => setObjective(e.target.value)}
             />
           </div>
-          <Button onClick={handleRun} disabled={!file || !objective} loading={loading}>
-            <Cpu className="h-4 w-4" /> Run modeling pipeline
-          </Button>
+          <div className="flex flex-wrap gap-3">
+            <Button onClick={handleRun} disabled={!file || !objective} loading={loading}>
+              <Cpu className="h-4 w-4" /> Run modeling pipeline
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={handleSearch}
+              disabled={!file || !objective}
+              loading={searching}
+            >
+              <Layers className="h-4 w-4" /> Run full model search (20+ candidates)
+            </Button>
+          </div>
+          <p className="text-xs text-muted">
+            The pipeline above fits one baseline per family. Full search fits every
+            (estimator, hyperparameter) combination in the Phase 7.7 catalog — 20+ candidates —
+            and ranks all of them, including a fixed hyperparameter grid per family.
+          </p>
         </CardContent>
       </Card>
+
+      {search && (
+        <Card className="mt-8">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Layers className="h-4 w-4 text-primary-2" /> Full model search results
+            </CardTitle>
+            <CardDescription>
+              {search.status === "completed"
+                ? `${search.candidate_count} candidates trained and ranked by ${search.selection_metric} (${search.task_type})`
+                : (search.reason ?? "Search did not complete")}
+            </CardDescription>
+          </CardHeader>
+          {search.status === "completed" && (
+            <CardContent className="space-y-2">
+              <div className="max-h-[32rem] overflow-y-auto rounded-xl border border-surface-border">
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-surface-2/90 backdrop-blur">
+                    <tr className="border-b border-surface-border">
+                      <th className="px-4 py-2.5 text-left font-medium text-muted">#</th>
+                      <th className="px-4 py-2.5 text-left font-medium text-muted">Family</th>
+                      <th className="px-4 py-2.5 text-left font-medium text-muted">Estimator</th>
+                      <th className="px-4 py-2.5 text-left font-medium text-muted">
+                        Hyperparameters
+                      </th>
+                      <th className="px-4 py-2.5 text-left font-medium text-muted">Metrics</th>
+                      <th className="px-4 py-2.5 text-left font-medium text-muted">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {search.candidates.map((c) => (
+                      <tr
+                        key={`${c.rank}-${c.estimator_name}`}
+                        className={
+                          "border-b border-surface-border/60 last:border-0 " +
+                          (c.rank === 1 ? "bg-primary/10" : "hover:bg-white/[0.02]")
+                        }
+                      >
+                        <td className="px-4 py-2.5 font-mono text-xs">
+                          {c.rank === 1 ? (
+                            <Badge variant="primary">
+                              <Trophy className="h-3 w-3" /> 1
+                            </Badge>
+                          ) : (
+                            c.rank
+                          )}
+                        </td>
+                        <td className="px-4 py-2.5 text-xs text-muted">{c.family}</td>
+                        <td className="px-4 py-2.5 font-mono text-xs">{c.estimator_name}</td>
+                        <td className="px-4 py-2.5 font-mono text-xs text-muted">
+                          {Object.entries(c.hyperparameters)
+                            .map(([k, v]) => `${k}=${Array.isArray(v) ? `[${v.join(",")}]` : v}`)
+                            .join(", ") || "—"}
+                        </td>
+                        <td className="px-4 py-2.5 font-mono text-xs">
+                          {Object.entries(c.metrics)
+                            .map(([k, v]) => `${k}=${v.toFixed(3)}`)
+                            .join("  ") || "—"}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <StatusBadge status={c.status === "completed" ? "completed" : "failed"} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          )}
+        </Card>
+      )}
 
       {spec && (
         <div className="mt-8 space-y-6">

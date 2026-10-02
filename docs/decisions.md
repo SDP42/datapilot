@@ -4,6 +4,67 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0098 — Phase 14.3: a fixed hyperparameter grid instead of adaptive search, and slicers that recompute from raw rows instead of filtering pre-aggregated stats
+
+- **Decision:** two choices define this increment:
+  1. **The expanded model search (Phase 7.7) is a fixed, documented
+     catalog of 20+ (estimator, hyperparameter) pairs, not
+     `GridSearchCV` / `RandomizedSearchCV` / Optuna.** The request asked
+     for "hyperparameter tuning if required" alongside "more than 20
+     models" — a real adaptive search (cross-validated grid/random
+     search) was considered and rejected for this increment: it would
+     multiply runtime by the number of CV folds on top of 20+ candidates
+     (expensive for a synchronous HTTP endpoint with no job queue behind
+     it yet), introduce a second source of randomness beyond the one
+     fixed seed this engine has used everywhere since Phase 7.4, and— by
+     definition — produce a *best-found* hyperparameter combination that
+     differs run to run unless heavily constrained anyway. A fixed grid
+     fit once per candidate on the same deterministic train/test split
+     `train_and_evaluate_models` already uses gets the same practical
+     outcome (seeing how estimator *and* hyperparameter choice affects
+     the metric) while keeping the same reproducibility guarantee as
+     literally every other number this engine has ever reported.
+     Genuine cross-validated search is a natural Phase 7.8 if the fixed
+     grid proves insufficient.
+  2. **Dashboard slicers filter the original CSV's raw rows (parsed
+     client-side), not the backend's pre-aggregated `EDAReport`.** The
+     EDA report's histograms / category counts are computed once, over
+     the whole dataset — there is no way to "filter" an already-computed
+     mean or histogram bin after the fact without the underlying
+     observations. The alternative (re-calling the backend's EDA
+     endpoint per slicer change) was rejected as unnecessarily slow and
+     network-dependent for what is simple arithmetic; the dataset sizes
+     this feature targets (the same CSVs the rest of the dashboard
+     builder already handles client-side) parse and recompute instantly
+     in the browser. `lib/csv-parse.ts` is a small dependency-free
+     parser (quoted fields, embedded commas, escaped quotes) rather than
+     adding a CSV-parsing library, matching the project's existing
+     "dependencies only for genuinely irreplaceable capability" line
+     from decision 0095.
+- **Reason:** both choices protect the same property this entire
+  codebase has optimized for since Phase 0 — that a reported number
+  means exactly what it says and would reappear identically on rerun.
+  An adaptive hyperparameter search or a stale pre-aggregated slicer
+  would each have quietly broken that for this one feature while
+  everything else kept the promise.
+- **Alternatives considered:** `GridSearchCV` with k-fold cross-
+  validation per candidate (rejected — see point 1: cost and a second
+  randomness source); re-fetching backend EDA on every slicer toggle
+  (rejected — see point 2: unnecessary latency and network dependency
+  for arithmetic the browser can already do); a CSV-parsing npm
+  dependency (rejected — the format this feature needs to handle is
+  narrow enough that a small first-party parser is more auditable than
+  pulling in a general-purpose library for it).
+- **Consequence:** `/api/v1/modeling/search` returns 21-22 ranked,
+  reproducible candidates per run (verified: 22 for a binary-
+  classification HR dataset, ranked by f1 descending, 0 failures).
+  Dashboard slicers genuinely filter every KPI, chart, and the
+  conclusion's correlation — verified live by toggling a department
+  filter and watching three KPIs and the correlation text change
+  together. Quality gates: `pytest` 2152 passed / 3 skipped; `ruff` /
+  `ruff format` / `mypy` all green; frontend `tsc` / `eslint` clean,
+  `next build` succeeds.
+
 ## 0097 — Phase 14.2: deterministic keyword grouping over an LLM call, and dashboards as separate tabs rather than one longer scroll
 
 - **Decision:** two choices define this increment:

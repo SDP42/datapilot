@@ -483,3 +483,42 @@ class ModelingSpec(BaseModel):
     selection: ModelSelection = Field(default_factory=ModelSelection)
 
     notes: list[str] = Field(default_factory=list)
+
+
+class ExpandedCandidateResult(BaseModel):
+    """One candidate's result from Phase 7.7's expanded multi-model search
+    — every candidate tried, not just the winner (contrast with
+    :class:`TrainingRun`, which Phase 7.4 produces one of per *family*,
+    never per hyperparameter variant).
+    """
+
+    rank: int = Field(description="1-indexed rank by the selection metric; 1 is best.")
+    family: ModelFamily
+    estimator_name: str
+    hyperparameters: dict[str, str | int | float | bool | list[int] | None] = Field(
+        default_factory=dict,
+        description="The exact hyperparameters this candidate was fit with.",
+    )
+    status: TrainingRunStatus
+    metrics: dict[str, float] = Field(default_factory=dict)
+    reason: str | None = Field(default=None, description="Populated iff status is not completed.")
+
+
+class ExpandedSearchResult(BaseModel):
+    """The full ranked result of Phase 7.7's expanded candidate search —
+    every candidate in the catalog applicable to this task, each fit and
+    evaluated independently (train/test split, identical to Phase 7.4),
+    ranked by the same selection metric Phase 7.5 would use. Still no
+    fitted estimator or array — JSON-primitive only, exactly like every
+    other Phase-7 evaluation result.
+    """
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    status: ModelingStatus
+    reason: str | None = None
+    task_type: str | None = None
+    selection_metric: str | None = None
+    candidate_count: int = 0
+    candidates: list[ExpandedCandidateResult] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
