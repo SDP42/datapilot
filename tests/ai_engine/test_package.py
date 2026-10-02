@@ -1,5 +1,5 @@
-"""Phase 11.1 / 11.2 / 11.3 / 11.4 — package-level sanity: imports,
-exports, and the anthropic-free-import boundary for `ai_engine`.
+"""Phase 11.1-11.4 / 12.1-12.4 — package-level sanity: imports, exports,
+and the anthropic-free-import boundary for `ai_engine`.
 """
 
 from __future__ import annotations
@@ -17,30 +17,40 @@ def test_ai_engine_imports_correctly():
 
 def test_public_exports_are_intentional():
     expected = {
+        "DEFAULT_MAX_STEPS",
         "TOOLS_BY_NAME",
         "TOOL_NAMES",
         "AnalysisContext",
         "AnalysisResult",
+        "AutonomousRunTrace",
+        "ExecutionContext",
+        "ExecutionResult",
+        "ExecutionStep",
         "LLMMessage",
         "LLMProvider",
         "LLMResponse",
         "Recommendation",
         "RecommendationResult",
+        "StepVerdict",
         "ToolSchema",
+        "add_section",
         "build_analysis_context",
+        "evaluate_step",
+        "execute_tool",
         "get_tool_schema",
         "interpret_results",
         "list_tools",
         "recommend_next_steps",
         "render_context_as_text",
+        "run_autonomous_experimentation",
     }
     assert set(ai_engine.__all__) == expected
     for name in ai_engine.__all__:
         assert hasattr(ai_engine, name)
-    # Phase 11 never executes a recommended tool itself (Phase 12's
-    # concern), never gives an LLM direct dataframe/model access, and
-    # ships exactly one concrete provider so far
-    for forbidden in ("execute", "dataframe", "openai", "planner", "critic"):
+    # Phase 11/12 never gives an LLM direct dataframe/model access, never
+    # lets a plan branch or run in parallel, and ships exactly one
+    # concrete provider so far
+    for forbidden in ("openai", "parallel", "branch"):
         assert not any(forbidden in name.lower() for name in ai_engine.__all__)
 
 

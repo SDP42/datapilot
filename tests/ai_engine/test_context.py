@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from data_engine.modeling import ModelingSpec
 from data_engine.problem_understanding import ProblemSpec
-from ai_engine.context import AnalysisContext, build_analysis_context, render_context_as_text
+from ai_engine.context import (
+    AnalysisContext,
+    add_section,
+    build_analysis_context,
+    render_context_as_text,
+)
 
 
 def test_build_context_with_no_reports():
@@ -67,3 +72,32 @@ def test_context_is_json_roundtrippable():
     context = build_analysis_context("ds1", modeling=modeling)
     restored = AnalysisContext.model_validate_json(context.model_dump_json())
     assert restored == context
+
+
+# --- add_section (Phase 12) ------------------------------------------------
+
+
+def test_add_section_adds_a_raw_dict():
+    context = build_analysis_context("ds1")
+    updated = add_section(context, "step_1", {"status": "completed"})
+    assert updated.sections["step_1"] == {"status": "completed"}
+
+
+def test_add_section_does_not_mutate_original_context():
+    context = build_analysis_context("ds1")
+    add_section(context, "step_1", {"status": "completed"})
+    assert context.sections == {}
+
+
+def test_add_section_overwrites_existing_name():
+    context = build_analysis_context("ds1")
+    context = add_section(context, "step_1", {"v": 1})
+    context = add_section(context, "step_1", {"v": 2})
+    assert context.sections["step_1"] == {"v": 2}
+
+
+def test_add_section_preserves_other_sections():
+    modeling = ModelingSpec(dataset_id="ds1", objective_provided=False)
+    context = build_analysis_context("ds1", modeling=modeling)
+    context = add_section(context, "step_1", {"v": 1})
+    assert set(context.sections) == {"modeling", "step_1"}

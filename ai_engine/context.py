@@ -95,4 +95,19 @@ def render_context_as_text(context: AnalysisContext) -> str:
     return "\n".join(lines)
 
 
-__all__ = ["AnalysisContext", "build_analysis_context", "render_context_as_text"]
+def add_section(context: AnalysisContext, name: str, data: dict) -> AnalysisContext:
+    """Return a new `AnalysisContext` with one more raw JSON section added.
+
+    Unlike :func:`build_analysis_context` (which takes a Pydantic report
+    and calls ``model_dump`` itself), this accepts an already-JSON
+    ``dict`` directly — the shape
+    :class:`~ai_engine.execution.ExecutionResult.output` already is, so
+    Phase 12's agent loop can fold a tool's result back into the context
+    for the next planning round without re-wrapping it in a model first.
+    Never mutates `context`; a `name` already present is overwritten in
+    the returned copy (never silently merged field-by-field).
+    """
+    return context.model_copy(update={"sections": {**context.sections, name: data}})
+
+
+__all__ = ["AnalysisContext", "add_section", "build_analysis_context", "render_context_as_text"]

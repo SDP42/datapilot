@@ -17,7 +17,7 @@ future phases are not anticipated in code.
 | 9 | Experiment Tracking | **Done.** 9.1: `ExperimentRecord` contract (the first deliberately non-deterministic contract — timestamp + UUID), `capture_environment`, `record_experiment`. 9.2: `ExperimentStore` — a filesystem registry (one read-only JSON file per record), mirroring `DatasetVersionStore`. 9.3: `compare_experiments` — deterministic ranking of recorded experiments by each one's own already-established selection metric (never recomputes one); mismatched metrics across records fail safely. 9.4: optional MLflow logging (`log_experiment_to_mlflow`), detected via the same lazy-import optional-dependency boundary as Phase 8's `torch`. Nothing is wired into `run_modeling_pipeline` / `run_mlp_modeling` / `select_dl_models` automatically — every Phase-9 capability is an explicit, opt-in call. |
 | 10 | Explainable AI | **Done.** 10.1: `ExplanationRequest` / `ExplanationReport` foundation (all `not_yet_inferred`). 10.2: `compute_permutation_importance` (`sklearn.inspection.permutation_importance`). 10.3: optional `compute_shap_importance` (model-agnostic `shap.Explainer`, the `explain` extra). 10.4: `compute_partial_dependence` (`sklearn.inspection.partial_dependence`). Every function takes an **already-fitted** estimator — no fitted model is ever persisted anywhere in this codebase (Phase 7/8's own result contracts hold only JSON primitives), so explainability never fits, re-fits, or mutates one; the caller supplies it, mirroring `dl_engine.evaluate_model`'s own "already-trained model" convention. |
 | 11 | AI Scientist / Agent | **Done.** 11.1: `build_analysis_context` / `render_context_as_text` — deterministic, generic bundling of any already-produced Phase 1-10 report into one `AnalysisContext`, never a raw dataframe or fitted model. 11.2: the fixed `TOOL_NAMES` vocabulary — JSON-schema-described deterministic capabilities an LLM may reference by name, never invent. 11.3: `AnthropicProvider`, the first concrete `LLMProvider` (Phase 0's decision 0004 deferred this); `anthropic` is an optional `ai` extra, detected via the same lazy-import boundary as `torch` / `mlflow` / `shap`. 11.4: `interpret_results` (natural-language summary) and `recommend_next_steps` (structured, tool-name-validated recommendations — an unrecognised tool is dropped with an explicit reason, never silently kept, per architecture principle #6). Nothing here executes a recommended tool — that's Phase 12. |
-| 12 | Autonomous Experimentation | Not started |
+| 12 | Autonomous Experimentation | **Done.** 12.1: `execute_tool` — the deterministic executor turning a Phase-11-validated `Recommendation` into a real call against one of the 7 declared tools, via a fixed dispatch table; `ExecutionContext` holds the runtime resources (dataframe, fitted model, experiment store, …) a handler needs, never fabricated. 12.2: `evaluate_step` — a *deterministic* critic (never a second LLM call) deciding continue/stop from an `ExecutionResult`'s own status. 12.3/12.4: `run_autonomous_experimentation` — the planner (`recommend_next_steps`) → executor → critic loop under an explicit `max_steps` budget, producing a fully JSON-serialisable `AutonomousRunTrace` a human can review step by step. |
 | 13 | Backend API | Not started |
 | 14 | Frontend | Not started |
 | 15 | MLOps / Monitoring | Not started |
@@ -1916,12 +1916,108 @@ Phase-7/8 entry point.
 
 **Phase 11 is now complete end to end.**
 
-### Phase 12 — Autonomous Experimentation
+### Phase 12 — Autonomous Experimentation — **Done**
 - **Objective:** planner → executor → critic loop under budgets.
 - **Components:** planner, deterministic executor over the tool layer,
   evaluator/critic, budget and stop-condition management, human-reviewable
   trace.
 - **Output:** an autonomously produced, fully traced analysis + model set.
+- **No new top-level package** — Phase 12 extends `ai_engine` (Phase
+  11's own agent/tool layer), since the roadmap names no dedicated
+  package for it (unlike `experimentation` / `explainability`, which
+  were pre-stubbed ahead of Phase 9/10) and "now execute the Phase-11
+  tool layer" is a direct continuation of the same package, not a new
+  concern.
+
+#### Phase 12.1 — Deterministic Tool Executor — **Done**
+- **Scope:** turn a Phase-11-validated `Recommendation` (tool name +
+  parameters) into a real call against the deterministic function it
+  names — closing architecture principle #6 ("An LLM recommendation is
+  executed only after translation into a typed, parameterised call to a
+  deterministic tool, followed by validation"). No tool is ever executed
+  outside this function.
+- **`ai_engine/execution.py` — `ExecutionContext`, `ExecutionResult`,
+  `execute_tool(tool, parameters, context)`.** `execute_tool`
+  re-validates `tool` against `ai_engine.tools.TOOL_NAMES` itself
+  (defense in depth — a caller must not assume
+  `recommend_next_steps` is the only path here), then dispatches through
+  a fixed table to one of seven private handlers, each calling exactly
+  the real public function that phase already exports (`analyze_quality`,
+  `analyze_dataframe`, the four standalone Phase-5 functions composed
+  into one `ProblemSpec` for `understand_problem`, `run_modeling_pipeline`,
+  `select_dl_models`, `compute_permutation_importance`,
+  `compare_experiments`) — duplicating none of their logic.
+  `ExecutionContext` is a plain `dataclass` (**not** a JSON-serialisable
+  Pydantic contract — the same reason `dl_engine.tensors.TensorBatch`
+  is one) holding the runtime resources (a `DataFrame`, a fitted model,
+  an `ExperimentStore`, …) a handler needs; every field is optional, and
+  a handler reports `status = unavailable` with an explicit reason
+  rather than guessing or fabricating a default when something required
+  is missing. `ExecutionResult.output` is the real underlying result's
+  own `model_dump(mode="json")` — never a paraphrase.
+- **`select_dl_models`'s handler deliberately requires the caller to
+  supply `ExecutionContext.dl_candidates` directly** — no default
+  architecture hyperparameters (hidden layer sizes, epochs, …) are
+  invented by this executor; `status = unavailable` with that reason
+  when absent, rather than fabricating a config nothing in this
+  codebase actually justifies.
+- **Quality gates:** see 12.4 below for the combined final count.
+
+#### Phase 12.2 — Deterministic Critic — **Done**
+- **Scope:** decide whether an autonomous run should continue after one
+  executed step.
+- **`ai_engine/critic.py` — `StepVerdict`, `evaluate_step(result)`.**
+  Deliberately **not** a second LLM call — a plain, deterministic
+  inspection of the step's own `ExecutionResult.status`:
+  `CONTINUE` only on `completed`; `STOP` on `unavailable` (the
+  recommended tool couldn't run given the supplied context) or `failed`
+  (something broke), distinguished only in the reason text, not the
+  verdict. Keeping termination deterministic means the same sequence of
+  execution results always produces the same verdicts — reproducible
+  and auditable, unlike asking the LLM "should we continue?" would be.
+
+#### Phase 12.3/12.4 — Planner / Executor / Critic Loop & Trace — **Done**
+- **Scope:** compose 12.1 + 12.2 + Phase 11.4's `recommend_next_steps`
+  into one sequential loop under an explicit budget, producing a
+  complete, human-reviewable record.
+- **`ai_engine/agent.py` — `ExecutionStep`, `AutonomousRunTrace`,
+  `run_autonomous_experimentation(provider, context, execution_context,
+  *, max_steps=5, tools=None)`.** Each cycle: ask `provider` for
+  recommendations against the **current** context (every prior step's
+  own result is folded back in via `ai_engine.context.add_section`, so
+  later steps can build on earlier ones); execute the **first**
+  recommendation only (never a second one from the same planning call);
+  let the deterministic critic decide. Stops on the first of: the
+  recommendation call itself failing or returning zero recommendations
+  ("nothing left to do," `status = completed`); the critic's `STOP`
+  verdict (`status = failed` only when the step's own execution
+  genuinely failed — an `unavailable` stop is still a `completed` run,
+  since nothing actually broke); or reaching `max_steps` (`status =
+  completed` — the budget, not a failure). `max_steps` is a required,
+  explicit argument — there is no silent "run forever" default. Never
+  raises for any stop condition; every one is recorded in
+  `AutonomousRunTrace.stop_reason`.
+- **`AutonomousRunTrace` deliberately carries a timestamp and a random
+  `run_id`** — the same reasoning Phase 9's `ExperimentRecord` already
+  established: a record of *when a specific run happened* cannot be
+  deterministic by nature.
+- **New tests:** `tests/ai_engine/test_execution.py` (all seven tools
+  against real data, including the deliberate `select_dl_models`
+  deferral), `test_critic.py`, `test_agent.py` (scripted fake providers
+  covering natural stop, unavailable stop, failed stop, budget
+  exhaustion, provider failure, and context-folding across steps), plus
+  `add_section` coverage appended to `test_context.py` and the
+  intentional-exports list updated in `test_package.py`.
+- **OUT (this increment and until explicitly implemented):** parallel or
+  branching plans (strictly sequential, one recommendation per step); a
+  second concrete provider; persisting an `AutonomousRunTrace` to a store
+  (a caller that wants one can register it via `experimentation.ExperimentStore`
+  itself — no new store was added here); retrying a failed step.
+- **Quality gates (12.1 + 12.2 + 12.3 + 12.4 combined):** `pytest` full
+  suite — 2086 passed / 3 skipped, 0 failed. `ruff` / `ruff format` /
+  `mypy` (159 source files) all green; decision 0093.
+
+**Phase 12 is now complete end to end.**
 
 ### Phase 13 — Backend API
 - **Objective:** expose the platform over HTTP.

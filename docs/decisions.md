@@ -4,6 +4,81 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0093 — Phase 12.1-12.4: Autonomous Experimentation — extending `ai_engine` rather than a new package, a deterministic (non-LLM) critic, and refusing to fabricate DL architecture defaults
+
+- **Decision:** implement the planner -> executor -> critic loop as four
+  increments inside the existing `ai_engine` package, not a new
+  top-level one:
+  1. **No new package.** Unlike Phase 9 (`experimentation`) and Phase 10
+     (`explainability`), which had empty package stubs already committed
+     ahead of time, the roadmap names no dedicated package for Phase 12.
+     "Now execute the Phase-11 tool layer" is a direct continuation of
+     `ai_engine`'s own concern (Phase 11.2 already declared the tools;
+     someone has to call them), not a new one, so `ai_engine/execution.py`
+     / `critic.py` / `agent.py` extend the existing package.
+  2. **`execute_tool`'s handlers call each phase's own already-public
+     composed function, never a private one, and never fabricate a
+     missing default.** Six of the seven tools map cleanly onto an
+     existing single entry point (`analyze_quality`,
+     `analyze_dataframe`, `run_modeling_pipeline`,
+     `compute_permutation_importance`, `compare_experiments`) or a
+     short, mechanical composition of Phase 5's four standalone
+     functions that the Phase 5 roadmap itself already documented as
+     "a caller merges the four standalone results... and decides the
+     overall status" (`understand_problem` — this executor **is** that
+     documented caller, not an invented shortcut). The seventh,
+     `select_dl_models`, is different in kind: running it requires
+     concrete architecture hyperparameters (hidden layer sizes, epochs,
+     learning rate, …) that nothing in this codebase specifies a
+     principled default for. Rather than inventing one, the handler
+     requires the caller to supply `ExecutionContext.dl_candidates`
+     directly and returns `status = unavailable` with that exact reason
+     when absent — the same "never fabricate" discipline every other
+     phase in this codebase already applies to a missing input.
+  3. **The critic (`evaluate_step`) is deliberately *not* a second LLM
+     call** — it is a plain, deterministic inspection of the just-executed
+     step's own `ExecutionResult.status`. Asking the LLM "should we
+     continue?" was considered and rejected: it would make the loop's
+     own termination behaviour non-reproducible (the same sequence of
+     results could get a different continue/stop answer on a different
+     run), which defeats the point of a "human-reviewable trace" — a
+     reviewer needs to be able to see *why* the loop stopped and trust
+     that the same inputs would stop it the same way again.
+  4. **`run_autonomous_experimentation` folds each step's result back
+     into the context via the Phase-11.1 `add_section` helper (added in
+     this increment) rather than re-building the context from scratch
+     each cycle.** This lets a later recommendation legitimately build
+     on an earlier step's actual output (e.g. recommending
+     `run_modeling_pipeline` after seeing `analyze_quality`'s findings)
+     without `ai_engine.agent` needing to know anything about what's
+     inside any particular tool's result.
+- **Reason:** every choice here is the same rule this project has
+  applied at every single increment across twelve phases — extend by
+  reusing what already exists (an established package, an established
+  composed function, an established result-status vocabulary) and never
+  fabricate a value this codebase has no principled source for.
+- **Alternatives considered:** a new top-level `agent` or `autonomous`
+  package (rejected — see point 1); an LLM-based critic consuming
+  `interpret_results`' own natural-language output to decide continue/stop
+  (rejected — see point 3: non-reproducible termination undermines the
+  trace's own purpose); inventing a conservative default `DLCandidate`
+  set (e.g. one small MLP) so `select_dl_models` "just works" without
+  caller input (rejected — see point 2: a fabricated default is exactly
+  what Phase 8's own `MLPArchitectureConfig` validation and this
+  project's "never fabricate" rule exist to prevent, and a caller who
+  actually wants DL candidates compared can supply them through
+  `ExecutionContext` with zero loss of capability).
+- **Consequence:** an autonomous run can genuinely execute multiple real
+  Phase 1-10 capabilities in sequence, each gated by LLM recommendation,
+  deterministic validation, deterministic execution, and deterministic
+  critique — with a complete, JSON-serialisable trace of what was
+  recommended, what ran, and why the loop stopped. `select_dl_models`
+  remains unreachable through the autonomous loop until a caller
+  explicitly supplies candidates via `ExecutionContext` — a documented
+  limitation, not an oversight. Quality gates: `pytest` full suite 2086
+  passed / 3 skipped, 0 failed; `ruff` / `ruff format` / `mypy` (159
+  source files) all green.
+
 ## 0092 — Phase 11.1-11.4: AI Scientist / Agent — generic context building, a closed tool vocabulary with mandatory validation, and never exercising the real Anthropic API in tests
 
 - **Decision:** implement Phase 11 (closing Phase 0's decision 0004,
