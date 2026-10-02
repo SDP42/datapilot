@@ -4,6 +4,76 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0088 — Phase 9.1: Experiment Tracking Foundation — a deliberate break from the determinism rule, environment capture without importing packages, and no dedicated docs file
+
+- **Decision:** establish `experimentation.contracts.ExperimentRecord` as
+  the first contract in this codebase that is **not** byte-identical on
+  repeated calls, scoped to exactly three things:
+  1. **`ExperimentRecord` nests one of `ModelingSpec` / `DLModelingResult`
+     / `DLSelectionResult`**, never duplicating their fields (the
+     established "reference, don't flatten" pattern). This required
+     importing `data_engine.modeling` and `dl_engine` directly at module
+     load time rather than under `TYPE_CHECKING` — the first draft used
+     `from __future__ import annotations` + `TYPE_CHECKING`-only imports
+     (matching how `dl_engine` lazily type-hints `torch.nn.Module`), but
+     Pydantic v2 cannot resolve a string-annotated field type that isn't
+     actually bound in the module's namespace at class-definition time;
+     it fails at the *first construction attempt* with "`ExperimentRecord`
+     is not fully defined," caught by this module's own smoke test.
+     Importing `dl_engine` directly (not the `torch` it optionally wraps)
+     is safe: `dl_engine`'s own package-level import never touches
+     `torch` (confirmed by its existing test,
+     `test_importing_dl_engine_never_imports_torch_at_package_load_time`),
+     and this increment adds the same guarantee for `experimentation`
+     itself and for `experimentation` + `dl_engine` imported together.
+  2. **`capture_environment()` reads `importlib.metadata.version()` for a
+     fixed, named package set — never imports the package itself.**
+     Importing e.g. `torch` just to read `torch.__version__` would
+     silently defeat every `dl_engine` module's own lazy-import
+     discipline for an environment-tracking feature that has nothing to
+     do with actually using `torch`. `importlib.metadata` reads installed
+     distribution metadata without importing the distribution's code at
+     all, so a caller who never installed the `dl` extra still gets a
+     correct `None` for `torch` with zero side effects.
+  3. **`record_experiment()` is the only way to produce a `completed`
+     record**, and is **not** wired into `run_modeling_pipeline`,
+     `run_mlp_modeling` / `run_cnn_modeling` / `run_lstm_modeling` /
+     `run_transformer_modeling`, or `select_dl_models` — recording stays
+     an explicit, opt-in call, matching how every Phase-8 entry point is
+     already opt-in rather than automatically triggered by Phase-7 code.
+  4. **No `docs/experimentation.md` was added.** `docs/README.md` lists a
+     dedicated doc file for every classical `data_engine` phase (1
+     through 7) but **not** for Phase 8 (`dl_engine`) — that phase's
+     documentation lives entirely in `docs/roadmap.md`, this decision
+     log, and module docstrings. Phase 9 follows the same precedent Phase
+     8 already set, rather than introducing a new, inconsistent
+     documentation pattern partway through the project.
+- **Reason:** an experiment record's entire purpose — saying *when* a run
+  happened and *under what identity* — is fundamentally non-deterministic;
+  pretending otherwise (e.g. hashing the nested result's content into a
+  fake "deterministic" id, the way `DLCandidate.candidate_id` does for a
+  *configuration*) would misrepresent what identity means for a record of
+  something that already happened in wall-clock time.
+- **Alternatives considered:** keeping `ModelingSpec` / `DLModelingResult`
+  / `DLSelectionResult` imports under `TYPE_CHECKING` with an explicit
+  `ExperimentRecord.model_rebuild()` call at the bottom of the module
+  (rejected — fragile: it only works if every caller imports
+  `experimentation.contracts` itself rather than re-exporting the class,
+  and it adds import-order coupling for no real benefit over a direct
+  import); importing the actual package to read `__version__` (rejected —
+  breaks the `torch`-optionality guarantee this project treats as a
+  binding invariant); a deterministic content-hash identity instead of a
+  random UUID (rejected — two genuinely separate experiment runs of the
+  identical configuration are not "the same experiment," unlike two
+  `DLCandidate`s describing the same configuration, which *are*
+  interchangeable by design).
+- **Consequence:** `experimentation` now depends on both `data_engine.modeling`
+  and `dl_engine` (one-directional — neither imports it back); a record's
+  equality / identity is no longer reproducible across two calls even
+  with identical input, which is new and deliberate for this one
+  contract only. Quality gates: `pytest` full suite 1956 passed / 2
+  skipped, 0 failed; `ruff` / `ruff format` / `mypy` clean.
+
 ## 0087 — Phase 8.8: Advanced Architecture Training/Evaluation/Selection Integration — one shared composition helper, a 3D tensor boundary, and name-based dispatch in `select_dl_models`
 
 - **Decision:** wire the three Phase-8.7 architecture foundations (CNN,

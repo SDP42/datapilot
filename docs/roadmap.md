@@ -1518,11 +1518,73 @@ future phases are not anticipated in code.
   than skipped). `ruff` / `ruff format` / `mypy` (`data_engine`,
   `datapilot`, `dl_engine`) all green; decision 0087.
 
-### Phase 9 — Experiment Tracking
+### Phase 9 — Experiment Tracking — **In progress — 9.1 foundation done**
 - **Objective:** make every experiment reproducible and comparable.
 - **Components:** `experimentation` definitions/execution/comparison,
   MLflow integration, seed and environment capture.
 - **Output:** queryable experiment history and comparisons.
+
+#### Phase 9.1 — Experiment Tracking Foundation — **Done**
+- **Scope:** the `ExperimentRecord` contract + environment capture +
+  a builder that wraps one already-produced result. No persistent store,
+  no query/comparison layer, no MLflow integration, and nothing
+  automatically recorded from any existing Phase-7/8 entry point.
+- **A deliberate departure from every prior phase's determinism rule:**
+  every Phase 0-8 contract was explicitly designed to be
+  byte-identical on repeated calls (no timestamp, no UUID) — called out
+  repeatedly in Phase-8 docstrings as "experiment identity is explicitly
+  Phase 9's concern, out of scope here." `ExperimentRecord` is the first
+  contract in the codebase that carries a real timestamp
+  (`created_at`, UTC) and a random identifier (`experiment_id`, UUID4) —
+  on purpose, since recording *when* something ran and *under what
+  identity* cannot be deterministic by nature.
+- **`experimentation/contracts.py` — `ExperimentStatus`
+  (`not_yet_recorded` / `unavailable` / `failed` / `completed`, mirroring
+  `DLTrainingStatus`'s four-state pattern), `ExperimentSource`
+  (`classical_modeling` / `dl_modeling` / `dl_selection` — a fixed, closed
+  vocabulary), `EnvironmentSnapshot` (Python version, platform, and a
+  fixed named set of tracked package versions — `pandas`, `numpy`,
+  `scipy`, `pydantic`, `matplotlib`, `plotly`, `scikit-learn`, `torch`),
+  and `ExperimentRecord` itself.** `ExperimentRecord` **nests** exactly
+  one of an existing Phase-7 `ModelingSpec`, Phase-8 `DLModelingResult`,
+  or Phase-8 `DLSelectionResult` — the same "reference, don't flatten"
+  pattern every other nested contract in this codebase already uses — a
+  `model_validator` enforces that a non-completed record carries no
+  nested result, and a completed record carries exactly one, matching
+  its declared `source`, with `environment` also required.
+- **`capture_environment()`** reads only installed-distribution metadata
+  (`importlib.metadata.version`) for the fixed tracked-package set —
+  **never imports a package** to read `__version__`, so calling it never
+  imports `torch`, preserving every `dl_engine` module's own lazy-import
+  boundary (verified: `experimentation` itself, and `experimentation` +
+  `dl_engine` imported together, never put `torch` in `sys.modules`). A
+  package that is not installed (e.g. `torch` without the `dl` extra)
+  maps to `None`, never omitted and never a fabricated version string.
+- **`record_experiment(*, source, classical_result=None,
+  dl_modeling_result=None, dl_selection_result=None, seed=None,
+  notes=None)`** — the only way to produce a `completed`
+  `ExperimentRecord`: generates a fresh `experiment_id` / `created_at`,
+  captures the environment, and nests the caller-supplied result
+  **as-is** — it retrains, re-evaluates, and recomputes nothing. Not
+  wired into `run_modeling_pipeline`, `run_mlp_modeling`,
+  `run_cnn_modeling` / `run_lstm_modeling` / `run_transformer_modeling`,
+  or `select_dl_models` — recording is an explicit, opt-in call a caller
+  makes *after* it already has a result, exactly like every Phase-8
+  entry point is opt-in rather than automatically triggered.
+- **New tests:** `tests/experimentation/test_contracts.py` (validator
+  edge cases for every status/source combination, `capture_environment`'s
+  fixed package set and torch-free guarantee, `record_experiment`'s
+  non-mutation / unique-id / JSON-roundtrip guarantees),
+  `tests/experimentation/test_package.py` (exports, torch-free import,
+  torch-free import even alongside `dl_engine`).
+- **OUT (this increment and until explicitly implemented):** a
+  persistent store for records (filesystem or database); querying,
+  listing, or comparing recorded experiments; automatic recording from
+  any existing Phase-7/8 entry point; MLflow integration; experiment
+  history / recommendation.
+- **Quality gates:** `pytest` full suite — 1956 passed / 2 skipped, 0
+  failed. `ruff` / `ruff format` / `mypy` (`experimentation` clean of any
+  new error) all green; decision 0088.
 
 ### Phase 10 — Explainable AI
 - **Objective:** explain model behaviour.
