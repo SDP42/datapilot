@@ -4,6 +4,90 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0095 — Phase 13.5 + 14: Auth pulled forward ahead of schedule, original components over a copied library, and treating a 3D sizing bug found in QA as a real defect
+
+- **Decision:** three choices define this phase:
+  1. **A JWT auth boundary (Phase 13.5) was built before the frontend,
+     even though it wasn't the next scheduled increment.** A login page
+     with nothing real behind it (a hardcoded check, or no check at
+     all) would have been a prop, not a feature — once the request was
+     for a genuine login page, the backend needed a genuine thing to
+     log into. `backend.datapilot_api.auth` is a single-operator model
+     (one username/password pair from `Settings`, PyJWT/HS256) rather
+     than a user table, matching this project's actual deployment
+     shape — one operator per instance — not a multi-tenant system
+     nothing in this codebase has ever assumed. Every Phase 13 router
+     now declares `dependencies=[Depends(get_current_user)]` at the
+     router level, so protection is structural and can't be forgotten
+     on a future route the way a per-endpoint decorator could be.
+  2. **~34 UI components were written from scratch against this
+     project's own design tokens, not copied from a third-party
+     component library.** The request asked for a "React Bits"-style
+     breadth of polished components; the actual React Bits source is
+     MIT-licensed and meant for exactly this kind of copying, but this
+     codebase has never added a UI component package as a dependency,
+     and introducing one now (or vendoring copied source files with no
+     dependency entry) would have been the one inconsistency in an
+     otherwise from-scratch frontend — every component here (spotlight-
+     card, tilt-card, magnetic-button, animated-counter, marquee,
+     gradient-text/blob, data-table, file-dropzone, accordion, status-
+     badge, hero-3d, …) is original code using the same CSS-variable
+     design-token system as everything else in `globals.css`, with only
+     genuinely headless primitives (Radix UI: tabs, dialog, select,
+     switch, tooltip) pulled in as a dependency, the same way this
+     project already treats other genuinely-hard-to-reinvent pieces
+     (`recharts` for charts, `framer-motion` for animation).
+  3. **A rendering bug found during manual responsive QA was fixed, not
+     dismissed as a tooling artifact.** At a 375px mobile viewport, the
+     landing page's Three.js hero sphere visually dominated the
+     heading — initially suspicious given an earlier, unrelated
+     screenshot-rendering anomaly in this same session that *was* a
+     genuine Browser-pane viewport-emulation artifact (confirmed via
+     DOM content, computed styles, and actual window dimensions all
+     reading normal while only the screenshot capture was affected).
+     This one was checked the same way before concluding anything:
+     zooming into the region showed a real hard-edged, non-blurred
+     sphere occupying most of the viewport width, consistent with
+     Three.js's perspective camera holding a fixed angular field of
+     view while the canvas narrows — the sphere's *projected* size
+     grows relative to a shrinking aspect ratio even though nothing
+     about the sphere itself changed. Fixed with a responsive CSS
+     `scale` on the canvas wrapper (`scale-75` mobile / `scale-90`
+     tablet / full size desktop) plus a smaller, less opaque container
+     at each breakpoint, rather than reaching into the WebGL camera/fov
+     math for a problem a CSS transform solves correctly.
+- **Reason:** each choice follows a pattern already established
+  elsewhere in this codebase rather than inventing a new convention:
+  optional/new capabilities get their own narrowly-scoped boundary
+  (auth mirrors the Phase 13.1-13.4 pattern of one clear module owning
+  one clear concern); dependencies are added only for genuinely
+  irreplaceable capability (Radix's accessibility semantics, Three.js's
+  WebGL layer) and never as a shortcut around writing original code;
+  and a bug surfaced during the project's own verification step is
+  something to diagnose to a concrete root cause and fix, exactly as
+  Phase 13's mypy audit (decision 0094's predecessor work) treated
+  "looks fine" as insufficient evidence on its own.
+- **Alternatives considered:** deferring auth to a later "security"
+  phase and shipping a cosmetic-only login form (rejected — indistin-
+  guishable from a mockup, and the user explicitly asked for backend
+  integration); adding a component library dependency or vendoring
+  copied source files (rejected — see point 2, breaks this project's
+  consistent from-scratch-plus-narrow-dependencies pattern); assuming
+  the mobile hero rendering was another instance of the same tooling
+  artifact already diagnosed earlier in this session (rejected without
+  verification — confirmed as a real, fixable CSS/WebGL interaction
+  before touching any code, and fixed only after that confirmation).
+- **Consequence:** the platform is now reachable through a real,
+  authenticated web UI end to end — login issues a JWT, every dashboard
+  page calls the real Phase 13 API through a typed client, and nothing
+  in the frontend is mocked. Quality gates: backend `pytest` full suite
+  2126 passed / 3 skipped, 0 failed (40 in `tests/backend/`); `ruff` /
+  `ruff format` / `mypy` (171 source files) all green. Frontend:
+  `tsc --noEmit` clean, `eslint` clean, `next build` succeeds (10 static
+  routes). Verified manually in-browser at mobile/tablet/desktop
+  viewports, including the full login -> dashboard flow against the
+  real backend.
+
 ## 0094 — Phase 13.1-13.4: Backend API — the first database-backed store, an opt-in Postgres driver, and updating a guard test that was right to fail
 
 - **Decision:** expose the platform over HTTP as four increments:

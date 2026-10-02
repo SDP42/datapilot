@@ -53,6 +53,8 @@ dependencies = [
     "python-multipart>=0.0.9",
     "sqlalchemy>=2.0",
     "pydantic-settings>=2.4",
+    # Phase 13.5 — the single-operator JWT auth boundary (backend.auth).
+    "pyjwt>=2.8",
 ]
 
 [project.optional-dependencies]

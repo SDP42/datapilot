@@ -19,11 +19,12 @@ from sqlalchemy.orm import Session
 
 from data_engine.modeling import ModelingRequest, run_modeling_pipeline
 
+from ..auth import get_current_user
 from ..db import get_engine, get_session, make_session_factory
 from ..dependencies import ingest_upload
 from ..job_store import JobNotFoundError, JobRecord, JobStore
 
-router = APIRouter(prefix="/api/v1/jobs", tags=["jobs"])
+router = APIRouter(prefix="/api/v1/jobs", tags=["jobs"], dependencies=[Depends(get_current_user)])
 _store = JobStore()
 
 

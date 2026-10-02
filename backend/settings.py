@@ -30,6 +30,15 @@ class Settings(BaseSettings):
     api_version: str = "0.1.0"
     max_upload_bytes: int = 50 * 1024 * 1024  # 50 MB
 
+    # Phase 13.5 — a single configured operator account, not a user-
+    # management system. `DATAPILOT_AUTH_PASSWORD` has no safe default on
+    # purpose: a deployment must set it explicitly (see `backend.auth`).
+    auth_username: str = "admin"
+    auth_password: str = "datapilot-dev-only"
+    jwt_secret: str = "datapilot-dev-secret-change-me-in-production-00000"
+    jwt_expire_minutes: int = 60 * 12
+    cors_origins: list[str] = ["http://localhost:3000"]
+
 
 @lru_cache
 def get_settings() -> Settings:

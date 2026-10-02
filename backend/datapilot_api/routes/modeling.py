@@ -10,13 +10,16 @@ endpoint is deliberately kept for the common, fast case.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Form, UploadFile
+from fastapi import APIRouter, Depends, Form, UploadFile
 
 from data_engine.modeling import ModelingRequest, ModelingSpec, run_modeling_pipeline
 
+from ..auth import get_current_user
 from ..dependencies import ingest_upload
 
-router = APIRouter(prefix="/api/v1/modeling", tags=["modeling"])
+router = APIRouter(
+    prefix="/api/v1/modeling", tags=["modeling"], dependencies=[Depends(get_current_user)]
+)
 
 
 @router.post("/run", response_model=ModelingSpec)

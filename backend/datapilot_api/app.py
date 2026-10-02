@@ -9,9 +9,10 @@ a fresh app (optionally with overridden settings / a test database) via
 from __future__ import annotations
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from .db import create_all_tables
-from .routes import analytics, datasets, health, jobs, modeling
+from .routes import analytics, auth, datasets, health, jobs, modeling
 
 
 def create_app() -> FastAPI:
@@ -27,9 +28,18 @@ def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(title=settings.api_title, version=settings.api_version)
 
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
     create_all_tables()
 
     app.include_router(health.router)
+    app.include_router(auth.router)
     app.include_router(datasets.router)
     app.include_router(modeling.router)
     app.include_router(jobs.router)

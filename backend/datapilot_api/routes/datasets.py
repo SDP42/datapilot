@@ -11,7 +11,7 @@ over Phase 1/2/4 alone.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Form, UploadFile
+from fastapi import APIRouter, Depends, Form, UploadFile
 
 from data_engine.eda import EDAReport, analyze_dataframe
 from data_engine.profiling import DatasetProfile, profile_dataset
@@ -19,9 +19,12 @@ from data_engine.quality import QualityReport, analyze_quality
 from datapilot.contracts import DatasetReference
 from pydantic import BaseModel
 
+from ..auth import get_current_user
 from ..dependencies import ingest_upload
 
-router = APIRouter(prefix="/api/v1/datasets", tags=["datasets"])
+router = APIRouter(
+    prefix="/api/v1/datasets", tags=["datasets"], dependencies=[Depends(get_current_user)]
+)
 
 
 class IngestResponse(BaseModel):

@@ -19,7 +19,7 @@ future phases are not anticipated in code.
 | 11 | AI Scientist / Agent | **Done.** 11.1: `build_analysis_context` / `render_context_as_text` — deterministic, generic bundling of any already-produced Phase 1-10 report into one `AnalysisContext`, never a raw dataframe or fitted model. 11.2: the fixed `TOOL_NAMES` vocabulary — JSON-schema-described deterministic capabilities an LLM may reference by name, never invent. 11.3: `AnthropicProvider`, the first concrete `LLMProvider` (Phase 0's decision 0004 deferred this); `anthropic` is an optional `ai` extra, detected via the same lazy-import boundary as `torch` / `mlflow` / `shap`. 11.4: `interpret_results` (natural-language summary) and `recommend_next_steps` (structured, tool-name-validated recommendations — an unrecognised tool is dropped with an explicit reason, never silently kept, per architecture principle #6). Nothing here executes a recommended tool — that's Phase 12. |
 | 12 | Autonomous Experimentation | **Done.** 12.1: `execute_tool` — the deterministic executor turning a Phase-11-validated `Recommendation` into a real call against one of the 7 declared tools, via a fixed dispatch table; `ExecutionContext` holds the runtime resources (dataframe, fitted model, experiment store, …) a handler needs, never fabricated. 12.2: `evaluate_step` — a *deterministic* critic (never a second LLM call) deciding continue/stop from an `ExecutionResult`'s own status. 12.3/12.4: `run_autonomous_experimentation` — the planner (`recommend_next_steps`) → executor → critic loop under an explicit `max_steps` budget, producing a fully JSON-serialisable `AutonomousRunTrace` a human can review step by step. |
 | 13 | Backend API | **Done.** 13.1: FastAPI app (`backend.datapilot_api.create_app`) + stateless endpoints wrapping Phase 1/2/4/7 directly (`/datasets/ingest`, `/datasets/quality`, `/datasets/eda`, `/modeling/run`) — upload a CSV, get the real result contract back. `backend.settings` is the first typed (`pydantic-settings`) config, additive to the Phase-0 YAML loader. 13.2: the first database-backed store in this codebase (`JobStore`, SQLAlchemy) — SQLite by default, PostgreSQL via `DATAPILOT_DATABASE_URL` with zero code change (the driver is an opt-in `postgres` extra, not a forced base dependency). 13.3: `/jobs/modeling` (submit) + `/jobs/{id}` (poll) — asynchronous job orchestration via `BackgroundTasks`. 13.4: optional DuckDB ad-hoc analytics (`/analytics/experiments/query`) over already-recorded experiments — reports `503` with an explicit reason when the `analytics` extra isn't installed, rather than the route not existing. |
-| 14 | Frontend | Not started |
+| 14 | Frontend | **Done.** 13.5: JWT auth boundary added to the backend first (`backend.datapilot_api.auth`, single-operator `/auth/login` + `/auth/me`, every Phase 13 router now `Depends(get_current_user)`-protected, `CORSMiddleware` for the frontend origin) — the frontend needed something real to authenticate against. 14: Next.js 16 (App Router) + TypeScript + Tailwind v4 app — a landing page with a Three.js (`@react-three/fiber`/`drei`) distorted-sphere hero and scroll-triggered Framer Motion sections, a JWT login page, and an authenticated dashboard (upload, quality, EDA, modeling, jobs, analytics) wired to the real Phase 13 endpoints through a typed `lib/api.ts` client — no mock data. ~34 original UI primitives (button, card, spotlight-card, tilt-card, magnetic-button, animated-counter, marquee, gradient-text, shiny-text, text-reveal, data-table, file-dropzone, accordion, …) plus Radix-based accessible primitives (tabs, dialog, select, switch, tooltip). Verified responsive at mobile/tablet/desktop breakpoints — a Three.js sizing bug found during that verification (the hero sphere rendering disproportionately large on narrow aspect ratios) was fixed with a responsive CSS scale on the canvas wrapper. |
 | 15 | MLOps / Monitoring | Not started |
 | 16 | Deployment | Not started |
 | 17 | Testing, Benchmarking & Documentation | Continuous |
@@ -2150,11 +2150,83 @@ Phase-7/8 entry point.
 
 **Phase 13 is now complete end to end.**
 
-### Phase 14 — Frontend
+#### Phase 13.5 — Auth Boundary (added ahead of Phase 14) — **Done**
+- **Scope:** Phase 13's API had no authentication at all — every route
+  was open. Building a real frontend meant the login page needed
+  something genuine to authenticate against, so this was pulled forward
+  from its original home (a later security-hardening pass) rather than
+  shipping a UI that fakes a login screen.
+- **`backend/datapilot_api/auth.py` — `verify_credentials`,
+  `create_access_token`, `decode_access_token`, `get_current_user`.** A
+  single-operator model (one username/password pair from `Settings`, not
+  a user table) — matches this project's actual deployment shape (one
+  operator per DataPilot instance). JWT via `PyJWT`, `HS256`, secret and
+  expiry both `Settings`-driven.
+- **`backend/datapilot_api/routes/auth.py` — `POST /api/v1/auth/login`,
+  `GET /api/v1/auth/me`.** Every Phase 13 router (`datasets`, `modeling`,
+  `jobs`, `analytics`) now takes `dependencies=[Depends(get_current_user)]`
+  at the router level — protection is structural, not a per-route
+  opt-in that a new route could forget.
+- **`CORSMiddleware`** added to `create_app()`, origins from
+  `Settings.cors_origins` (defaults to the Next.js dev origin) — the
+  first cross-origin caller this API has ever needed to support.
+- **Quality gates:** `pytest` full suite 2126 passed / 3 skipped, 0
+  failed (40 in `tests/backend/`, including 8 new auth tests covering
+  login success/failure and `/me` with valid/missing/malformed/wrong-
+  secret/expired tokens). `ruff` / `ruff format` / `mypy` all green.
+
+### Phase 14 — Frontend — **Done**
 - **Objective:** interactive UI.
 - **Components:** `frontend` Next.js + TypeScript app — dataset upload,
   profile/quality/EDA views, experiment dashboards, recommendation review.
 - **Output:** a usable web application.
+- **Stack:** Next.js 16 (App Router) + TypeScript + Tailwind CSS v4
+  (CSS-based `@theme inline`, no `tailwind.config.js`); Framer Motion
+  for scroll-triggered and micro-interaction animation; Three.js via
+  `@react-three/fiber` / `@react-three/drei` for the landing page's 3D
+  hero; Radix UI primitives for accessible tabs/dialog/select/switch/
+  tooltip; `react-hook-form` + `zod` for form validation; `recharts` for
+  the modeling candidate-ranking chart; `sonner` for toasts;
+  `class-variance-authority` + `clsx`/`tailwind-merge` for variant
+  styling.
+- **`lib/api.ts`** — a single typed API client (no ad-hoc `fetch` calls
+  scattered through pages) mirroring every Phase 13 Pydantic
+  request/response contract as a TypeScript interface, with an
+  `ApiError` class and a `localStorage`-backed bearer-token header
+  helper reading the Phase 13.5 JWT.
+- **~34 original UI components** under `components/ui/` — button, card,
+  input, badge, spinner, skeleton, alert, avatar, chip, tabs, tooltip,
+  select, switch, dialog, progress-bar/ring, gradient-text, shiny-text,
+  text-reveal, spotlight-card, tilt-card, magnetic-button, marquee,
+  animated-counter, stat-card, click-spark, gradient-blob, file-
+  dropzone, data-table, accordion, status-badge, divider, hero-3d — each
+  written from scratch against this project's own design tokens, not
+  copied from a library, since no third-party component package was
+  added as a dependency.
+- **Pages:** `/` (landing — hero, feature grid, pipeline walkthrough,
+  stack marquee, CTA), `/login` (JWT form), `/dashboard` (auth-guarded
+  layout) with `upload`, `quality`, `eda`, `modeling`, `jobs`, and
+  `analytics` sub-pages, each calling the real backend through
+  `lib/api.ts` — no mock or placeholder data anywhere in the dashboard.
+- **Responsive verification:** checked directly in a real browser at
+  375×812 (mobile), 768×1024 (tablet), and desktop widths. Caught one
+  genuine bug in the process — the Three.js hero sphere renders larger
+  relative to a narrow canvas (fixed angular size against a shrinking
+  aspect ratio), overwhelming the heading on mobile; fixed with a
+  responsive CSS `scale` on the canvas wrapper plus a smaller/less-
+  opaque container at each breakpoint, rather than touching the
+  WebGL camera.
+- **Quality gates:** `npx tsc --noEmit` clean; `eslint` clean (0
+  errors/warnings) — including fixing a `react-hooks/refs` and
+  `react-hooks/purity` violation (random star-field positions were
+  computed with a ref during render; moved to module scope) and a
+  `react-hooks/set-state-in-effect` violation (`useAuth`'s session
+  check now resolves through an async function with a `cancelled`
+  guard rather than calling `setState` synchronously in the effect
+  body); `next build` succeeds, 10 static routes, no build errors.
+  Backend quality gates unaffected: `pytest` 2126 passed / 3 skipped,
+  `ruff` / `ruff format` / `mypy` (171 source files) all green.
+- **Decision:** 0095.
 
 ### Phase 15 — MLOps / Monitoring
 - **Objective:** operate models in production.

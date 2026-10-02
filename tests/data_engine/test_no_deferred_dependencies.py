@@ -104,6 +104,7 @@ def test_declared_runtime_dependencies_are_the_expected_set():
         "python-multipart",
         "sqlalchemy",
         "pydantic-settings",
+        "pyjwt",
     }
     assert _STILL_DEFERRED_FROM_BASE_DEPENDENCIES.isdisjoint(declared)
 

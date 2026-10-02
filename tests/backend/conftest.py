@@ -35,6 +35,21 @@ def client(tmp_path, monkeypatch):
 
 
 @pytest.fixture
+def auth_headers(client):
+    """A valid `Authorization: Bearer <token>` header for the default dev account."""
+    from backend.settings import get_settings
+
+    settings = get_settings()
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"username": settings.auth_username, "password": settings.auth_password},
+    )
+    assert response.status_code == 200, response.text
+    token = response.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
 def sample_csv_bytes():
     import numpy as np
 

@@ -8,7 +8,7 @@ silently not existing.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from backend.analytics import AnalyticsQueryError, query_experiments
@@ -16,7 +16,11 @@ from backend.availability import is_duckdb_available
 from experimentation import ExperimentStore
 from experimentation.store import ExperimentNotFoundError
 
-router = APIRouter(prefix="/api/v1/analytics", tags=["analytics"])
+from ..auth import get_current_user
+
+router = APIRouter(
+    prefix="/api/v1/analytics", tags=["analytics"], dependencies=[Depends(get_current_user)]
+)
 
 
 class AnalyticsQueryRequest(BaseModel):
