@@ -4,6 +4,56 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0097 — Phase 14.2: deterministic keyword grouping over an LLM call, and dashboards as separate tabs rather than one longer scroll
+
+- **Decision:** two choices define this increment:
+  1. **Column-to-dashboard grouping is a deterministic keyword match
+     (`lib/dashboard-grouping.ts`), not an LLM call.** The request was
+     explicitly domain-aware ("supply chain or hr analytics") multi-
+     dashboard generation, which an LLM could plausibly do more
+     flexibly — rejected for this increment because it would make the
+     Dashboard Builder's output non-reproducible (the same dataset could
+     group differently run to run), slower (a network round-trip per
+     analysis), and dependent on `ai_engine` / a provider key being
+     configured, none of which the rest of this codebase's EDA/chart
+     path requires. A fixed keyword-to-category table covering the
+     domains actually named in the request (workforce, compensation,
+     attrition, inventory, logistics, procurement, sales, operations,
+     finance) plus a generic merge/split step to hit an arbitrary
+     requested dashboard count is instant, deterministic, and testable
+     the same way every other EDA-adjacent piece of this codebase is.
+  2. **Multiple dashboards render as separate tabs
+     (`components/ui/tabs`), not stacked sections on one page.** The
+     direct complaint was that results had to be seen "not in background
+     format" — read as: generated content needs to be distinctly visible
+     and navigable, not buried in one undifferentiated scroll. Tabs make
+     each generated dashboard a first-class, individually reachable view
+     (and each gets its own scoped HTML/PDF export), rather than
+     requiring the user to scroll past every other dashboard to find the
+     one they want.
+- **Reason:** both choices keep this feature inside the same
+  determinism / reproducibility discipline every data-engine phase in
+  this codebase already commits to — EDA, quality, modeling all produce
+  the same output for the same input, and the dashboard grouping now
+  does too. Tabs are the direct, minimal fix for the "can't actually see
+  my results properly" complaint, not a cosmetic reskin.
+- **Alternatives considered:** calling `ai_engine`'s provider
+  abstraction to classify columns by domain with an LLM (rejected — see
+  point 1: reproducibility, latency, and an optional-dependency
+  requirement none of this path currently has); rendering every
+  generated dashboard as stacked full-width sections on one scrolling
+  page (rejected — see point 2, this is close to what was already there
+  and was exactly what was flagged as not working).
+- **Consequence:** uploading a multi-domain dataset (HR, supply chain,
+  sales, …) and asking for N dashboards now produces N genuinely
+  separate, themed, individually-exportable views instead of one grid.
+  Verified with a synthetic 8-column HR dataset (grouped correctly into
+  Demographics & Workforce / Compensation & Performance / Attrition &
+  Engagement) and a supply-chain-style column-name check (Suppliers &
+  Procurement / Logistics & Shipping / Inventory & Stock). Quality
+  gates: frontend `tsc --noEmit` / `eslint` clean, `next build`
+  succeeds.
+
 ## 0096 — Phase 14.1: model persistence as a deliberately narrow boundary crossing, activity history over re-deriving the past, and fixing real bugs the user actually hit rather than polishing around them
 
 - **Decision:** four choices define this increment, all made in direct

@@ -11,6 +11,7 @@ import {
   Wand2,
   FileDown,
   Printer,
+  LayoutTemplate,
 } from "lucide-react";
 
 import { PageHeader } from "@/components/layout/page-header";
@@ -21,21 +22,76 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { StatCard } from "@/components/ui/stat-card";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { NumericHistogramCard, CategoricalBarCard } from "@/components/ui/eda-charts";
 import { cn } from "@/lib/utils";
 import { downloadDashboardHtml, printDashboardPdf } from "@/lib/export";
+import { groupColumnsIntoDashboards, suggestDashboardCount } from "@/lib/dashboard-grouping";
 import { analyzeEda, ApiError, EdaReport } from "@/lib/api";
+
+type Tile =
+  | { kind: "numeric"; column: string; numeric: EdaReport["univariate"]["numeric"][number] }
+  | { kind: "categorical"; column: string; categorical: EdaReport["univariate"]["categorical"][number] };
+
+function buildTile(report: EdaReport, column: string): Tile | null {
+  const numeric = report.univariate.numeric.find((c) => c.column === column);
+  if (numeric) return { kind: "numeric", column, numeric };
+  const categorical = report.univariate.categorical.find((c) => c.column === column);
+  if (categorical) return { kind: "categorical", column, categorical };
+  return null;
+}
+
+function TileGrid({
+  report,
+  columns,
+  innerRef,
+}: {
+  report: EdaReport;
+  columns: string[];
+  innerRef?: React.Ref<HTMLDivElement>;
+}) {
+  const tiles = columns.map((c) => buildTile(report, c)).filter((t): t is Tile => t !== null);
+  return (
+    <div ref={innerRef} className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      {tiles.map((tile, i) =>
+        tile.kind === "numeric" ? (
+          <NumericHistogramCard
+            key={tile.column}
+            dist={
+              report.distribution.columns.find((d) => d.column === tile.column) ?? {
+                column: tile.column,
+                status: "unavailable",
+                reason: "No distribution computed for this column",
+                count: tile.numeric.count,
+                minimum: tile.numeric.minimum,
+                maximum: tile.numeric.maximum,
+                mean: tile.numeric.mean,
+                median: tile.numeric.median,
+                std: tile.numeric.std,
+                histogram: { status: "unavailable", n_bins: null, bin_edges: [], bins: [], total_count: null },
+              }
+            }
+          />
+        ) : (
+          <CategoricalBarCard key={tile.column} cat={tile.categorical} variant={i % 2 === 0 ? "bar" : "pie"} />
+        ),
+      )}
+    </div>
+  );
+}
 
 export default function DashboardsPage() {
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [report, setReport] = useState<EdaReport | null>(null);
+  const [fileLabel, setFileLabel] = useState("dataset");
 
   const [selected, setSelected] = useState<string[]>([]);
-  const [tileCount, setTileCount] = useState(6);
+  const [dashboardCount, setDashboardCount] = useState(1);
   const [built, setBuilt] = useState(false);
-  const dashboardRef = useRef<HTMLDivElement>(null);
-  const [fileLabel, setFileLabel] = useState("dataset");
+  const [activeTab, setActiveTab] = useState("0");
+
+  const dashboardRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const chartableColumns = useMemo(() => {
     if (!report) return [];
@@ -58,7 +114,7 @@ export default function DashboardsPage() {
         (c) => c.column,
       );
       setSelected(allColumns);
-      setTileCount(allColumns.length || 1);
+      setDashboardCount(suggestDashboardCount(allColumns));
       toast.success(`Dataset analyzed — all ${allColumns.length} chartable columns selected`);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Analysis failed");
@@ -68,46 +124,37 @@ export default function DashboardsPage() {
   }
 
   function toggleColumn(column: string) {
-    setSelected((prev) => {
-      const next = prev.includes(column) ? prev.filter((c) => c !== column) : [...prev, column];
-      setTileCount(next.length || 1);
-      return next;
-    });
+    setSelected((prev) =>
+      prev.includes(column) ? prev.filter((c) => c !== column) : [...prev, column],
+    );
   }
 
   function selectAll() {
     const all = chartableColumns.map((c) => c.column);
     setSelected(all);
-    setTileCount(all.length || 1);
+    setDashboardCount(suggestDashboardCount(all));
   }
 
   function clearSelection() {
     setSelected([]);
-    setTileCount(1);
+    setDashboardCount(1);
   }
 
-  const tiles = useMemo(() => {
-    if (!report) return [];
-    return selected
-      .slice(0, tileCount)
-      .map((column) => {
-        const numeric = report.univariate.numeric.find((c) => c.column === column);
-        if (numeric) {
-          const dist = report.distribution.columns.find((d) => d.column === column);
-          return { kind: "numeric" as const, column, numeric, dist };
-        }
-        const categorical = report.univariate.categorical.find((c) => c.column === column);
-        if (categorical) return { kind: "categorical" as const, column, categorical };
-        return null;
-      })
-      .filter((t): t is NonNullable<typeof t> => t !== null);
-  }, [report, selected, tileCount]);
+  const groups = useMemo(() => {
+    if (!built || selected.length === 0) return [];
+    return groupColumnsIntoDashboards(selected, dashboardCount);
+  }, [built, selected, dashboardCount]);
+
+  function handleGenerate() {
+    setBuilt(true);
+    setActiveTab("0");
+  }
 
   return (
     <div>
       <PageHeader
         title="Dashboard builder"
-        description="Upload a dataset, pick the categories that matter, and get a Power BI-style grid of charts in one click."
+        description="Upload a dataset and get multiple domain-themed dashboards — like separate HR, supply chain, or sales reports — not one flat pile of charts."
       />
 
       <Card>
@@ -132,9 +179,11 @@ export default function DashboardsPage() {
       {report && (
         <Card className="mt-8">
           <CardHeader>
-            <CardTitle>2. Choose categories &amp; dashboard size</CardTitle>
+            <CardTitle>2. Choose categories &amp; how many dashboards</CardTitle>
             <CardDescription>
-              Pick which columns to visualize, then tell us how many tiles the dashboard should show.
+              Pick which columns to visualize, then tell us how many separate dashboards to split
+              them into — each one grouped by detected theme (e.g. workforce, compensation,
+              logistics, sales).
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -170,35 +219,32 @@ export default function DashboardsPage() {
 
             <div className="flex flex-wrap items-end gap-4">
               <div>
-                <Label htmlFor="tile-count">How many dashboard tiles?</Label>
+                <Label htmlFor="dashboard-count">How many dashboards?</Label>
                 <Input
-                  id="tile-count"
+                  id="dashboard-count"
                   type="number"
                   min={1}
                   max={Math.max(1, selected.length)}
-                  value={tileCount}
-                  onChange={(e) => setTileCount(Number(e.target.value) || 1)}
+                  value={dashboardCount}
+                  onChange={(e) => setDashboardCount(Math.max(1, Number(e.target.value) || 1))}
                   className="w-32"
                 />
               </div>
               <p className="pb-3 text-sm text-muted">
                 {selected.length} of {chartableColumns.length} categor
-                {chartableColumns.length === 1 ? "y" : "ies"} selected — dashboard will show{" "}
-                {Math.min(tileCount, selected.length)}.
+                {chartableColumns.length === 1 ? "y" : "ies"} selected — will be split into{" "}
+                {Math.min(dashboardCount, Math.max(1, selected.length))} dashboard
+                {Math.min(dashboardCount, Math.max(1, selected.length)) === 1 ? "" : "s"}.
               </p>
-              <Button
-                onClick={() => setBuilt(true)}
-                disabled={selected.length === 0}
-                className="ml-auto"
-              >
-                <Wand2 className="h-4 w-4" /> Generate dashboard
+              <Button onClick={handleGenerate} disabled={selected.length === 0} className="ml-auto">
+                <Wand2 className="h-4 w-4" /> Generate dashboards
               </Button>
             </div>
           </CardContent>
         </Card>
       )}
 
-      {built && report && (
+      {built && report && groups.length > 0 && (
         <div className="mt-8 space-y-6">
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <StatCard icon={<Rows3 className="h-5 w-5" />} label="Rows" value={report.n_rows.toLocaleString()} />
@@ -213,68 +259,65 @@ export default function DashboardsPage() {
               value={`${report.univariate.missingness.missing_percentage.toFixed(2)}%`}
             />
             <StatCard
-              icon={<LayoutGrid className="h-5 w-5" />}
-              label="Dashboard tiles"
-              value={tiles.length}
+              icon={<LayoutTemplate className="h-5 w-5" />}
+              label="Dashboards generated"
+              value={groups.length}
             />
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-xl font-semibold tracking-tight">Your dashboard</h2>
-            <Badge variant="primary">{tiles.length} tiles</Badge>
-            <div className="ml-auto flex gap-2">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() =>
-                  dashboardRef.current && downloadDashboardHtml(dashboardRef.current, fileLabel)
-                }
-              >
-                <FileDown className="h-3.5 w-3.5" /> Download HTML
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() =>
-                  dashboardRef.current && printDashboardPdf(dashboardRef.current, fileLabel)
-                }
-              >
-                <Printer className="h-3.5 w-3.5" /> Download PDF
-              </Button>
+          <Tabs value={activeTab} onValueChange={setActiveTab}>
+            <div className="flex flex-wrap items-center gap-3">
+              <TabsList className="flex-wrap">
+                {groups.map((g, i) => (
+                  <TabsTrigger key={i} value={String(i)}>
+                    {g.title}
+                    <span className="ml-1.5 opacity-70">({g.columns.length})</span>
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+              <div className="ml-auto flex gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    const el = dashboardRefs.current[activeTab];
+                    const group = groups[Number(activeTab)];
+                    if (el && group) downloadDashboardHtml(el, `${fileLabel}_${group.title}`);
+                  }}
+                >
+                  <FileDown className="h-3.5 w-3.5" /> Download HTML
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    const el = dashboardRefs.current[activeTab];
+                    const group = groups[Number(activeTab)];
+                    if (el && group) printDashboardPdf(el, `${fileLabel}_${group.title}`);
+                  }}
+                >
+                  <Printer className="h-3.5 w-3.5" /> Download PDF
+                </Button>
+              </div>
             </div>
-          </div>
 
-          <div ref={dashboardRef} className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {tiles.map((tile, i) =>
-              tile.kind === "numeric" ? (
-                <NumericHistogramCard
-                  key={tile.column}
-                  dist={
-                    tile.dist ?? {
-                      column: tile.column,
-                      status: "unavailable",
-                      reason: "No distribution computed for this column",
-                      count: tile.numeric.count,
-                      minimum: tile.numeric.minimum,
-                      maximum: tile.numeric.maximum,
-                      mean: tile.numeric.mean,
-                      median: tile.numeric.median,
-                      std: tile.numeric.std,
-                      histogram: {
-                        status: "unavailable",
-                        n_bins: null,
-                        bin_edges: [],
-                        bins: [],
-                        total_count: null,
-                      },
-                    }
-                  }
+            {groups.map((g, i) => (
+              <TabsContent key={i} value={String(i)}>
+                <div className="mb-4 flex items-center gap-2">
+                  <LayoutGrid className="h-4 w-4 text-primary-2" />
+                  <h2 className="text-lg font-semibold tracking-tight">{g.title}</h2>
+                  <Badge variant="primary">{g.columns.length} tiles</Badge>
+                </div>
+                <TileGrid
+                  report={report}
+                  columns={g.columns}
+                  innerRef={(el) => {
+                    dashboardRefs.current[String(i)] = el;
+                  }}
                 />
-              ) : (
-                <CategoricalBarCard key={tile.column} cat={tile.categorical} variant={i % 2 === 0 ? "bar" : "pie"} />
-              ),
-            )}
-          </div>
+              </TabsContent>
+            ))}
+          </Tabs>
         </div>
       )}
     </div>

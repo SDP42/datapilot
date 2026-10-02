@@ -2305,6 +2305,42 @@ Phase-7/8 entry point.
   filenames.
 - **Decision:** 0096.
 
+#### Phase 14.2 — Multi-Dashboard Generation by Detected Domain — **Done**
+- **Scope:** the Dashboard Builder generated one flat grid of charts
+  regardless of dataset size or shape — for an HR or supply-chain
+  dataset with many columns, that meant one long undifferentiated
+  scroll, not something resembling a real analytics report (Power BI /
+  Tableau workbooks split related metrics into separate report pages).
+- **`frontend/src/lib/dashboard-grouping.ts` — `categorizeColumn`,
+  `groupColumnsIntoDashboards`, `suggestDashboardCount`.** A
+  deterministic keyword match against common analytics domains
+  (workforce/demographics, compensation, attrition, inventory,
+  logistics, procurement, sales, operations, finance, dates) — no AI
+  call, instant and reproducible. The Dashboard Builder now asks "how
+  many dashboards?" (defaulting to the number of distinct detected
+  categories among the selected columns) in addition to which columns
+  to chart; `groupColumnsIntoDashboards` merges the smallest detected
+  groups or splits the largest until the result matches exactly that
+  count.
+- **Frontend: each generated dashboard is a separate tab
+  (`components/ui/tabs`, Radix-based), not one long scroll.** Every tab
+  gets its own title (the detected category, e.g. "Attrition &
+  Engagement"), its own tile count badge, and its own "Download HTML" /
+  "Download PDF" export scoped to just that tab's content.
+- **Quality gates:** frontend `tsc --noEmit` clean, `eslint` clean,
+  `next build` succeeds (13 static routes, unchanged route count — this
+  is a rework of the existing `/dashboard/dashboards` page, not a new
+  route). Verified in a real browser with a synthetic 8-column HR
+  dataset (age, gender, department, tenure, salary, performance rating,
+  attrition, satisfaction score): auto-suggested 3 dashboards, correctly
+  grouped into "Demographics & Workforce" (4), "Compensation &
+  Performance" (2), and "Attrition & Engagement" (2) — and separately
+  verified the keyword matcher against supply-chain-style column names
+  (supplier/shipment/inventory/lead_time/warehouse), which grouped
+  correctly as "Suppliers & Procurement", "Logistics & Shipping", and
+  "Inventory & Stock".
+- **Decision:** 0097.
+
 ### Phase 15 — MLOps / Monitoring
 - **Objective:** operate models in production.
 - **Components:** model/data versioning, drift and performance monitoring,
