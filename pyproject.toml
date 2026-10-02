@@ -69,6 +69,13 @@ dl = [
 mlflow = [
     "mlflow>=2.10",
 ]
+# Phase 10.3 — SHAP-based feature importance (explainability.shap_integration).
+# Optional: explainability.availability detects its absence
+# deterministically, and every other Phase 10 capability (permutation
+# importance, partial dependence) is fully usable without installing it.
+explain = [
+    "shap>=0.44",
+]
 
 [project.urls]
 Documentation = "https://github.com/your-org/datapilot/tree/main/docs"

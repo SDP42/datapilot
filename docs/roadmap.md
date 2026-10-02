@@ -15,7 +15,7 @@ future phases are not anticipated in code.
 | 7 | Model Development / Modeling | **Done** — `data_engine.modeling`, all deterministic and standalone: `ModelingSpec` contract + foundation (7.1); **model readiness** `assess_model_readiness` + **data-split planning** `recommend_data_split` (7.2); **model candidate generation** `generate_model_candidates` (7.3); **training & evaluation** `train_and_evaluate_models` (7.4) — fits one conservative scikit-learn baseline per candidate family and reports per-candidate metrics; **model selection & recommendation** `select_model` (7.5) — deterministically ranks the successful 7.4 runs by a fixed per-task metric and recommends one family/estimator. Nothing beyond the 7.4 baselines is trained; no hyperparameter tuning, CV, feature importance, SHAP, or artifact persistence anywhere in Phase 7. **Post-Phase-7 stabilization (done):** `run_modeling_pipeline` deterministic end-to-end composition + overall `ModelingSpec.status`; `EvaluationResults` is now a status mirror of `TrainingOutcome`; explicit forecasting chronological-order precondition. **Forecasting Foundation (done):** first-class `TaskTypeInference.time_column` + `infer_task_type(..., time_column=)`; unsorted-forecasting caught in Phase-5 feasibility; new `FeatureEngineeringSpec.temporal` section + `recommend_temporal_features` (lag / rolling **recommendations**). **Forecasting Execution (done):** Phase 7.4 now **builds** those lag / rolling features (`build_temporal_features`, backward-looking, leakage-safe one-step-ahead) and trains the forecasting model on them; `TrainingRun.temporal_features_built` / `rows_consumed_as_history`. **Forecasting Execution — part 2 & Recursive Multi-Step Forecasting (done):** Phase 7.4 also **builds** the Phase-6.3 calendar / seasonal derivations (`build_calendar_features`, stateless, no leakage; `TrainingRun.calendar_features_built`); additive `ModelingRequest.forecast_horizon` / `TrainingRun.forecast_horizon` add recursive rolling-origin multi-step diagnostics (`rmse_h1..hN`) without changing the one-step selection metric |
 | 8 | Deep Learning | **In progress — 8.8 (CNN/LSTM/Transformer training/evaluation/selection integration) done; classical-vs-DL comparison and experiment tracking not started.** 8.1: `dl_engine` package + PyTorch optional-dependency boundary + `DLTrainingConfig`. 8.2: deterministic seeding/device resolution, the dataset-to-tensor boundary, and a minimal deterministic training loop (`train_model`, `DLTrainingResult`). 8.3: the first Phase-8 architecture — a small feed-forward MLP (`MLPArchitectureConfig`, `build_mlp`) for regression / binary / multiclass classification. 8.4: `evaluate_model` — evaluates an already-trained model on explicitly supplied evaluation data, reusing the exact Phase-7 metric vocabulary (`DLEvaluationResult`). 8.5: `run_mlp_modeling` — chains build → train → evaluate into one deterministic single-model run (`DLModelingResult`). 8.6: `select_dl_models` — executes multiple `DLCandidate` configurations (each exactly once) and deterministically ranks them by the exact Phase-7 selection metric per task (`rmse`/minimize, `f1`/maximize), comparing DL candidates against each other only (`DLSelectionResult`). 8.7: `CNNArchitectureConfig` / `LSTMArchitectureConfig` / `TransformerArchitectureConfig` + `build_cnn` / `build_lstm` / `build_transformer` — architecture foundations. 8.8: `run_cnn_modeling` / `run_lstm_modeling` / `run_transformer_modeling` + `to_sequence_tensors` wire those three architectures into real training/evaluation; `select_dl_models` now dispatches across all four architecture families. No classical-vs-DL comparison, no experiment tracking; every Phase 0-7 capability works without PyTorch installed |
 | 9 | Experiment Tracking | **Done.** 9.1: `ExperimentRecord` contract (the first deliberately non-deterministic contract — timestamp + UUID), `capture_environment`, `record_experiment`. 9.2: `ExperimentStore` — a filesystem registry (one read-only JSON file per record), mirroring `DatasetVersionStore`. 9.3: `compare_experiments` — deterministic ranking of recorded experiments by each one's own already-established selection metric (never recomputes one); mismatched metrics across records fail safely. 9.4: optional MLflow logging (`log_experiment_to_mlflow`), detected via the same lazy-import optional-dependency boundary as Phase 8's `torch`. Nothing is wired into `run_modeling_pipeline` / `run_mlp_modeling` / `select_dl_models` automatically — every Phase-9 capability is an explicit, opt-in call. |
-| 10 | Explainable AI | Not started |
+| 10 | Explainable AI | **Done.** 10.1: `ExplanationRequest` / `ExplanationReport` foundation (all `not_yet_inferred`). 10.2: `compute_permutation_importance` (`sklearn.inspection.permutation_importance`). 10.3: optional `compute_shap_importance` (model-agnostic `shap.Explainer`, the `explain` extra). 10.4: `compute_partial_dependence` (`sklearn.inspection.partial_dependence`). Every function takes an **already-fitted** estimator — no fitted model is ever persisted anywhere in this codebase (Phase 7/8's own result contracts hold only JSON primitives), so explainability never fits, re-fits, or mutates one; the caller supplies it, mirroring `dl_engine.evaluate_model`'s own "already-trained model" convention. |
 | 11 | AI Scientist / Agent | Not started |
 | 12 | Autonomous Experimentation | Not started |
 | 13 | Backend API | Not started |
@@ -1692,11 +1692,119 @@ persistent storage, deterministic comparison, and optional MLflow
 logging all exist, all tested, none of it wired automatically into any
 Phase-7/8 entry point.
 
-### Phase 10 — Explainable AI
+### Phase 10 — Explainable AI — **Done**
 - **Objective:** explain model behaviour.
 - **Components:** `explainability` — feature importance, SHAP, partial
   dependence; structured explanation objects.
 - **Output:** explanation reports per model.
+
+#### A deliberate resolution before any code: no fitted model is ever persisted
+- **The problem:** every Phase 7 contract (`TrainingOutcome` / `TrainingRun`)
+  and Phase 8 contract (`DLModelingResult`) holds only JSON primitives —
+  "no fitted estimator / pipeline / array / prediction" is stated
+  explicitly in `data_engine.modeling.training`'s own docstring, and
+  `dl_engine` never returns a `torch.nn.Module` either. There is
+  genuinely nowhere in this codebase's public API to get a fitted model
+  from, so Phase 10 cannot "explain a `ModelingSpec`" the way it might
+  naively sound.
+- **The resolution:** every `explainability` function takes an
+  **already-fitted** scikit-learn-compatible estimator directly from the
+  caller — it never fits, re-fits, or mutates one. This mirrors the
+  **exact** resolution Phase 8.5's own decision log (0084) already
+  reached for a near-identical problem: `data_engine.modeling.training`'s
+  split-execution logic (`_split_indices`) is private, and rather than
+  reaching across that privacy boundary, `dl_engine.run_mlp_modeling`
+  requires the caller to supply already-separated train/eval arrays. The
+  same principle applies here: `_build_estimator` is equally private, so
+  `explainability` requires the caller to supply an already-fitted model
+  instead of duplicating or reaching into Phase 7's internals.
+
+#### Phase 10.1 — Explainability Foundation — **Done**
+- **Scope:** the `ExplanationRequest` / `ExplanationReport` contracts +
+  `understand_explanation()`, mirroring Phase 5.1 / 6.1 / 7.1 / 8.1's own
+  "contract only, nothing computed" foundation exactly.
+- **`explainability/contracts.py`.** `ExplainabilityStatus`
+  (`not_yet_inferred` / `unavailable` / `completed` — the Phase 5-7
+  three-state pattern, **not** Phase 9's `ExperimentStatus` shape, since
+  explanation computation is itself deterministic); `ExplanationMethod`
+  (`permutation_importance` / `shap` / `partial_dependence`);
+  `FeatureImportanceEntry` / `FeatureImportanceResult` (shared by *both*
+  10.2 and 10.3 — a caller comparing both methods' rankings needs only
+  one result shape); `PartialDependencePoint` / `PartialDependenceResult`;
+  `ExplanationRequest` / `ExplanationReport`. `understand_explanation`
+  echoes the request into an all-`not_yet_inferred` report; computes
+  nothing. No `generated_at` — repeated calls are byte-identical.
+- **Quality gates:** see 10.4 below for the combined final count (10.1
+  through 10.4 landed together).
+
+#### Phase 10.2 — Permutation Feature Importance — **Done**
+- **Scope:** rank features by how much shuffling each degrades an
+  already-fitted model's score. No new dependency — `scikit-learn`
+  (already Phase 7.4's own dependency) ships
+  `sklearn.inspection.permutation_importance`.
+- **`explainability/importance.py` — `compute_permutation_importance(model,
+  X, y, feature_names, *, n_repeats=10, scoring=None, seed=42)`.** `model`
+  must already be fitted and expose `.predict` / `.score`; `X` must
+  already be fully numeric, matching the Phase 6.5 / 7.4 preprocessing
+  boundary every other DataPilot modeling entry point requires. Entries
+  are ranked by importance descending (ties keep `feature_names`' own
+  order — a stable sort); deterministic for a fixed `seed`. Returns
+  `status = unavailable` for a shape mismatch or empty `X` — never
+  fabricates an importance value; a scikit-learn-raised error (e.g. an
+  unfitted estimator) propagates as-is rather than being swallowed.
+- **OUT (this increment):** fitting a model (explicitly out — see above);
+  feature-interaction importance; a composed pipeline.
+
+#### Phase 10.3 — Optional SHAP-Based Feature Importance — **Done**
+- **Scope:** the same ranking as 10.2, via SHAP instead of permutation —
+  **optional** dependency, detected deterministically, zero impact on
+  any other Phase 10 capability when not installed.
+- **`explainability/availability.py` — `shap_availability()` /
+  `is_shap_available()`.** Byte-for-byte mirrors
+  `dl_engine.availability` / `experimentation.availability`'s own lazy
+  `torch` / `mlflow` boundary: a deterministic, lazily-imported probe
+  (`shap` imported only when the probe function is called, never at
+  package import time), returning a JSON-primitive `SHAPAvailability`.
+- **`explainability/shap_integration.py` — `compute_shap_importance(model,
+  X, feature_names)`.** Uses the **model-agnostic** `shap.Explainer(model.predict,
+  X)` path (not a model-specific `TreeExplainer` / `DeepExplainer`), so it
+  works for any already-fitted estimator this codebase can produce
+  without branching on model type. Global importance per feature =
+  `mean(abs(shap_values))` — a standard SHAP summary statistic. Populates
+  the **same** `FeatureImportanceResult` contract 10.2 does
+  (`method = ExplanationMethod.SHAP`), never a SHAP-specific shape.
+- **`pyproject.toml` gains the optional `explain` extra**
+  (`pip install 'datapilot[explain]'`, `shap>=0.44`) — verified by a
+  subprocess-level test that imports `explainability` and asserts `shap`
+  never lands in `sys.modules`.
+- **OUT (this increment):** model-specific SHAP explainers (`TreeExplainer`
+  etc. — the generic `Explainer` path is used uniformly instead);
+  per-instance SHAP value export (only the global mean-abs summary is
+  returned, to keep the result bounded and consistent in shape with
+  10.2's own ranking).
+
+#### Phase 10.4 — Partial Dependence — **Done**
+- **Scope:** one feature's average-prediction curve over a deterministic
+  grid, for an already-fitted model. No new dependency —
+  `sklearn.inspection.partial_dependence`.
+- **`explainability/partial_dependence.py` — `compute_partial_dependence(model,
+  X, feature_name, feature_index, *, grid_resolution=20)`.** The grid is
+  sklearn's own deterministic convention (`grid_resolution` values evenly
+  spaced between the 5th and 95th percentile of the observed feature
+  values, `kind='average'`) — never a causal claim, purely an
+  association the already-fitted model encodes. Returns `status =
+  unavailable` for an out-of-range `feature_index` or empty `X`.
+- **Not composed into `ExplanationReport` automatically** — exactly like
+  Phase 5/6/7's own standalone-function convention, a caller merges
+  10.2 / 10.3 / 10.4's results into the Phase-10.1 report's sections.
+- **Quality gates (10.1 + 10.2 + 10.3 + 10.4 combined):** `pytest` full
+  suite — 2012 passed / 3 skipped, 0 failed (SHAP happened to be already
+  installed in the verifying environment, so the real-SHAP tests ran
+  rather than skipped — the unavailable-path tests are environment-
+  independent regardless). `ruff` / `ruff format` / `mypy` (148 source
+  files) all green; decision 0091.
+
+**Phase 10 is now complete end to end.**
 
 ### Phase 11 — AI Scientist / Agent
 - **Objective:** LLM reasoning over structured results.

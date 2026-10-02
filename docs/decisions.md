@@ -4,6 +4,73 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0091 — Phase 10.1-10.4: Explainable AI — caller supplies the fitted model, one shared result contract for two importance methods, and a model-agnostic SHAP path
+
+- **Decision:** before writing any Phase 10 code, resolve a real
+  architectural blocker: every Phase 7 (`TrainingOutcome` / `TrainingRun`)
+  and Phase 8 (`DLModelingResult`) contract holds only JSON primitives —
+  there is nowhere in this codebase's public API that returns a fitted
+  model. Phase 10 therefore cannot "explain a `ModelingSpec`" by taking
+  one as input; every `explainability` function instead takes an
+  **already-fitted** scikit-learn-compatible estimator directly from the
+  caller, never fitting, re-fitting, or mutating it — the same resolution
+  Phase 8.5's own decision (0084) already reached for a structurally
+  identical problem (`data_engine.modeling.training`'s split-execution
+  logic being private): rather than reaching across a module's privacy
+  boundary (`_build_estimator`, `_split_indices` are both private), the
+  caller supplies what's needed directly. Within that resolution, three
+  further choices:
+  1. **`compute_permutation_importance` (10.2) and
+     `compute_shap_importance` (10.3) populate the *same*
+     `FeatureImportanceResult` contract**, distinguished only by
+     `method: ExplanationMethod`, rather than two separate result types
+     (`PermutationImportanceResult` / `SHAPImportanceResult`). A caller
+     comparing both methods' rankings for the same model needs one
+     result shape, not two near-identical ones to normalise between.
+  2. **`compute_shap_importance` uses the model-agnostic
+     `shap.Explainer(model.predict, X)` path, never a model-specific
+     `TreeExplainer` / `DeepExplainer`.** A type-dispatching design
+     (tree model -> `TreeExplainer`, anything else -> `KernelExplainer`)
+     would need to inspect `type(model)` against an ever-growing list of
+     known tree-model classes to stay fast — the generic path is slower
+     for large tree ensembles but works identically for *any* already-
+     fitted estimator this codebase can produce (classical scikit-learn
+     today; a Phase-8 PyTorch module wrapped behind `.predict` tomorrow)
+     without `explainability` needing to know what produced the model.
+  3. **Only the global `mean(abs(shap_values))` summary is returned, not
+     per-instance SHAP values.** A per-instance export (shape `(n_rows,
+     n_features)`) has unbounded size relative to the input data and
+     would make `FeatureImportanceResult` inconsistent in shape with
+     10.2's own per-feature ranking; a caller who genuinely needs
+     per-instance values already has `model` and `X` in hand to call
+     `shap.Explainer` directly — this function answers "which features
+     matter," not "explain this one prediction."
+- **Reason:** the whole project's rule — extend by reusing an
+  already-established pattern (Phase 8.5's "caller supplies it"
+  resolution, Phase 8/9's lazy-optional-dependency boundary for `torch`
+  / `mlflow`) rather than re-deriving a new one, and never duplicate
+  logic (Phase 7's private estimator-building) across a module boundary.
+- **Alternatives considered:** retrofitting Phase 7 to optionally return
+  a fitted estimator (rejected — would be a breaking change to a
+  heavily-tested, "no fitted estimator in any return contract" invariant
+  repeated in Phase 7.4's own docstring, for the sole benefit of one
+  later phase); a separate `fit_for_explanation(X, y, family)` entry
+  point in `explainability` itself that duplicates `_build_estimator`
+  (rejected — exactly the duplication Phase 8.5's decision 0084 already
+  ruled out for the structurally identical split-logic case); two
+  separate result contracts for permutation vs. SHAP importance
+  (rejected — see point 1 above).
+- **Consequence:** `explainability` has no dependency on
+  `data_engine.modeling` or `dl_engine` at all — it is a general tool
+  over any fitted scikit-learn-compatible estimator, not Phase 7/8-
+  specific. A caller who used DataPilot through Phase 7 to decide *which*
+  family to use must still fit that estimator themselves (with
+  scikit-learn directly, using the same family `ModelCandidates`
+  recommended) before `explainability` can do anything with it — this is
+  a real, documented limitation, not an oversight. Quality gates:
+  `pytest` full suite 2012 passed / 3 skipped, 0 failed; `ruff` / `ruff
+  format` / `mypy` (148 source files) all green.
+
 ## 0090 — Phase 9.2/9.3/9.4: Experiment Store, Comparison, and Optional MLflow Logging — reusing Phase 7/8's own selection metrics instead of a second extraction path, and a by-name dispatch precedent carried forward
 
 - **Decision:** complete Phase 9 (store, comparison, MLflow) in one pass,
