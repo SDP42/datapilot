@@ -6,13 +6,12 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { motion } from "framer-motion";
-import { Sparkles, ArrowRight, Lock, User } from "lucide-react";
+import { Sparkles, ArrowRight, Lock, User, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Divider } from "@/components/ui/divider";
 import { Alert } from "@/components/ui/alert";
 import { GradientText } from "@/components/ui/gradient-text";
 import { GradientBlob } from "@/components/ui/gradient-blob";
@@ -64,10 +63,10 @@ export default function LoginPage() {
           DataPilot
         </Link>
 
-        <h1 className="mt-6 text-center text-2xl font-bold tracking-tight">
+        <h1 className="mt-6 text-center text-3xl font-bold tracking-tight">
           Sign in to the <GradientText>console</GradientText>
         </h1>
-        <p className="mt-2 text-center text-sm text-muted">
+        <p className="mt-2 text-center text-base text-muted">
           Use the credentials your administrator configured for this deployment.
         </p>
 
@@ -114,15 +113,23 @@ export default function LoginPage() {
           </Button>
         </form>
 
-        <Divider label="New to DataPilot" className="my-6" />
-
-        <p className="text-center text-xs text-muted">
-          DataPilot is configured per deployment —{" "}
-          <Link href="/" className="font-medium text-primary-2 hover:underline">
-            learn more on the landing page
-          </Link>
-          .
-        </p>
+        <div className="mt-6 flex items-start gap-3 rounded-xl border border-surface-border bg-surface-2/50 p-4">
+          <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-primary-2" />
+          <p className="text-sm text-muted">
+            DataPilot runs as a single-operator deployment — there&apos;s no public sign-up. Your
+            administrator provisions the one account above via{" "}
+            <code className="rounded bg-surface px-1.5 py-0.5 text-xs text-foreground">
+              DATAPILOT_AUTH_USERNAME
+            </code>{" "}
+            /{" "}
+            <code className="rounded bg-surface px-1.5 py-0.5 text-xs text-foreground">
+              DATAPILOT_AUTH_PASSWORD
+            </code>
+            . <Link href="/" className="font-medium text-primary-2 hover:underline">
+              Learn more on the landing page.
+            </Link>
+          </p>
+        </div>
       </motion.div>
     </div>
   );

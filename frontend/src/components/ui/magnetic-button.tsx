@@ -41,7 +41,7 @@ export function MagneticButton({
       onClick={onClick}
       style={{ x: springX, y: springY }}
       className={cn(
-        "relative inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-primary to-primary-2 px-7 py-3.5 font-medium text-white shadow-xl shadow-primary/30",
+        "glow-border relative inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-primary to-primary-2 px-7 py-3.5 text-lg font-medium text-white shadow-xl shadow-primary/30",
         className,
       )}
     >

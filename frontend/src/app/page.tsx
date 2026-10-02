@@ -93,6 +93,7 @@ const PIPELINE = [
 export default function LandingPage() {
   return (
     <div className="relative flex min-h-screen flex-col overflow-x-hidden bg-background bg-grid">
+      <div className="noise-overlay" />
       <Navbar />
 
       {/* Hero */}
@@ -123,7 +124,7 @@ export default function LandingPage() {
           </GradientText>
         </h1>
 
-        <p className="relative z-10 mt-6 max-w-2xl text-balance text-lg text-muted">
+        <p className="relative z-10 mt-6 max-w-2xl text-balance text-xl text-muted">
           Upload a dataset and DataPilot ingests, profiles, cleans, explores, models, explains,
           and tracks every step deterministically — with an autonomous agent layered on top that
           proposes, never silently executes.
@@ -190,8 +191,8 @@ export default function LandingPage() {
                 <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 to-accent/20 text-primary-2">
                   <f.icon className="h-5 w-5" />
                 </div>
-                <h3 className="mt-4 text-base font-semibold">{f.title}</h3>
-                <p className="mt-2 text-sm text-muted">{f.desc}</p>
+                <h3 className="mt-4 text-lg font-semibold">{f.title}</h3>
+                <p className="mt-2 text-base text-muted">{f.desc}</p>
               </SpotlightCard>
             </motion.div>
           ))}
@@ -220,9 +221,9 @@ export default function LandingPage() {
               transition={{ duration: 0.4, delay: i * 0.08 }}
               className="relative rounded-2xl border border-surface-border bg-surface/50 p-5"
             >
-              <span className="text-xs font-mono text-primary-2">{step.phase}</span>
-              <h3 className="mt-2 text-sm font-semibold">{step.title}</h3>
-              <p className="mt-1.5 text-xs text-muted">{step.detail}</p>
+              <span className="text-sm font-mono text-primary-2">{step.phase}</span>
+              <h3 className="mt-2 text-base font-semibold">{step.title}</h3>
+              <p className="mt-1.5 text-sm text-muted">{step.detail}</p>
             </motion.div>
           ))}
         </div>

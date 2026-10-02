@@ -58,8 +58,8 @@ export default function DashboardOverviewPage() {
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 to-accent/20 text-primary-2">
               <link.icon className="h-5 w-5" />
             </div>
-            <h3 className="mt-4 text-base font-semibold">{link.title}</h3>
-            <p className="mt-1.5 text-sm text-muted">{link.desc}</p>
+            <h3 className="mt-4 text-lg font-semibold">{link.title}</h3>
+            <p className="mt-1.5 text-base text-muted">{link.desc}</p>
             <Link href={link.href} className="mt-4 inline-block">
               <Button variant="secondary" size="sm">
                 Open <ArrowRight className="h-3.5 w-3.5" />
