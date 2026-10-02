@@ -8,6 +8,8 @@ distribution-robust model may help later.
 
 from __future__ import annotations
 
+from typing import SupportsFloat, cast
+
 import numpy as np
 
 from datapilot.contracts import ColumnType
@@ -31,7 +33,11 @@ def check(ctx: CheckContext) -> list[QualityFinding]:
         if len(series) < SKEW_MIN_NON_NULL or series.nunique() <= 2:
             continue
 
-        skew = float(series.skew())
+        # pandas-stubs types Series.skew()'s return broadly regardless of
+        # the Series' own numeric dtype; `col.inferred_type` already
+        # confirmed NUMERIC above, so the runtime value is always a real
+        # float/np.float64 — cast documents that known-true narrowing.
+        skew = float(cast(SupportsFloat, series.astype(float).skew()))
         if not np.isfinite(skew) or abs(skew) < SKEW_HIGH_ABS:
             continue
 

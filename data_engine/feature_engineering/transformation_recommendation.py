@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import math
 import re
+from typing import SupportsFloat, cast
 
 import numpy as np
 import pandas as pd
@@ -107,7 +108,11 @@ def _finite(series: pd.Series) -> np.ndarray:
 def _skew(values: np.ndarray) -> float | None:
     if values.size < TRANSFORMATION_MIN_OBS:
         return None
-    skew = float(pd.Series(values).skew())
+    # pandas-stubs types Series.skew()'s return broadly regardless of the
+    # Series' own numeric dtype; `values` is already a plain float ndarray
+    # (built by _finite above), so the actual runtime value is always a
+    # real float/np.float64 — cast documents that known-true narrowing.
+    skew = float(cast(SupportsFloat, pd.Series(values, dtype=float).skew()))
     return None if math.isnan(skew) else skew
 
 

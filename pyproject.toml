@@ -42,6 +42,12 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.5",
     "mypy>=1.10",
+    # Type stubs for runtime dependencies that ship their own (pandas,
+    # pyyaml) — scipy / scikit-learn / plotly do not publish actively
+    # maintained stubs, so those are handled via [tool.mypy] overrides
+    # below instead of a speculative stub package.
+    "pandas-stubs",
+    "types-PyYAML",
 ]
 # Optional: static image export (PNG / SVG / PDF) of Plotly figures via
 # export_visualization(). HTML export needs nothing extra.
@@ -93,3 +99,13 @@ target-version = "py311"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.mypy]
+# scipy / scikit-learn / plotly do not publish actively maintained type
+# stubs (unlike pandas / pyyaml, covered by the pandas-stubs / types-PyYAML
+# dev dependencies above) — ignore_missing_imports here, scoped to exactly
+# these three, rather than a blanket project-wide setting that would also
+# hide a genuinely missing stub for a future dependency.
+[[tool.mypy.overrides]]
+module = ["scipy.*", "sklearn.*", "plotly.*"]
+ignore_missing_imports = true

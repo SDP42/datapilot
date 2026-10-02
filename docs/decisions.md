@@ -4,6 +4,55 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0089 — Fix: genuinely clean `mypy`, not just zero-*visible*-errors
+
+- **Decision:** every prior phase's "quality gates: ... `mypy` ...
+  all green" claim was true only in the environment that happened to
+  verify it — this project declared no `[tool.mypy]` config and no type
+  stub packages (`pandas-stubs`, `types-PyYAML`) in the `dev` extra, so a
+  genuinely fresh `pip install -e ".[dev]"` would see ~86
+  `[import-untyped]` warnings for `pandas` / `scipy` / `scikit-learn` /
+  `plotly` / `yaml` and, worse, **mypy silently skips type-checking any
+  expression that flows through an untyped import** — so installing the
+  real stubs for the two libraries that publish them (`pandas-stubs`,
+  `types-PyYAML`) surfaced **four previously-invisible real type errors**
+  in already-shipped Phase 1/2/6 code: an ambiguous `Series | dict` branch
+  in `profiling/profiler.py` (needed an explicit annotation), two
+  `Series.skew()` calls whose input `pandas-stubs` now typed too broadly
+  for a bare `float(...)` call (`feature_engineering/transformation_recommendation.py`,
+  `quality/checks/skewness.py` — fixed with a `cast(SupportsFloat, ...)`
+  documenting the already-true runtime narrowing, not a behavior change),
+  and an `ExtensionArray` vs. `ndarray` union missing `.tobytes()` in
+  `cleaning/executor.py` (fixed with `np.asarray(...)` first). `scipy` /
+  `scikit-learn` / `plotly` do not publish actively-maintained stubs, so
+  those three are handled via a new, narrowly-scoped
+  `[[tool.mypy.overrides]]` (`ignore_missing_imports = true` for exactly
+  those three module globs) rather than a project-wide blanket setting
+  that would also hide a genuinely missing stub for some future
+  dependency.
+- **Reason:** "no type errors reported" and "mypy actually checked
+  everything" are different claims, and only the second one is worth
+  anything — an untyped-import warning doesn't just fail to flag an
+  issue in that one import line, it silently turns off checking for
+  every expression downstream of it.
+- **Alternatives considered:** a project-wide `ignore_missing_imports =
+  true` (rejected — would also silently swallow a real future missing
+  stub, defeating the purpose of running mypy at all); `# type: ignore`
+  comments at each of the four call sites (rejected — hides the error
+  without explaining *why* it's safe; a scoped `cast` with a comment
+  documents the actual reasoning); leaving the four latent errors alone
+  since they were never actually wrong at runtime (rejected — "happens
+  to be correct today" is not the same guarantee `mypy` is supposed to
+  provide, and the whole point of this fix is making that guarantee
+  real).
+- **Consequence:** `mypy data_engine datapilot dl_engine experimentation`
+  now reports "Success: no issues found in 138 source files" with zero
+  overrides hiding a real error — verified by re-running it immediately
+  after installing the two new stub packages, before any of the four
+  fixes, to confirm each flagged error was genuine. `pytest` full suite
+  still 1956 passed / 2 skipped, 0 failed (none of the four fixes change
+  behavior, only type-narrowing). `ruff` / `ruff format` unaffected.
+
 ## 0088 — Phase 9.1: Experiment Tracking Foundation — a deliberate break from the determinism rule, environment capture without importing packages, and no dedicated docs file
 
 - **Decision:** establish `experimentation.contracts.ExperimentRecord` as

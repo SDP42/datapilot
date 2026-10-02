@@ -45,7 +45,9 @@ def _clean_float(value: Any) -> float | None:
 
 def _numeric_stats(series: pd.Series) -> NumericColumnStats:
     non_null = series.dropna()
-    quantiles = non_null.quantile([0.25, 0.5, 0.75]) if not non_null.empty else {}
+    quantiles: pd.Series | dict[float, float] = (
+        non_null.quantile([0.25, 0.5, 0.75]) if not non_null.empty else {}
+    )
     return NumericColumnStats(
         count=int(non_null.count()),
         mean=_clean_float(non_null.mean()) if not non_null.empty else None,

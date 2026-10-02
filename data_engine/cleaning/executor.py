@@ -18,6 +18,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from data_engine.profiling import load_dataframe, profile_dataframe
@@ -121,9 +122,8 @@ def _execution_id(
 
 
 def _df_sha(df: pd.DataFrame) -> str:
-    return hashlib.sha256(pd.util.hash_pandas_object(df, index=True).values.tobytes()).hexdigest()[
-        :16
-    ]
+    hashed = np.asarray(pd.util.hash_pandas_object(df, index=True).values)
+    return hashlib.sha256(hashed.tobytes()).hexdigest()[:16]
 
 
 def _eligible(op: CleaningOperation, approved: set[str], auto_recommended: bool) -> bool:
