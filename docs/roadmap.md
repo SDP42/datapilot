@@ -19,7 +19,7 @@ future phases are not anticipated in code.
 | 11 | AI Scientist / Agent | **Done.** 11.1: `build_analysis_context` / `render_context_as_text` — deterministic, generic bundling of any already-produced Phase 1-10 report into one `AnalysisContext`, never a raw dataframe or fitted model. 11.2: the fixed `TOOL_NAMES` vocabulary — JSON-schema-described deterministic capabilities an LLM may reference by name, never invent. 11.3: `AnthropicProvider`, the first concrete `LLMProvider` (Phase 0's decision 0004 deferred this); `anthropic` is an optional `ai` extra, detected via the same lazy-import boundary as `torch` / `mlflow` / `shap`. 11.4: `interpret_results` (natural-language summary) and `recommend_next_steps` (structured, tool-name-validated recommendations — an unrecognised tool is dropped with an explicit reason, never silently kept, per architecture principle #6). Nothing here executes a recommended tool — that's Phase 12. |
 | 12 | Autonomous Experimentation | **Done.** 12.1: `execute_tool` — the deterministic executor turning a Phase-11-validated `Recommendation` into a real call against one of the 7 declared tools, via a fixed dispatch table; `ExecutionContext` holds the runtime resources (dataframe, fitted model, experiment store, …) a handler needs, never fabricated. 12.2: `evaluate_step` — a *deterministic* critic (never a second LLM call) deciding continue/stop from an `ExecutionResult`'s own status. 12.3/12.4: `run_autonomous_experimentation` — the planner (`recommend_next_steps`) → executor → critic loop under an explicit `max_steps` budget, producing a fully JSON-serialisable `AutonomousRunTrace` a human can review step by step. |
 | 13 | Backend API | **Done.** 13.1: FastAPI app (`backend.datapilot_api.create_app`) + stateless endpoints wrapping Phase 1/2/4/7 directly (`/datasets/ingest`, `/datasets/quality`, `/datasets/eda`, `/modeling/run`) — upload a CSV, get the real result contract back. `backend.settings` is the first typed (`pydantic-settings`) config, additive to the Phase-0 YAML loader. 13.2: the first database-backed store in this codebase (`JobStore`, SQLAlchemy) — SQLite by default, PostgreSQL via `DATAPILOT_DATABASE_URL` with zero code change (the driver is an opt-in `postgres` extra, not a forced base dependency). 13.3: `/jobs/modeling` (submit) + `/jobs/{id}` (poll) — asynchronous job orchestration via `BackgroundTasks`. 13.4: optional DuckDB ad-hoc analytics (`/analytics/experiments/query`) over already-recorded experiments — reports `503` with an explicit reason when the `analytics` extra isn't installed, rather than the route not existing. |
-| 14 | Frontend | **Done.** 13.5: JWT auth boundary added to the backend first (`backend.datapilot_api.auth`, single-operator `/auth/login` + `/auth/me`, every Phase 13 router now `Depends(get_current_user)`-protected, `CORSMiddleware` for the frontend origin) — the frontend needed something real to authenticate against. 14: Next.js 16 (App Router) + TypeScript + Tailwind v4 app — a landing page with a Three.js (`@react-three/fiber`/`drei`) distorted-sphere hero and scroll-triggered Framer Motion sections, a JWT login page, and an authenticated dashboard (upload, quality, EDA, modeling, jobs, analytics) wired to the real Phase 13 endpoints through a typed `lib/api.ts` client — no mock data. ~34 original UI primitives (button, card, spotlight-card, tilt-card, magnetic-button, animated-counter, marquee, gradient-text, shiny-text, text-reveal, data-table, file-dropzone, accordion, …) plus Radix-based accessible primitives (tabs, dialog, select, switch, tooltip). Verified responsive at mobile/tablet/desktop breakpoints — a Three.js sizing bug found during that verification (the hero sphere rendering disproportionately large on narrow aspect ratios) was fixed with a responsive CSS scale on the canvas wrapper. |
+| 14 | Frontend | **Done.** 13.5: JWT auth boundary added to the backend first (`backend.datapilot_api.auth`, single-operator `/auth/login` + `/auth/me`, every Phase 13 router now `Depends(get_current_user)`-protected, `CORSMiddleware` for the frontend origin) — the frontend needed something real to authenticate against. 14: Next.js 16 (App Router) + TypeScript + Tailwind v4 app — a landing page with a Three.js (`@react-three/fiber`/`drei`) distorted-sphere hero and scroll-triggered Framer Motion sections, a JWT login page, and an authenticated dashboard (upload, quality, EDA, modeling, jobs, analytics) wired to the real Phase 13 endpoints through a typed `lib/api.ts` client — no mock data. ~34 original UI primitives (button, card, spotlight-card, tilt-card, magnetic-button, animated-counter, marquee, gradient-text, shiny-text, text-reveal, data-table, file-dropzone, accordion, …) plus Radix-based accessible primitives (tabs, dialog, select, switch, tooltip). Verified responsive at mobile/tablet/desktop breakpoints — a Three.js sizing bug found during that verification (the hero sphere rendering disproportionately large on narrow aspect ratios) was fixed with a responsive CSS scale on the canvas wrapper. 14.1: model persistence + prediction (`data_engine.modeling.persistence`, `POST /api/v1/predict/train` + `/models` + `/models/{id}/predict`) — the first part of this codebase allowed to save a fitted estimator and run it again on new data; a database-backed activity log (`routes.history`) recording every synchronous run, closing the gap where only async jobs were ever persisted; a real bug fix for uploaded filenames being lost before reaching `DatasetReference`; a Dashboard Builder bug fix (it silently capped itself at 6 charted columns regardless of selection — now selects and shows all by default); and dashboard export to standalone HTML / browser-native PDF. |
 | 15 | MLOps / Monitoring | Not started |
 | 16 | Deployment | Not started |
 | 17 | Testing, Benchmarking & Documentation | Continuous |
@@ -2227,6 +2227,83 @@ Phase-7/8 entry point.
   Backend quality gates unaffected: `pytest` 2126 passed / 3 skipped,
   `ruff` / `ruff format` / `mypy` (171 source files) all green.
 - **Decision:** 0095.
+
+#### Phase 14.1 — Model Persistence & Prediction, Run History, Dashboard/Frontend Fixes — **Done**
+- **Scope:** direct response to real gaps — "where is the ML part and
+  prediction", a dashboard builder silently capping charts at 6 columns
+  instead of the user's actual selection, and no persisted history for
+  any synchronous run (upload/quality/EDA/modeling/predict all happened
+  and vanished). All three were real defects, not polish.
+- **Phase 7.6 — model persistence & prediction
+  (`data_engine.modeling.persistence`, `training.fit_final_pipeline`,
+  `pipeline.train_and_persist_model`).** Every prior Phase-7 increment
+  explicitly documented that it persisted nothing; this is the first and
+  only place that boundary is crossed. `fit_final_pipeline` reuses
+  `training.py`'s own `_build_estimator` / `_build_preprocessor` (no
+  reimplementation) to refit the selected family on the full dataset;
+  `save_model` persists it as joblib artifact + JSON metadata sidecar,
+  mirroring the ingestion raw store's own immutable-artifact convention
+  (decision 0008); `predict_with_model` never imputes a feature column
+  absent from new data — it reports `missing_columns` and predicts
+  nothing, rather than guessing.
+- **Backend (`routes.predictions`):** `POST /api/v1/predict/train`
+  (train + persist), `GET /api/v1/predict/models` (list), `POST
+  /api/v1/predict/models/{id}/predict` (batch CSV inference). Storage
+  root is `backend.settings.Settings.trained_model_dir`, not
+  `datapilot.paths.DATA_MODELS_DIR` directly — mirrors
+  `dependencies.ingest_upload`'s own tempdir-scoped upload store so
+  tests and alternate deployments never touch the repo's real `data/`
+  directory.
+- **Backend (`routes.history`, `activity_store.ActivityStore`): the
+  first database-backed record of every synchronous run.** Every prior
+  Phase-13 synchronous endpoint (`/datasets/*`, `/modeling/run`,
+  `/predict/*`) ran and returned its result with nothing persisted —
+  only the asynchronous `/jobs` path (Phase 13.3) was ever recorded.
+  `ActivityRow`/`ActivityStore` mirror `JobRow`/`JobStore`'s own shape;
+  every one of those six endpoints now records a row (kind, dataset id
+  + filename, a short summary, timestamp) after it completes.
+  `GET /api/v1/history` is the one read endpoint over it.
+- **Bug fix: uploaded filenames were lost.**
+  `dependencies.ingest_upload` wrote every upload to a
+  `tempfile.NamedTemporaryFile`-generated name before calling
+  `ingest_dataset` — which derives `DatasetReference.original_filename`
+  from the path it's given — so every reference in the app showed a
+  meaningless name like `tmpu8ctdzpk.csv` instead of what the user
+  actually uploaded. Fixed by writing the upload to a temp directory
+  under its own (sanitised) filename instead of a random one.
+- **Frontend bug fix: the Dashboard Builder silently capped itself at 6
+  tiles.** Selecting a dataset with more than ~8 columns only ever
+  defaulted to 6 charted, with no obvious way to see the rest — the
+  exact behavior flagged as broken. Fixed: analyzing a dataset now
+  selects all chartable columns by default, the tile-count field tracks
+  the live selection instead of a hardcoded 6, and "Select all" / "Clear"
+  controls make the intent explicit either way.
+- **Frontend: `/dashboard/predict` (train, list, and run saved models)
+  and `/dashboard/history` (the activity log) — both new pages**, wired
+  through typed `lib/api.ts` additions mirroring the new backend
+  contracts exactly (no `any`, no loose `Record<string, unknown>`
+  fallback for these response shapes).
+  `/dashboard/dashboards` gained "Download HTML" / "Download PDF"
+  buttons (`lib/export.ts`) — the rendered dashboard's DOM plus every
+  same-origin stylesheet rule is serialized into one self-contained
+  HTML document (works fully offline, no server round-trip); the PDF
+  path opens that same document in a new window and invokes the
+  browser's native print dialog rather than adding a PDF-generation
+  dependency.
+- **Quality gates:** `pytest` full suite 2143 passed / 3 skipped (up
+  from 2126 — 17 new tests across `tests/data_engine/modeling/test_persistence.py`
+  and `tests/backend/datapilot_api/test_predictions.py`); `ruff` /
+  `ruff format` / `mypy` (176 source files) all green — `joblib` added
+  as an explicit base dependency (scikit-learn's own de/serialization
+  tool; previously only present transitively) with its own
+  `ignore_missing_imports` mypy override, matching the scipy/sklearn/
+  plotly precedent. Frontend: `tsc --noEmit` clean, `eslint` clean,
+  `next build` succeeds (13 static routes). Verified end to end in a
+  real browser: trained and persisted a `RandomForestRegressor`, ran it
+  against new rows, confirmed the 10-tile dashboard (previously capped
+  at 6) and the history log both reflect real runs with correct
+  filenames.
+- **Decision:** 0096.
 
 ### Phase 15 — MLOps / Monitoring
 - **Objective:** operate models in production.

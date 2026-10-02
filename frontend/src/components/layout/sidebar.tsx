@@ -13,6 +13,8 @@ import {
   LogOut,
   Sparkles,
   LayoutGrid,
+  Target,
+  History,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
@@ -25,8 +27,10 @@ const NAV = [
   { href: "/dashboard/eda", label: "EDA", icon: LineChart },
   { href: "/dashboard/dashboards", label: "Dashboards", icon: LayoutGrid },
   { href: "/dashboard/modeling", label: "Modeling", icon: Cpu },
+  { href: "/dashboard/predict", label: "Train & Predict", icon: Target },
   { href: "/dashboard/jobs", label: "Jobs", icon: ListChecks },
   { href: "/dashboard/analytics", label: "Analytics", icon: Database },
+  { href: "/dashboard/history", label: "History", icon: History },
 ];
 
 export function Sidebar() {

@@ -99,6 +99,7 @@ def test_declared_runtime_dependencies_are_the_expected_set():
         "matplotlib",
         "plotly",
         "scikit-learn",
+        "joblib",
         "fastapi",
         "uvicorn",
         "python-multipart",

@@ -23,6 +23,8 @@ unchanged and still returns an all-``not_yet_inferred`` spec.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
 
 from data_engine.feature_engineering import (
@@ -52,6 +54,7 @@ from .models import (
     DataSplitPlan,
     EvaluationResults,
     ModelCandidates,
+    ModelFamily,
     ModelingRequest,
     ModelingSpec,
     ModelingStatus,
@@ -59,10 +62,11 @@ from .models import (
     ModelSelection,
     TrainingOutcome,
 )
+from .persistence import PersistedModelMetadata, save_model
 from .readiness import assess_model_readiness
 from .selection import select_model
 from .split_planning import recommend_data_split
-from .training import train_and_evaluate_models
+from .training import fit_final_pipeline, train_and_evaluate_models
 from .understanding import understand_modeling
 
 _NOTE_COMPOSED = (
@@ -278,3 +282,52 @@ def run_modeling_pipeline(df: pd.DataFrame, request: ModelingRequest) -> Modelin
             "notes": [_NOTE_COMPOSED, _NOTE_EVAL_SOT],
         }
     )
+
+
+def train_and_persist_model(
+    df: pd.DataFrame,
+    request: ModelingRequest,
+    *,
+    root: Path | None = None,
+) -> tuple[ModelingSpec, PersistedModelMetadata | None]:
+    """Run the full Phase 5 -> 7 pipeline and, only if it selected a model,
+    persist that model (Phase 7.6) so it can serve predictions later.
+
+    A **composition layer only**, exactly like :func:`run_modeling_pipeline`
+    itself: it calls :func:`run_modeling_pipeline` verbatim for the
+    ``ModelingSpec`` (never reimplementing any of its stages), and reuses
+    this module's own ``_build_problem_spec`` / ``_build_feature_engineering_spec``
+    — the same two calls :func:`run_modeling_pipeline` already makes — to
+    refit the selected family on the full dataset via
+    :func:`data_engine.modeling.training.fit_final_pipeline` and persist it
+    via :func:`data_engine.modeling.persistence.save_model`.
+
+    Returns ``(spec, None)`` whenever ``spec.status`` is not ``completed``
+    (nothing to persist) or whenever persistence is legitimately not
+    possible, e.g. ``scikit-learn`` is unavailable or the task is
+    unsupported — the ``ModelingSpec`` itself always reflects exactly what
+    :func:`run_modeling_pipeline` would have returned, unaffected by
+    whether persistence succeeded.
+    """
+    spec = run_modeling_pipeline(df, request)
+    if spec.status is not ModelingStatus.COMPLETED or spec.selection.selected_family is None:
+        return spec, None
+
+    problem = _build_problem_spec(df, request)
+    feature_engineering = _build_feature_engineering_spec(df, request, problem)
+    family = ModelFamily(spec.selection.selected_family)
+
+    try:
+        fitted = fit_final_pipeline(df, problem, feature_engineering, family)
+    except ValueError:
+        return spec, None
+
+    metadata = save_model(
+        fitted,
+        dataset_id=request.dataset_id,
+        objective=request.objective,
+        selection_metric=spec.selection.selection_metric,
+        selected_score=spec.selection.selected_score,
+        root=root,
+    )
+    return spec, metadata

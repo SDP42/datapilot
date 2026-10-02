@@ -4,6 +4,92 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0096 — Phase 14.1: model persistence as a deliberately narrow boundary crossing, activity history over re-deriving the past, and fixing real bugs the user actually hit rather than polishing around them
+
+- **Decision:** four choices define this increment, all made in direct
+  response to concrete complaints rather than speculative improvement:
+  1. **Model persistence (`data_engine.modeling.persistence`,
+     `training.fit_final_pipeline`) is scoped as narrowly as possible, not
+     as a general MLOps layer.** Every earlier Phase-7 increment states
+     outright that it persists nothing — `TrainingOutcome`'s own notes
+     say "no model artifact was persisted." Rather than relaxing that
+     boundary everywhere, exactly one new function
+     (`fit_final_pipeline`) is allowed to return a live fitted
+     `sklearn.Pipeline`, and it does so by reusing
+     `training.py`'s own `_build_estimator` / `_build_preprocessor` —
+     the same functions evaluation already used — so the persisted
+     model is built identically to the one whose metrics were reported,
+     never a second, drifted definition of "the model." Persistence
+     itself (`save_model` / `load_model`) mirrors the ingestion raw
+     store's immutable-artifact-plus-JSON-sidecar shape (decision 0008)
+     rather than inventing a new storage convention.
+  2. **The activity log (`routes.history`, `ActivityStore`) records a
+     short summary per run, never a second copy of the full result.**
+     The temptation, once a database table exists, is to store
+     everything (the full `EDAReport`, the full `ModelingSpec`) "in case
+     it's useful later" — rejected, because a result that large belongs
+     to the response that produced it, not a history row, and a second
+     copy invites the two to drift. `ActivityRow` mirrors `JobRow`'s own
+     shape (the Phase 13.2/13.3 precedent) rather than a new one.
+  3. **Two of this increment's four fixes were bugs the user actually
+     hit, verified by reproducing them first, not by code review
+     alone.** The Dashboard Builder capping itself at 6 tiles was
+     reproduced with a real 10-column CSV before touching any code — the
+     chip-selector already listed all columns, but the default selection
+     sliced to 8 and the tile-count field defaulted to 6 independently of
+     what was actually selected, so "select more" silently didn't show
+     more unless the number field was also raised by hand. The lost-
+     filename bug (`DatasetReference.original_filename` showing
+     `tmpu8ctdzpk.csv` instead of the real upload name) was found while
+     building the history feature — `ingest_dataset` derives the name
+     from the path it's given, and `dependencies.ingest_upload` was
+     handing it a `tempfile`-generated path, never the caller's real
+     filename. Both are fixed at the root cause (the default-selection
+     logic; the temp-file naming), not patched around.
+  4. **Dashboard export (HTML / PDF) uses the browser's own
+     capabilities, not a new rendering dependency.** `lib/export.ts`
+     serializes the rendered dashboard's DOM plus every readable
+     same-origin stylesheet rule into one self-contained HTML document —
+     recharts already renders real SVG markup, so nothing needs
+     re-rendering to export. The PDF path opens that same document and
+     calls the browser's native print dialog rather than adding
+     `html2canvas` / `jsPDF`, keeping the frontend's dependency set
+     exactly as deliberate as decision 0095 established for its UI
+     components.
+- **Reason:** every choice narrows scope to the actual problem rather
+  than reaching for the most general version of a solution — a pattern
+  this project has applied consistently (the optional-dependency
+  boundary across five-plus phases, the filesystem-store-then-DB-store
+  precedent) and that stays correct here: a narrow persistence boundary
+  is auditable, a short activity summary can't drift from the result it
+  logged, and fixes aimed at a reproduced symptom don't risk masking
+  the actual defect under a cosmetic change.
+- **Alternatives considered:** persisting full result payloads in the
+  activity log (rejected — see point 2); a general "save any model"
+  layer independent of the Phase-7 selection flow (rejected — would
+  have duplicated `_build_estimator` / `_build_preprocessor` instead of
+  reusing them, exactly the kind of drift this codebase's "duplicates
+  none of their logic" composition-layer discipline exists to prevent);
+  `html2canvas` + `jsPDF` for export (rejected — see point 4, an added
+  dependency for a capability the browser and recharts' own SVG output
+  already provide); assuming the dashboard-cap report was a UI
+  misunderstanding rather than reproducing it first (rejected — it was
+  real, and reproducing it first is what revealed the actual two-part
+  cause: default selection *and* an independently-defaulted tile count).
+- **Consequence:** the platform now has a real train -> persist ->
+  predict path (`/dashboard/predict`), a real cross-session run history
+  (`/dashboard/history`), dashboards that actually chart everything the
+  user selects, correct filenames throughout, and dashboard export to
+  HTML/PDF. Quality gates: `pytest` full suite 2143 passed / 3 skipped
+  (17 new tests); `ruff` / `ruff format` / `mypy` (176 source files) all
+  green (`joblib` added as an explicit dependency with its own mypy
+  override, matching the scipy/sklearn/plotly precedent). Frontend:
+  `tsc --noEmit` clean, `eslint` clean, `next build` succeeds (13 static
+  routes). Verified end to end in a real browser against the real
+  backend: trained and persisted a `RandomForestRegressor`, predicted
+  against new rows, confirmed a 10-tile dashboard and a populated
+  history log with correct filenames.
+
 ## 0095 — Phase 13.5 + 14: Auth pulled forward ahead of schedule, original components over a copied library, and treating a 3D sizing bug found in QA as a real defect
 
 - **Decision:** three choices define this phase:

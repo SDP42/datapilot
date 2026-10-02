@@ -1,8 +1,17 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { LayoutGrid, Sparkles, Rows3, Columns3, AlertTriangle, Wand2 } from "lucide-react";
+import {
+  LayoutGrid,
+  Sparkles,
+  Rows3,
+  Columns3,
+  AlertTriangle,
+  Wand2,
+  FileDown,
+  Printer,
+} from "lucide-react";
 
 import { PageHeader } from "@/components/layout/page-header";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -14,6 +23,7 @@ import { StatCard } from "@/components/ui/stat-card";
 import { Badge } from "@/components/ui/badge";
 import { NumericHistogramCard, CategoricalBarCard } from "@/components/ui/eda-charts";
 import { cn } from "@/lib/utils";
+import { downloadDashboardHtml, printDashboardPdf } from "@/lib/export";
 import { analyzeEda, ApiError, EdaReport } from "@/lib/api";
 
 export default function DashboardsPage() {
@@ -24,6 +34,8 @@ export default function DashboardsPage() {
   const [selected, setSelected] = useState<string[]>([]);
   const [tileCount, setTileCount] = useState(6);
   const [built, setBuilt] = useState(false);
+  const dashboardRef = useRef<HTMLDivElement>(null);
+  const [fileLabel, setFileLabel] = useState("dataset");
 
   const chartableColumns = useMemo(() => {
     if (!report) return [];
@@ -42,12 +54,12 @@ export default function DashboardsPage() {
     try {
       const data = await analyzeEda(file);
       setReport(data);
-      const defaultSelection = [...data.univariate.numeric, ...data.univariate.categorical]
-        .slice(0, 8)
-        .map((c) => c.column);
-      setSelected(defaultSelection);
-      setTileCount(Math.min(6, defaultSelection.length) || 1);
-      toast.success("Dataset analyzed — choose your categories below");
+      const allColumns = [...data.univariate.numeric, ...data.univariate.categorical].map(
+        (c) => c.column,
+      );
+      setSelected(allColumns);
+      setTileCount(allColumns.length || 1);
+      toast.success(`Dataset analyzed — all ${allColumns.length} chartable columns selected`);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Analysis failed");
     } finally {
@@ -56,9 +68,22 @@ export default function DashboardsPage() {
   }
 
   function toggleColumn(column: string) {
-    setSelected((prev) =>
-      prev.includes(column) ? prev.filter((c) => c !== column) : [...prev, column],
-    );
+    setSelected((prev) => {
+      const next = prev.includes(column) ? prev.filter((c) => c !== column) : [...prev, column];
+      setTileCount(next.length || 1);
+      return next;
+    });
+  }
+
+  function selectAll() {
+    const all = chartableColumns.map((c) => c.column);
+    setSelected(all);
+    setTileCount(all.length || 1);
+  }
+
+  function clearSelection() {
+    setSelected([]);
+    setTileCount(1);
   }
 
   const tiles = useMemo(() => {
@@ -91,7 +116,13 @@ export default function DashboardsPage() {
           <CardDescription>We run the deterministic EDA engine once and chart everything from it.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <FileDropzone file={file} onFileSelect={setFile} />
+          <FileDropzone
+            file={file}
+            onFileSelect={(f) => {
+              setFile(f);
+              if (f) setFileLabel(f.name.replace(/\.csv$/i, ""));
+            }}
+          />
           <Button onClick={handleAnalyze} disabled={!file} loading={loading}>
             <Sparkles className="h-4 w-4" /> Analyze dataset
           </Button>
@@ -107,6 +138,14 @@ export default function DashboardsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="secondary" size="sm" onClick={selectAll} type="button">
+                Select all ({chartableColumns.length})
+              </Button>
+              <Button variant="ghost" size="sm" onClick={clearSelection} type="button">
+                Clear
+              </Button>
+            </div>
             <div className="flex flex-wrap gap-2">
               {chartableColumns.map(({ column, kind }) => {
                 const active = selected.includes(column);
@@ -143,7 +182,8 @@ export default function DashboardsPage() {
                 />
               </div>
               <p className="pb-3 text-sm text-muted">
-                {selected.length} categor{selected.length === 1 ? "y" : "ies"} selected — showing the first{" "}
+                {selected.length} of {chartableColumns.length} categor
+                {chartableColumns.length === 1 ? "y" : "ies"} selected — dashboard will show{" "}
                 {Math.min(tileCount, selected.length)}.
               </p>
               <Button
@@ -179,12 +219,32 @@ export default function DashboardsPage() {
             />
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-xl font-semibold tracking-tight">Your dashboard</h2>
             <Badge variant="primary">{tiles.length} tiles</Badge>
+            <div className="ml-auto flex gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() =>
+                  dashboardRef.current && downloadDashboardHtml(dashboardRef.current, fileLabel)
+                }
+              >
+                <FileDown className="h-3.5 w-3.5" /> Download HTML
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() =>
+                  dashboardRef.current && printDashboardPdf(dashboardRef.current, fileLabel)
+                }
+              >
+                <Printer className="h-3.5 w-3.5" /> Download PDF
+              </Button>
+            </div>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <div ref={dashboardRef} className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {tiles.map((tile, i) =>
               tile.kind === "numeric" ? (
                 <NumericHistogramCard

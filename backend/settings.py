@@ -39,6 +39,16 @@ class Settings(BaseSettings):
     jwt_expire_minutes: int = 60 * 12
     cors_origins: list[str] = ["http://localhost:3000"]
 
+    # Phase 13.6 — where `routes.predictions` persists trained model
+    # artifacts (joblib pipeline + JSON metadata sidecar). Deliberately
+    # its own setting rather than `datapilot.paths.DATA_MODELS_DIR`
+    # directly, mirroring `dependencies.ingest_upload`'s own tempdir-
+    # scoped upload store — so tests (and alternate deployments) can
+    # redirect it without touching the repo's own `data/` directory.
+    # (Named `trained_model_dir`, not `model_*`, to avoid Pydantic's
+    # reserved `model_` field-name namespace.)
+    trained_model_dir: str = "data/models"
+
 
 @lru_cache
 def get_settings() -> Settings:

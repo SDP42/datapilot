@@ -52,7 +52,16 @@ from .models import (
     TrainingRun,
     TrainingRunStatus,
 )
-from .pipeline import run_modeling_pipeline
+from .persistence import (
+    PREDICTION_ENGINE_VERSION,
+    PersistedModelMetadata,
+    PredictionResult,
+    list_models,
+    load_model,
+    predict_with_model,
+    save_model,
+)
+from .pipeline import run_modeling_pipeline, train_and_persist_model
 from .readiness import (
     MODEL_READINESS_MIN_ROWS,
     MODEL_READINESS_ROWS_WARNING,
@@ -83,6 +92,8 @@ from .training import (
     MODEL_TRAINING_N_CLUSTERS,
     MODEL_TRAINING_RANDOM_SEED,
     MODEL_TRAINING_TREE_MAX_DEPTH,
+    FittedPipeline,
+    fit_final_pipeline,
     train_and_evaluate_models,
 )
 from .understanding import understand_modeling
@@ -106,11 +117,13 @@ __all__ = [
     "MODEL_TRAINING_N_CLUSTERS",
     "MODEL_TRAINING_RANDOM_SEED",
     "MODEL_TRAINING_TREE_MAX_DEPTH",
+    "PREDICTION_ENGINE_VERSION",
     "SMALL_DATA_TEST_FRACTION",
     "SMALL_DATA_TRAIN_FRACTION",
     "DataSplitPlan",
     "DataSplitStrategy",
     "EvaluationResults",
+    "FittedPipeline",
     "ModelCandidate",
     "ModelCandidates",
     "ModelFamily",
@@ -120,18 +133,26 @@ __all__ = [
     "ModelingRequest",
     "ModelingSpec",
     "ModelingStatus",
+    "PersistedModelMetadata",
+    "PredictionResult",
     "TrainingOutcome",
     "TrainingRun",
     "TrainingRunStatus",
     "assess_model_readiness",
     "build_calendar_features",
     "build_temporal_features",
+    "fit_final_pipeline",
     "generate_model_candidates",
+    "list_models",
+    "load_model",
+    "predict_with_model",
     "recommend_data_split",
     "run_modeling_pipeline",
+    "save_model",
     "select_model",
     "summarize_evaluation",
     "temporal_feature_spec",
     "train_and_evaluate_models",
+    "train_and_persist_model",
     "understand_modeling",
 ]

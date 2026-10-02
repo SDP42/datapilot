@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 def client(tmp_path, monkeypatch):
     db_path = tmp_path / "test.db"
     monkeypatch.setenv("DATAPILOT_DATABASE_URL", f"sqlite:///{db_path}")
+    monkeypatch.setenv("DATAPILOT_TRAINED_MODEL_DIR", str(tmp_path / "models"))
 
     from backend.settings import get_settings
     from backend.datapilot_api.db import get_engine

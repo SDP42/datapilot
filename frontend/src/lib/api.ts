@@ -100,6 +100,32 @@ export async function getJob(jobId: string) {
   return handle<JobRecord>(res);
 }
 
+export async function trainAndSaveModel(file: File, objective: string, forecastHorizon = 1) {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("objective", objective);
+  form.append("forecast_horizon", String(forecastHorizon));
+  return uploadForm<TrainAndSaveResponse>("/api/v1/predict/train", form);
+}
+
+export async function listTrainedModels() {
+  const res = await fetch(`${API_BASE}/api/v1/predict/models`, { headers: authHeaders() });
+  return handle<PersistedModelMetadata[]>(res);
+}
+
+export async function predictWithModel(modelId: string, file: File) {
+  const form = new FormData();
+  form.append("file", file);
+  return uploadForm<PredictionResult>(`/api/v1/predict/models/${modelId}/predict`, form);
+}
+
+export async function getHistory(limit = 50) {
+  const res = await fetch(`${API_BASE}/api/v1/history?limit=${limit}`, {
+    headers: authHeaders(),
+  });
+  return handle<ActivityRecord[]>(res);
+}
+
 export async function queryAnalytics(experimentIds: string[], sql: string) {
   const res = await fetch(`${API_BASE}/api/v1/analytics/experiments/query`, {
     method: "POST",
@@ -278,4 +304,43 @@ export interface JobRecord {
   updated_at: string;
   result: ModelingSpec | null;
   error: string | null;
+}
+
+export interface PersistedModelMetadata {
+  model_id: string;
+  dataset_id: string;
+  created_at: string;
+  family: string;
+  estimator_name: string;
+  category: "regression" | "classification" | "clustering";
+  target_column: string | null;
+  feature_cols: string[];
+  numeric_cols: string[];
+  categorical_cols: string[];
+  objective?: string | null;
+  selection_metric?: string | null;
+  selected_score?: number | null;
+  engine_version: string;
+}
+
+export interface TrainAndSaveResponse extends ModelingSpec {
+  model: PersistedModelMetadata | null;
+}
+
+export interface PredictionResult {
+  model_id: string;
+  row_count: number;
+  predictions: (number | string | boolean | null)[];
+  probabilities?: number[] | null;
+  missing_columns: string[];
+  notes: string[];
+}
+
+export interface ActivityRecord {
+  activity_id: string;
+  kind: "ingest" | "quality" | "eda" | "modeling" | "train" | "predict";
+  dataset_id: string;
+  dataset_filename?: string | null;
+  summary: string;
+  created_at: string;
 }

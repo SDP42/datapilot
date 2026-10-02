@@ -65,7 +65,7 @@ def create_all_tables(engine: Engine | None = None) -> None:
     (Alembic) is introduced in this increment; schema changes after this
     point are explicitly deferred (see `docs/decisions.md`).
     """
-    from . import job_models  # noqa: F401 - imported for its side effect of registering the table
+    from . import activity_models, job_models  # noqa: F401 - registers both tables
 
     Base.metadata.create_all(bind=engine or get_engine())
 

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import math
 import re
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
@@ -1059,5 +1060,125 @@ def _run_candidate(
         test_rows=int(test_idx.size),
         metrics=metrics,
         reason=None,
+        notes=notes,
+    )
+
+
+@dataclass(frozen=True)
+class FittedPipeline:
+    """A fitted, ready-to-persist scikit-learn pipeline plus the metadata
+    :func:`data_engine.modeling.persistence.save_model` needs to run it
+    again later on new, unseen rows.
+
+    Holds a live scikit-learn ``Pipeline`` object, so — unlike every other
+    result in :mod:`data_engine.modeling` — it is **not** JSON-primitive
+    and never crosses the Pydantic / HTTP boundary directly. It exists
+    only to hand off to the persistence layer.
+    """
+
+    pipeline: Any
+    estimator_name: str
+    family: ModelFamily
+    category: str
+    target_column: str | None
+    feature_cols: list[str]
+    numeric_cols: list[str]
+    categorical_cols: list[str]
+    notes: list[str] = field(default_factory=list)
+
+
+def fit_final_pipeline(
+    df: pd.DataFrame,
+    problem: ProblemSpec,
+    feature_engineering: FeatureEngineeringSpec,
+    family: ModelFamily,
+) -> FittedPipeline:
+    """Refit the chosen candidate family's baseline pipeline on *all*
+    available rows, for persistence and later inference.
+
+    This is the **only** function in Phase 7 allowed to return a live,
+    fitted estimator — every evaluation path (:func:`train_and_evaluate_models`)
+    deliberately keeps its fitted pipelines train/test-split-scoped and
+    JSON-primitive-only. Standard practice once a family has been chosen
+    from held-out evaluation: refit on the full dataset for the artifact
+    that actually gets deployed. Reuses the exact same estimator mapping
+    (:func:`_build_estimator`) and preprocessing construction
+    (:func:`_build_preprocessor`) as evaluation, so the fitted pipeline is
+    built identically to the one whose metrics were reported — nothing
+    about the model definition is reinvented here.
+
+    Raises ``ValueError`` if the task type / feature set makes training
+    impossible (mirrors the same preconditions :func:`train_and_evaluate_models`
+    checks, surfaced as an exception here since there is no ``TrainingRun``
+    to carry an ``unavailable`` status).
+    """
+    if not _SKLEARN_AVAILABLE:
+        raise ValueError("scikit-learn is not available in this environment")
+
+    task_inference = problem.task_type
+    if task_inference.status is not _PU_COMPLETED or task_inference.task_type is None:
+        raise ValueError("task-type inference is not completed")
+    task = task_inference.task_type
+    if task in _UNSUPPORTED_TASKS:
+        raise ValueError(f"model training does not support task type '{task.value}'")
+    category = _TASK_CATEGORY[task]
+    is_supervised = category in {"regression", "classification"}
+
+    df_columns = [str(c) for c in df.columns]
+    column_set = set(df_columns)
+    target_column = problem.target.target_column if is_supervised else None
+
+    col_type = {c.column: c.column_type for c in feature_engineering.inventory.candidates}
+    eligible = [
+        c for c in _eligible_features(feature_engineering) if c in column_set and c != target_column
+    ]
+    numeric_cols = sorted(
+        c for c in eligible if col_type.get(c) in (ColumnType.NUMERIC, ColumnType.BOOLEAN)
+    )
+    categorical_cols = sorted(c for c in eligible if col_type.get(c) is ColumnType.CATEGORICAL)
+    feature_cols = sorted(numeric_cols + categorical_cols)
+    if not feature_cols:
+        raise ValueError("no usable numeric / categorical feature columns are available")
+
+    built = _build_estimator(family, category)
+    if built is None:
+        raise ValueError(
+            f"no dependency-light baseline estimator is defined for the '{family.value}' "
+            f"family on a {category} task"
+        )
+    estimator_name, estimator = built
+
+    req_by_col: dict[str, set[str]] = {}
+    for requirement in feature_engineering.preprocessing.requirements:
+        req_by_col.setdefault(requirement.column, set()).add(requirement.description)
+    preprocessor, preproc_error = _build_preprocessor(numeric_cols, categorical_cols, req_by_col)
+    if preproc_error is not None:
+        raise ValueError(preproc_error)
+
+    from sklearn.pipeline import Pipeline
+
+    x_all = df[feature_cols]
+    pipeline = Pipeline([("preprocess", preprocessor), ("model", estimator)])
+    notes = [
+        f"refit on all {len(df)} available rows after family '{family.value}' was selected "
+        "from held-out evaluation; see the ModelingSpec that produced this selection for "
+        "the metrics that justified it",
+        f"random seed: {MODEL_TRAINING_RANDOM_SEED} (fixed)",
+    ]
+    if category == "clustering":
+        pipeline.fit(x_all)
+    else:
+        y_all = df[target_column].to_numpy()
+        pipeline.fit(x_all, y_all)
+
+    return FittedPipeline(
+        pipeline=pipeline,
+        estimator_name=estimator_name,
+        family=family,
+        category=category,
+        target_column=target_column,
+        feature_cols=feature_cols,
+        numeric_cols=numeric_cols,
+        categorical_cols=categorical_cols,
         notes=notes,
     )
