@@ -2573,6 +2573,57 @@ Phase-7/8 entry point.
   linear ones) rather than linear always winning.
 - **Decision:** 0101.
 
+#### Phase 14.7 — Opt-In K-Fold Cross-Validation for the Expanded Search — **Done**
+- **Scope:** "do more backend and proper accuracy and all r2 and all that
+  is needed" — the expanded search (Phase 7.7) ranked every candidate by
+  a single train/test split score, which is a known-unreliable, high-
+  variance estimate of how a model actually generalizes. The fix is
+  genuine k-fold cross-validation, not a cosmetic change.
+- **`run_expanded_search` gained `use_cross_validation: bool = False`**
+  (`data_engine/modeling/training.py`) — opt-in because it multiplies
+  runtime by roughly the fold count (measured: 5.39s without CV vs
+  30.69s with CV for the same 102-candidate classification search).
+  When enabled, every candidate is *also* scored with a fixed 5-fold
+  `KFold` (regression) or `StratifiedKFold` (classification) — shuffled
+  with the same fixed `MODEL_TRAINING_RANDOM_SEED = 42` this module
+  always uses — over the full dataset for the selection metric
+  (`cross_val_score` with `neg_root_mean_squared_error` for RMSE,
+  `f1_macro` for F1), reporting `cv_<metric>_mean` and
+  `cv_<metric>_std` alongside every other metric. Candidates are then
+  ranked by the cross-validated mean instead of the single-split score,
+  since it's the more reliable number. A candidate for which CV itself
+  fails (e.g. too few members of a class to stratify) keeps its single-
+  split result with no `cv_*` metrics — never dropped or marked failed
+  over this.
+- **`ExpandedSearchResult.cross_validation_enabled: bool`**
+  (`data_engine/modeling/models.py`) and pass-through
+  `use_cross_validation` param on `run_expanded_model_search`
+  (`data_engine/modeling/pipeline.py`) — lets callers and the UI know
+  whether the ranking in front of them is single-split or cross-
+  validated without inspecting individual candidate metrics.
+- **`/api/v1/modeling/search` gained `cross_validate: bool = Form(default=False)`**
+  (`backend/datapilot_api/routes/modeling.py`), passed straight through;
+  the activity-log summary appends "(cross-validated)" when used.
+- **Modeling page: a "5-fold cross-validation (more reliable accuracy
+  estimate, ~5x slower)" checkbox** next to the "Run full model search"
+  button (`frontend/src/app/dashboard/modeling/page.tsx`), wired into
+  `runModelSearch(file, objective, crossValidate)`
+  (`frontend/src/lib/api.ts`). When a search ran with CV, the "Ranked
+  by" StatCard, the best-candidate callout, and the results table all
+  switch to showing `cv_<metric>_mean`/`cv_<metric>_std` instead of the
+  single-split metric, so the more reliable number is what's actually
+  displayed, not buried in a column.
+- **Quality gates:** `pytest` full suite 2155 passed / 3 skipped (3 new
+  tests: CV disabled by default with no `cv_*` keys present, CV enabled
+  adds `cv_f1_mean`/`cv_f1_std` and reranks by them, and an end-to-end
+  `/search` endpoint test with `cross_validate=true` asserting
+  `cross_validation_enabled: true` and `cv_rmse_mean`/`cv_rmse_std` on
+  the response); `ruff` / `ruff format` / `mypy` (176 source files) all
+  green. Frontend: `tsc --noEmit` clean, `eslint` clean, `next build`
+  succeeds (14 routes, unchanged). Verified live in a real browser: the
+  checkbox renders and toggles correctly on the modeling page.
+- **Decision:** 0102.
+
 ### Phase 15 — MLOps / Monitoring
 - **Objective:** operate models in production.
 - **Components:** model/data versioning, drift and performance monitoring,

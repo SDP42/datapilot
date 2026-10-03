@@ -334,9 +334,11 @@ def train_and_persist_model(
     return spec, metadata
 
 
-def run_expanded_model_search(df: pd.DataFrame, request: ModelingRequest) -> ExpandedSearchResult:
+def run_expanded_model_search(
+    df: pd.DataFrame, request: ModelingRequest, *, use_cross_validation: bool = False
+) -> ExpandedSearchResult:
     """Phase 7.7: fit and rank every candidate in the expanded catalog
-    (20+ (estimator, hyperparameter) combinations) for this dataset.
+    (100+ (estimator, hyperparameter) combinations) for this dataset.
 
     A **composition layer only**: reuses this module's own
     ``_build_problem_spec`` / ``_build_feature_engineering_spec`` (the
@@ -344,7 +346,8 @@ def run_expanded_model_search(df: pd.DataFrame, request: ModelingRequest) -> Exp
     Phase-7.2/7.3 ``assess_model_readiness`` / ``recommend_data_split``,
     then hands off to :func:`data_engine.modeling.training.run_expanded_search`
     for the actual fitting/evaluation/ranking — nothing here is
-    reimplemented.
+    reimplemented. ``use_cross_validation`` is passed straight through;
+    see that function's own docstring for what it changes.
     """
     problem = _build_problem_spec(df, request)
     feature_engineering = _build_feature_engineering_spec(df, request, problem)
@@ -353,5 +356,11 @@ def run_expanded_model_search(df: pd.DataFrame, request: ModelingRequest) -> Exp
     )
     split = recommend_data_split(df, problem, feature_engineering, objective=request.objective)
     return run_expanded_search(
-        df, problem, feature_engineering, readiness, split, objective=request.objective
+        df,
+        problem,
+        feature_engineering,
+        readiness,
+        split,
+        objective=request.objective,
+        use_cross_validation=use_cross_validation,
     )

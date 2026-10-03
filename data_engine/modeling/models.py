@@ -528,5 +528,11 @@ class ExpandedSearchResult(BaseModel):
     total_fit_seconds: float = Field(
         default=0.0, description="Sum of every candidate's fit_seconds — the real wall-clock cost."
     )
+    cross_validation_enabled: bool = Field(
+        default=False,
+        description="True iff candidates were also scored with k-fold cross-validation "
+        "(see each candidate's cv_<metric>_mean / cv_<metric>_std) and ranked by that "
+        "instead of the single train/test split score.",
+    )
     candidates: list[ExpandedCandidateResult] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)

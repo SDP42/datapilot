@@ -62,22 +62,31 @@ async def run(
 async def search(
     file: UploadFile,
     objective: str = Form(...),
+    cross_validate: bool = Form(default=False),
     session: Session = Depends(get_session),
 ) -> ExpandedSearchResult:
     """Ingest an uploaded CSV and fit + rank every candidate in the Phase 7.7
     expanded catalog (100+ (estimator, hyperparameter) combinations), not
     just one baseline per family. Slower than `/run` — every candidate is
     its own fit — but returns the full ranked field for comparison.
+
+    `cross_validate=true` additionally scores every candidate with 5-fold
+    cross-validation and ranks by that more reliable estimate instead of
+    the single train/test split score — roughly 5x slower, since each
+    candidate is fit that many more times.
     """
     reference, df = await ingest_upload(file)
     request = ModelingRequest(dataset_id=reference.dataset_id, objective=objective)
-    result = run_expanded_model_search(df, request)
+    result = run_expanded_model_search(df, request, use_cross_validation=cross_validate)
     _activity.record(
         session,
         kind="search",
         dataset_id=reference.dataset_id,
         dataset_filename=reference.original_filename,
-        summary=f"status={result.status.value}; {result.candidate_count} candidates ranked",
+        summary=(
+            f"status={result.status.value}; {result.candidate_count} candidates ranked"
+            f"{' (cross-validated)' if cross_validate else ''}"
+        ),
     )
     return result
 

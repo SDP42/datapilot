@@ -34,6 +34,7 @@ export default function ModelingPage() {
 
   const [searching, setSearching] = useState(false);
   const [search, setSearch] = useState<ExpandedSearchResult | null>(null);
+  const [crossValidate, setCrossValidate] = useState(false);
 
   async function handleRun() {
     if (!file || !objective) return;
@@ -53,10 +54,14 @@ export default function ModelingPage() {
     if (!file || !objective) return;
     setSearching(true);
     try {
-      const data = await runModelSearch(file, objective);
+      const data = await runModelSearch(file, objective, crossValidate);
       setSearch(data);
       if (data.status === "completed") {
-        toast.success(`${data.candidate_count} candidates trained and ranked`);
+        toast.success(
+          data.cross_validation_enabled
+            ? `${data.candidate_count} candidates trained and cross-validated`
+            : `${data.candidate_count} candidates trained and ranked`,
+        );
       } else {
         toast.warning(data.reason ?? "Model search could not complete");
       }
@@ -74,9 +79,10 @@ export default function ModelingPage() {
       for (const k of Object.keys(c.metrics)) present.add(k);
     }
     const order = present.has("rmse") ? REGRESSION_METRIC_ORDER : CLASSIFICATION_METRIC_ORDER;
+    const cvOrder = [...present].filter((k) => k.startsWith("cv_")).sort();
     const ordered = order.filter((k) => present.has(k));
-    const rest = [...present].filter((k) => !ordered.includes(k));
-    return [...ordered, ...rest];
+    const rest = [...present].filter((k) => !ordered.includes(k) && !cvOrder.includes(k));
+    return [...ordered, ...cvOrder, ...rest];
   }, [search]);
 
   const bestCandidate = search?.candidates.find((c) => c.rank === 1) ?? null;
@@ -125,11 +131,22 @@ export default function ModelingPage() {
               <Layers className="h-4 w-4" /> Run full model search (100+ candidates)
             </Button>
           </div>
+          <label className="flex items-center gap-2 text-sm text-muted">
+            <input
+              type="checkbox"
+              checked={crossValidate}
+              onChange={(e) => setCrossValidate(e.target.checked)}
+              className="h-4 w-4 rounded border-surface-border accent-[var(--primary)]"
+            />
+            5-fold cross-validation (more reliable accuracy estimate, ~5x slower)
+          </label>
           <p className="text-xs text-muted">
             The pipeline above fits one baseline per family. Full search fits every
             (estimator, hyperparameter) combination in the Phase 7.7 catalog — 100+ candidates,
             each with real fit timing and every metric shown, not just the selection metric — and
-            ranks all of them by a fixed hyperparameter grid per family.
+            ranks all of them by a fixed hyperparameter grid per family. A single train/test split
+            can be an unreliable estimate of real-world accuracy; enabling cross-validation scores
+            every candidate across 5 folds and ranks by that averaged result instead.
           </p>
         </CardContent>
       </Card>
@@ -150,7 +167,11 @@ export default function ModelingPage() {
             <StatCard
               icon={<Sparkles className="h-5 w-5" />}
               label="Ranked by"
-              value={search.selection_metric ?? "—"}
+              value={
+                search.cross_validation_enabled
+                  ? `cv_${search.selection_metric}_mean`
+                  : (search.selection_metric ?? "—")
+              }
             />
             <StatCard
               icon={<Trophy className="h-5 w-5" />}
@@ -168,7 +189,11 @@ export default function ModelingPage() {
                 </CardTitle>
                 <CardDescription>
                   This is the hyperparameter-tuning result — every candidate below was fit with a
-                  different, fixed configuration; this one scored best on {search.selection_metric}.
+                  different, fixed configuration; this one scored best on{" "}
+                  {search.cross_validation_enabled
+                    ? `cv_${search.selection_metric}_mean (5-fold cross-validated)`
+                    : search.selection_metric}
+                  .
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex flex-wrap items-center gap-3">
@@ -179,10 +204,23 @@ export default function ModelingPage() {
                     .map(([k, v]) => `${k}=${Array.isArray(v) ? `[${v.join(",")}]` : v}`)
                     .join(", ") || "default hyperparameters"}
                 </span>
-                <Badge variant="success">
-                  {search.selection_metric}:{" "}
-                  {bestCandidate.metrics[search.selection_metric ?? ""]?.toFixed(4) ?? "—"}
-                </Badge>
+                {search.cross_validation_enabled &&
+                bestCandidate.metrics[`cv_${search.selection_metric}_mean`] !== undefined ? (
+                  <>
+                    <Badge variant="success">
+                      cv_{search.selection_metric}_mean:{" "}
+                      {bestCandidate.metrics[`cv_${search.selection_metric}_mean`]?.toFixed(4)}
+                    </Badge>
+                    <Badge variant="default">
+                      ±{bestCandidate.metrics[`cv_${search.selection_metric}_std`]?.toFixed(4) ?? "—"}
+                    </Badge>
+                  </>
+                ) : (
+                  <Badge variant="success">
+                    {search.selection_metric}:{" "}
+                    {bestCandidate.metrics[search.selection_metric ?? ""]?.toFixed(4) ?? "—"}
+                  </Badge>
+                )}
                 <span className="ml-auto text-xs text-muted">
                   fit in {bestCandidate.fit_seconds.toFixed(3)}s
                 </span>

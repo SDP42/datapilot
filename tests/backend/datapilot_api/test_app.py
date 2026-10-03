@@ -114,3 +114,20 @@ def test_modeling_search_requires_auth(client, sample_csv_bytes):
     files = {"file": ("data.csv", io.BytesIO(sample_csv_bytes), "text/csv")}
     response = client.post("/api/v1/modeling/search", files=files, data={"objective": "predict y"})
     assert response.status_code == 401
+
+
+def test_modeling_search_cross_validate_adds_cv_metrics(client, auth_headers, sample_csv_bytes):
+    files = {"file": ("data.csv", io.BytesIO(sample_csv_bytes), "text/csv")}
+    response = client.post(
+        "/api/v1/modeling/search",
+        files=files,
+        data={"objective": "predict y", "cross_validate": "true"},
+        headers=auth_headers,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "completed"
+    assert body["cross_validation_enabled"] is True
+    with_cv = [c for c in body["candidates"] if "cv_rmse_mean" in c["metrics"]]
+    assert len(with_cv) > 0
+    assert all("cv_rmse_std" in c["metrics"] for c in with_cv)

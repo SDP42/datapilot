@@ -4,6 +4,50 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0102 — Phase 14.7: real k-fold cross-validation, opt-in rather than always-on
+
+- **Decision:** "proper accuracy" was answered by implementing genuine
+  k-fold cross-validation (`KFold`/`StratifiedKFold` + `cross_val_score`,
+  5 folds, the same fixed `MODEL_TRAINING_RANDOM_SEED = 42` this module
+  always uses) as an *opt-in* addition (`use_cross_validation: bool =
+  False`) to the expanded search, rather than either (a) leaving the
+  single train/test split as the only option, or (b) always running CV
+  by default. When enabled, every candidate gets `cv_<metric>_mean` /
+  `cv_<metric>_std` alongside its single-split metrics, and ranking
+  switches to the cross-validated mean. A candidate for which CV itself
+  fails (e.g. too few members of a class to stratify) simply keeps its
+  single-split result rather than being dropped or marked failed.
+- **Reason:** a single train/test split is a known-unreliable, high-
+  variance estimator of how a model generalizes — averaging a metric
+  over several folds is the standard statistical fix, and was the
+  literal, correct way to make the accuracy numbers more trustworthy
+  rather than arguing the existing split-based numbers were already
+  fine. Opt-in (not default) because CV multiplies runtime by roughly
+  the fold count — measured 5.39s without CV vs 30.69s with CV for the
+  same 102-candidate classification search — and the existing fast path
+  (and its test expectations) is still the right default for quick
+  iteration; CV is for when the user specifically wants the more
+  rigorous number.
+- **Alternatives considered:** always running CV by default (rejected —
+  ~5-6x slower on every search, including the common fast-iteration
+  case, for a rigor improvement not every search needs);
+  `GridSearchCV`/`RandomizedSearchCV` style adaptive hyperparameter
+  search (rejected — breaks this module's deliberate choice of fixed,
+  reproducible hyperparameter grids with one fixed random seed, a
+  decision already made and documented for the Phase 7.7 catalog);
+  silently dropping a candidate whose CV fails (rejected — a transient
+  stratification failure on one candidate shouldn't erase an otherwise
+  valid single-split result).
+- **Consequence:** `run_expanded_search`/`run_expanded_model_search` take
+  a `use_cross_validation` flag, `ExpandedSearchResult` carries
+  `cross_validation_enabled`, `/api/v1/modeling/search` accepts
+  `cross_validate`, and the modeling page has a checkbox that switches
+  the StatCards, best-candidate callout, and results table over to the
+  cross-validated metrics when used. Quality gates: `pytest` 2155 passed
+  / 3 skipped (3 new tests); `ruff` / `ruff format` / `mypy` all green;
+  frontend `tsc` / `eslint` clean, `next build` succeeds; checkbox
+  verified rendering and toggling live in the browser.
+
 ## 0101 — Phase 14.6: real timing over a reassurance, showing every metric instead of arguing linear isn't always best
 
 - **Decision:** two choices define this increment:

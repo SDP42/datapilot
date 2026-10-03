@@ -87,10 +87,11 @@ export async function runModeling(file: File, objective: string, forecastHorizon
   return uploadForm<ModelingSpec>("/api/v1/modeling/run", form);
 }
 
-export async function runModelSearch(file: File, objective: string) {
+export async function runModelSearch(file: File, objective: string, crossValidate = false) {
   const form = new FormData();
   form.append("file", file);
   form.append("objective", objective);
+  form.append("cross_validate", String(crossValidate));
   return uploadForm<ExpandedSearchResult>("/api/v1/modeling/search", form);
 }
 
@@ -364,6 +365,7 @@ export interface ExpandedSearchResult {
   selection_metric?: string | null;
   candidate_count: number;
   total_fit_seconds: number;
+  cross_validation_enabled: boolean;
   candidates: ExpandedCandidateResult[];
   notes: string[];
 }

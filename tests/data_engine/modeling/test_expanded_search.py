@@ -104,6 +104,39 @@ def test_run_expanded_model_search_classification_ranks_by_f1_descending():
     } <= families
 
 
+def test_cross_validation_disabled_by_default():
+    df = _regression_df()
+    request = ModelingRequest(dataset_id="ds-reg", objective="predict price")
+    result = run_expanded_model_search(df, request)
+
+    assert result.cross_validation_enabled is False
+    for c in result.candidates:
+        assert not any(k.startswith("cv_") for k in c.metrics)
+
+
+def test_cross_validation_adds_cv_metrics_and_reranks_by_them():
+    df = _binary_df()
+    request = ModelingRequest(dataset_id="ds-bin", objective="predict churn")
+    result = run_expanded_model_search(df, request, use_cross_validation=True)
+
+    assert result.status is ModelingStatus.COMPLETED
+    assert result.cross_validation_enabled is True
+    assert result.candidate_count > 100
+
+    completed = [c for c in result.candidates if c.status is TrainingRunStatus.COMPLETED]
+    with_cv = [c for c in completed if "cv_f1_mean" in c.metrics]
+    assert len(with_cv) > 0
+
+    for c in with_cv:
+        assert "cv_f1_std" in c.metrics
+        assert 0.0 <= c.metrics["cv_f1_mean"] <= 1.0
+        assert c.metrics["cv_f1_std"] >= 0.0
+
+    # ranked by cv_f1_mean descending among candidates that have it
+    cv_means = [c.metrics["cv_f1_mean"] for c in with_cv]
+    assert cv_means == sorted(cv_means, reverse=True)
+
+
 def test_run_expanded_search_too_little_data_is_unavailable():
     df = _tiny_df()
     request = ModelingRequest(dataset_id="ds-tiny", objective="predict y")

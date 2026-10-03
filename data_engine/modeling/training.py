@@ -1703,6 +1703,13 @@ def _expanded_catalog(category: str) -> list[_CandidateSpec]:
     return specs
 
 
+_CV_FOLDS = 5
+_CV_SCORING: dict[str, str] = {
+    "rmse": "neg_root_mean_squared_error",
+    "f1": "f1_macro",
+}
+
+
 def run_expanded_search(
     df: pd.DataFrame,
     problem: ProblemSpec,
@@ -1711,9 +1718,10 @@ def run_expanded_search(
     split: DataSplitPlan,
     *,
     objective: str | None = None,
+    use_cross_validation: bool = False,
 ) -> ExpandedSearchResult:
     """Fit and evaluate every candidate in Phase 7.7's expanded catalog —
-    20+ concrete (estimator, hyperparameter) combinations, not one
+    100+ concrete (estimator, hyperparameter) combinations, not one
     baseline per family — and return every result, ranked.
 
     This is the **hyperparameter-tuning entry point**: every candidate is
@@ -1725,6 +1733,21 @@ def run_expanded_search(
     uses. Unlike Phase 7.4/7.5 (one estimator per family, one winner
     surfaced), this returns **every** candidate's result so a caller can
     compare the full field, not just the one DataPilot would have picked.
+
+    ``use_cross_validation`` (default ``False``, since it multiplies
+    runtime by roughly ``_CV_FOLDS``): when ``True``, every candidate
+    *also* gets a fixed ``_CV_FOLDS``-fold cross-validation score for the
+    selection metric (``KFold`` for regression, ``StratifiedKFold`` for
+    classification; shuffled with the one fixed random seed this module
+    always uses) over the *full* dataset — a single train/test split can
+    be an unreliable, high-variance estimate of how a model generalizes;
+    averaging over several folds is the standard fix. When enabled,
+    candidates are ranked by the cross-validated mean instead of the
+    single-split score, since it is the more reliable number. A
+    candidate for which cross-validation itself fails (e.g. a class with
+    too few members to stratify) keeps its single-split result and
+    simply has no ``cv_*`` metrics — it is never dropped or marked
+    failed over this.
 
     Supervised tasks only (regression / classification) — clustering and
     unsupported task types return ``status = unavailable``.
@@ -1807,6 +1830,18 @@ def run_expanded_search(
     x_train, x_test = x_all.iloc[train_idx], x_all.iloc[test_idx]
     y_train, y_test = y_all[train_idx], y_all[test_idx]
 
+    cv_splitter = None
+    if use_cross_validation and selection_metric in _CV_SCORING:
+        from sklearn.model_selection import KFold, StratifiedKFold
+
+        cv_splitter = (
+            KFold(n_splits=_CV_FOLDS, shuffle=True, random_state=MODEL_TRAINING_RANDOM_SEED)
+            if category == "regression"
+            else StratifiedKFold(
+                n_splits=_CV_FOLDS, shuffle=True, random_state=MODEL_TRAINING_RANDOM_SEED
+            )
+        )
+
     for spec in catalog:
         candidate_start = _perf_counter()
         try:
@@ -1828,7 +1863,29 @@ def run_expanded_search(
                 metrics = _classification_metrics(
                     y_test, y_pred, proba, n_classes=len(np.unique(y_train))
                 )
-            score = metrics.get(selection_metric) if selection_metric else None
+
+            cv_mean: float | None = None
+            if cv_splitter is not None and selection_metric is not None:
+                try:
+                    from sklearn.model_selection import cross_val_score
+
+                    scoring = _CV_SCORING[selection_metric]
+                    cv_scores = cross_val_score(
+                        pipeline, x_all, y_all, cv=cv_splitter, scoring=scoring
+                    )
+                    cv_mean = float(
+                        -cv_scores.mean() if scoring.startswith("neg_") else cv_scores.mean()
+                    )
+                    metrics[f"cv_{selection_metric}_mean"] = _round(cv_mean)
+                    metrics[f"cv_{selection_metric}_std"] = _round(float(cv_scores.std()))
+                except Exception:  # noqa: BLE001 - CV is a best-effort addition, never fatal
+                    cv_mean = None
+
+            score = (
+                cv_mean
+                if cv_mean is not None
+                else (metrics.get(selection_metric) if selection_metric else None)
+            )
             results.append(
                 (
                     ExpandedCandidateResult(
@@ -1871,25 +1928,44 @@ def run_expanded_search(
         result.model_copy(update={"rank": i + 1}) for i, (result, _score) in enumerate(results)
     ]
 
+    cv_active = cv_splitter is not None
     return ExpandedSearchResult(
         status=ModelingStatus.COMPLETED,
         task_type=task.value,
         selection_metric=selection_metric,
         candidate_count=len(ranked),
         total_fit_seconds=round(sum(r.fit_seconds for r, _ in results), 4),
+        cross_validation_enabled=cv_active,
         candidates=ranked,
         notes=[
             f"{len(catalog)} (estimator, hyperparameter) candidates from the fixed Phase 7.7 "
-            "catalog, each fit once on a single train/test split (no cross-validation) — "
-            "see each candidate's own metrics for its test-partition performance",
-            f"ranked by '{selection_metric}' ({direction})" if selection_metric else "unranked",
+            "catalog, each fit once on a single train/test split — see each candidate's own "
+            "metrics for its test-partition performance"
+            + (
+                f"; additionally scored with {_CV_FOLDS}-fold cross-validation "
+                f"(cv_{selection_metric}_mean / cv_{selection_metric}_std on each candidate) "
+                "and ranked by that more reliable estimate instead"
+                if cv_active
+                else " (no cross-validation this run)"
+            ),
+            (
+                f"ranked by {'cross-validated ' if cv_active else ''}'{selection_metric}' "
+                f"({direction})"
+                if selection_metric
+                else "unranked"
+            ),
             f"random seed: {MODEL_TRAINING_RANDOM_SEED} (fixed)",
             "fit_seconds on every candidate and total_fit_seconds here are real wall-clock "
-            "timings, not estimates — these are classical scikit-learn estimators on a single "
-            "train/test split (no cross-validation, no deep learning), which is why 100+ "
-            "candidates typically complete in single-digit seconds on a dataset of a few "
-            "hundred to a few thousand rows; a slower or much larger dataset will show "
-            "correspondingly larger fit_seconds values here",
+            "timings, not estimates — these are classical scikit-learn estimators"
+            + (
+                f", each cross-validated over {_CV_FOLDS} folds this run, which is why "
+                "fit_seconds is noticeably larger than a single-split-only run would show"
+                if cv_active
+                else " on a single train/test split (no cross-validation, no deep learning), "
+                "which is why 100+ candidates typically complete in single-digit seconds on a "
+                "dataset of a few hundred to a few thousand rows; a slower or much larger "
+                "dataset will show correspondingly larger fit_seconds values here"
+            ),
             "no model artifact was persisted here; use "
             "data_engine.modeling.persistence.save_model with fit_final_pipeline (or an "
             "expanded-search-specific fit) to persist a chosen candidate",
