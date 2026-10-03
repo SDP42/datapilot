@@ -3072,6 +3072,43 @@ Phase-7/8 entry point.
   layer is added.
 - **Decision:** 0109.
 
+#### Phase 14.15 — Dashboard Builder: Cross-Filtering — **Done**
+- **Scope:** "power bi dashboard more good" was clarified via a direct
+  multi-choice question; the user picked cross-filtering specifically —
+  clicking a bar/slice/tile on one visual filters every other visual on
+  the same dashboard, the signature power-BI-feel interaction the
+  Dashboard Builder (Phase 14.5/14.6) didn't have yet.
+- **`components/ui/eda-charts.tsx`'s `CategoricalBarCard` /
+  `CategoricalTreemapCard`** gained optional `onValueClick` /
+  `activeValues` props — clicking a bar, pie slice, or treemap tile
+  calls `onValueClick(value)`; `activeValues` dims (30% opacity)
+  every non-selected mark and outlines the selected one, so the active
+  cross-filter is visible on the chart itself, not just in the slicer
+  row. Both props are optional and default to inert — the EDA page's
+  own (unfiltered) use of these same components is unaffected.
+  Clicking an already-selected mark toggles it back off.
+- **`app/dashboard/dashboards/page.tsx`** wires `onValueClick` to the
+  *existing* `toggleCategorical(column, value)` function — the exact
+  function the six slicers already call — so a chart click and a
+  slicer click are indistinguishable to the rest of the page: the same
+  `filters.categorical` state, the same `filteredRows` recomputation,
+  the same "Clear all filters" button. No new filter mechanism was
+  built; the slicers' own plumbing was simply given a second entry
+  point.
+- **Quality gates:** no backend changes (purely client-side); `tsc
+  --noEmit` clean, `eslint` clean, `next build` succeeds (19 routes,
+  unchanged). Verified live in a real browser end to end: injected a
+  synthetic 200-row sales CSV via a `DataTransfer`-constructed `File`
+  (the browser pane used for manual verification has no native file
+  picker), generated a dashboard, clicked the "East" slice of the
+  region pie chart, and confirmed — the pie narrowed to one slice
+  ("East: 50"), the adjacent numeric histogram's bucket ranges
+  recomputed from the filtered rows, the "region" slicer pill lit up
+  as selected, the "Top region" KPI updated to "East", and a "Clear
+  all filters" control appeared — the full chain from one chart click
+  to every other visual on the dashboard updating.
+- **Decision:** 0110.
+
 ### Phase 15 — MLOps / Monitoring
 - **Objective:** operate models in production.
 - **Components:** model/data versioning, drift and performance monitoring,

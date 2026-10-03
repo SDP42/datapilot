@@ -441,9 +441,12 @@ function BiDashboardPanel({
 
       {/* Row 4 — Charts */}
       <div>
-        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">
-          Breakdown
-        </h3>
+        <div className="mb-2 flex items-center gap-2">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted">Breakdown</h3>
+          <span className="text-[11px] text-muted">
+            — click a bar, slice, or tile to cross-filter every visual on this dashboard
+          </span>
+        </div>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {insight && scatterPoints.length > 0 && (
             <ScatterCorrelationCard
@@ -460,12 +463,16 @@ function BiDashboardPanel({
               <CategoricalTreemapCard
                 key={col}
                 cat={computeCategoricalAnalysis(filteredRows, col, filters.topN)}
+                onValueClick={(v) => toggleCategorical(col, v)}
+                activeValues={filters.categorical[col] ?? []}
               />
             ) : (
               <CategoricalBarCard
                 key={col}
                 cat={computeCategoricalAnalysis(filteredRows, col, filters.topN)}
                 variant={i % 2 === 0 ? "bar" : "pie"}
+                onValueClick={(v) => toggleCategorical(col, v)}
+                activeValues={filters.categorical[col] ?? []}
               />
             ),
           )}

@@ -4,6 +4,42 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0110 — Phase 14.15: cross-filtering reuses the slicers' own state function rather than inventing a parallel one
+
+- **Decision:** a chart click and a slicer click write to the exact same
+  `filters.categorical` state through the exact same `toggleCategorical`
+  function — the chart components just gained a second way to call it.
+  No separate "chart selection" state, no new filter-merging logic, no
+  second code path for "clear all."
+- **Reason:** the slicers already had a fully correct, tested
+  categorical-filter mechanism (`toggleCategorical` → `filters.categorical`
+  → `applyAllFilters` → `filteredRows`, which every chart on the page
+  already reads from). Cross-filtering **is** categorical filtering,
+  triggered from a different UI surface — treating it as a separate
+  concept would have meant either reconciling two filter states on every
+  render, or the "Clear all filters" button not actually clearing a
+  chart-originated selection. Reusing the existing function made the
+  entire feature a prop-threading change, not a new state-management
+  problem.
+- **Alternatives considered:** a dedicated "clicked segment" highlight
+  state kept separate from the slicer filters, merged only at render
+  time (rejected — two sources of truth for "what's currently selected"
+  is exactly the kind of drift this project's `_prepare_supervised_run`/
+  `build_problem_spec` decisions in the same session were made to avoid,
+  just in the frontend instead of the backend); scoping cross-filter
+  clicks to only affect charts *other* than the one clicked, leaving the
+  clicked chart itself always showing unfiltered data (rejected — every
+  other BI tool's convention, and this project's own slicers, show the
+  active selection highlighted *in place*, not hidden from the chart
+  that set it).
+- **Consequence:** `eda-charts.tsx`'s two categorical chart components
+  gained optional, backward-compatible props; `dashboards/page.tsx`
+  wires them to the pre-existing `toggleCategorical`. No backend change.
+  Quality gates: frontend `tsc` / `eslint` / `next build` all clean;
+  verified live — a chart click correctly updated the slicer pill, the
+  KPI row, another chart's bucket ranges, and the "Clear all filters"
+  control, confirming one shared state rather than two reconciled ones.
+
 ## 0109 — Phase 14.14: promote two composition helpers to public rather than duplicate them; never fabricate the diagram's endpoint counts
 
 - **Decision:** two choices define this increment:

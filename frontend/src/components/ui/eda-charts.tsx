@@ -93,11 +93,21 @@ export function NumericHistogramCard({ dist }: { dist: NumericDistribution }) {
 export function CategoricalBarCard({
   cat,
   variant = "bar",
+  onValueClick,
+  activeValues,
 }: {
   cat: CategoricalColumnAnalysis;
   variant?: "bar" | "pie";
+  /** Cross-filtering (Phase 14.15): clicking a bar/slice toggles that value
+   * into the dashboard's shared filter state, the same state the slicers
+   * write to — every other chart re-renders from the filtered rows. */
+  onValueClick?: (value: string) => void;
+  activeValues?: string[];
 }) {
   const data = cat.top_values.map((tv) => ({ name: tv.value, count: tv.count }));
+  const hasSelection = Boolean(activeValues && activeValues.length > 0);
+  const opacityFor = (name: string) =>
+    !hasSelection || activeValues?.includes(name) ? 1 : 0.3;
 
   return (
     <Card className="overflow-hidden">
@@ -108,6 +118,7 @@ export function CategoricalBarCard({
           </CardTitle>
           <CardDescription>
             count of rows per {cat.column} value · {cat.unique_count} unique values
+            {onValueClick ? " · click to filter" : ""}
           </CardDescription>
         </div>
         <Badge variant="accent">categorical</Badge>
@@ -119,8 +130,16 @@ export function CategoricalBarCard({
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <Pie data={data} dataKey="count" nameKey="name" innerRadius="45%" outerRadius="80%" paddingAngle={2}>
-                {data.map((_, i) => (
-                  <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                {data.map((d, i) => (
+                  <Cell
+                    key={i}
+                    fill={CHART_COLORS[i % CHART_COLORS.length]}
+                    fillOpacity={opacityFor(d.name)}
+                    stroke={activeValues?.includes(d.name) ? "var(--foreground)" : undefined}
+                    strokeWidth={activeValues?.includes(d.name) ? 2 : 0}
+                    className={onValueClick ? "cursor-pointer" : undefined}
+                    onClick={() => onValueClick?.(d.name)}
+                  />
                 ))}
               </Pie>
               <Tooltip contentStyle={tooltipStyle} />
@@ -139,8 +158,16 @@ export function CategoricalBarCard({
               />
               <Tooltip contentStyle={tooltipStyle} />
               <Bar dataKey="count" radius={[0, 4, 4, 0]}>
-                {data.map((_, i) => (
-                  <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                {data.map((d, i) => (
+                  <Cell
+                    key={i}
+                    fill={CHART_COLORS[i % CHART_COLORS.length]}
+                    fillOpacity={opacityFor(d.name)}
+                    stroke={activeValues?.includes(d.name) ? "var(--foreground)" : undefined}
+                    strokeWidth={activeValues?.includes(d.name) ? 2 : 0}
+                    className={onValueClick ? "cursor-pointer" : undefined}
+                    onClick={() => onValueClick?.(d.name)}
+                  />
                 ))}
               </Bar>
             </BarChart>
@@ -369,12 +396,23 @@ export function ScatterCorrelationCard({
 
 /** A treemap of a categorical column's top values — an alternative to bar/
  * pie that reads cardinality differences more clearly at a glance. */
-export function CategoricalTreemapCard({ cat }: { cat: CategoricalColumnAnalysis }) {
+export function CategoricalTreemapCard({
+  cat,
+  onValueClick,
+  activeValues,
+}: {
+  cat: CategoricalColumnAnalysis;
+  /** Cross-filtering (Phase 14.15): clicking a tile toggles that value into
+   * the dashboard's shared filter state — same mechanism as the slicers. */
+  onValueClick?: (value: string) => void;
+  activeValues?: string[];
+}) {
   const data = cat.top_values.map((tv, i) => ({
     name: tv.value,
     size: tv.count,
     fill: CHART_COLORS[i % CHART_COLORS.length],
   }));
+  const hasSelection = Boolean(activeValues && activeValues.length > 0);
 
   return (
     <Card className="overflow-hidden">
@@ -383,7 +421,10 @@ export function CategoricalTreemapCard({ cat }: { cat: CategoricalColumnAnalysis
           <CardTitle className="text-base">
             <span className="font-mono">{cat.column}</span> by size
           </CardTitle>
-          <CardDescription>row count per {cat.column} value, area-proportional</CardDescription>
+          <CardDescription>
+            row count per {cat.column} value, area-proportional
+            {onValueClick ? " · click to filter" : ""}
+          </CardDescription>
         </div>
         <Badge variant="accent">treemap</Badge>
       </CardHeader>
@@ -401,9 +442,23 @@ export function CategoricalTreemapCard({ cat }: { cat: CategoricalColumnAnalysis
                   x: number; y: number; width: number; height: number; name: string; fill: string;
                 };
                 if (width < 2 || height < 2) return <g />;
+                const active = activeValues?.includes(name);
                 return (
-                  <g>
-                    <rect x={x} y={y} width={width} height={height} fill={fill} rx={3} />
+                  <g
+                    className={onValueClick ? "cursor-pointer" : undefined}
+                    onClick={() => onValueClick?.(name)}
+                  >
+                    <rect
+                      x={x}
+                      y={y}
+                      width={width}
+                      height={height}
+                      fill={fill}
+                      fillOpacity={!hasSelection || active ? 1 : 0.3}
+                      stroke={active ? "var(--foreground)" : "var(--background)"}
+                      strokeWidth={active ? 2 : 1}
+                      rx={3}
+                    />
                     {width > 48 && height > 20 && (
                       <text
                         x={x + 6}
