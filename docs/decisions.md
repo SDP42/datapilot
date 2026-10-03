@@ -4,6 +4,96 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0104 — Phase 14.9: real per-user accounts replace the single-operator account; badges computed, never stored
+
+- **Decision:** two choices define this increment:
+  1. **Phase 13.5's single configured operator account is replaced with
+     a real `users` table** — independent registration, PBKDF2-HMAC-
+     SHA256 password hashing (stdlib `hashlib`, no new dependency),
+     and a JWT that carries `user_id` so every route can scope data
+     (history, gamification) to the actual caller. The configured
+     `DATAPILOT_AUTH_USERNAME`/`_PASSWORD` account is kept, but only as
+     a seeded row in that same table (`bootstrap.seed_dev_account`),
+     not a parallel code path — there is exactly one way to authenticate
+     now, not a special case plus a general one.
+  2. **Badges are computed from `xp`/streak on every read, never stored
+     as their own rows.** A stored-badges table could drift from the
+     numbers that justify it (an XP calculation bug fixed later would
+     leave already-awarded badges wrong forever); a pure function over
+     already-authoritative state can't drift, by construction.
+- **Reason:** matches this project's running principle (already applied
+  to `fit_seconds`, real scatter-plot points, and now this) of making a
+  claim re-derivable from real state rather than cached or asserted
+  separately. XP itself is deliberately fixed-per-action-kind and never
+  derived from a model's own accuracy/fit metrics, so engagement
+  tracking can never reward submitting a worse model for more points.
+- **Alternatives considered:** keeping the single-operator account and
+  adding a separate "real users" table alongside it (rejected — two
+  authentication code paths to keep in sync, and the request was
+  explicitly for real accounts, not an additional admin mode); storing
+  earned badges as their own rows with an "awarded_at" timestamp
+  (rejected — badges-as-history has some value, but the badges a user
+  currently holds should always equal what their current state computes,
+  and storing both invites them silently disagreeing after any future
+  change to badge thresholds or XP amounts).
+- **Consequence:** `backend/datapilot_api/user_models.py` /
+  `user_store.py` / `security.py` / `bootstrap.py` / `instrumentation.py`
+  are new; `auth.py`, `routes/auth.py`, `routes/history.py`,
+  `routes/datasets.py`, `routes/modeling.py`, `routes/predictions.py`,
+  `activity_models.py`, `activity_store.py` are all updated to carry
+  `AuthenticatedUser` through. Quality gates: `pytest` 2166 passed / 3
+  skipped (9 new tests); `ruff` / `ruff format` / `mypy` all green;
+  frontend `tsc` / `eslint` clean, `next build` succeeds (17 routes).
+  Verified live: full registration → onboarding → profile → XP-on-
+  ingest → badge-earned flow, and the light/dark toggle, all working in
+  a real browser session.
+
+## 0103 — Phase 14.8: five accuracy levers found by reading the modeling code, not by guessing
+
+- **Decision:** rather than speculating about what might be hurting
+  accuracy, the actual gaps were found by reading `training.py` and
+  `_build_preprocessor` directly, then verified against a 14-dataset
+  edge-case battery run through the real `run_expanded_model_search`.
+  Five real, narrow fixes resulted: `class_weight="balanced"` on every
+  classifier that supports it (confirmed per-estimator via
+  `inspect.signature`, not assumed), `OneHotEncoder(max_categories=30)`
+  for high-cardinality categoricals, a `VotingRegressor`/
+  `VotingClassifier` over the top-5 candidates added as one more ranked
+  candidate, `TransformedTargetRegressor(log1p/expm1)` for a skewed,
+  non-negative target decided from the training partition only, and
+  `RobustScaler` instead of `StandardScaler` when the training partition
+  is outlier-heavy (Tukey fence). The same edge-case battery also
+  surfaced a real, unrelated bug — every row with a missing target
+  crashed every single candidate while the endpoint still reported
+  `status: completed` — fixed in the same pass since it was found while
+  verifying this one.
+- **Reason:** "do more backend and proper accuracy" from two requests
+  back, and "what more can we do for improving accuracy" this request,
+  both asked for substance, not reassurance — the same principle behind
+  Phase 14.6's real `fit_seconds` and Phase 14.7's real cross-validation.
+  Each of the five levers is a documented, narrow, well-understood fix
+  for a specific failure mode found in the actual code, not a vague
+  "tune more."
+- **Alternatives considered:** `GridSearchCV`/`RandomizedSearchCV`-style
+  adaptive hyperparameter search to chase accuracy generically (rejected
+  again, consistent with the Phase 7.7 decision — breaks fixed,
+  reproducible grids with one fixed seed); dropping high-cardinality
+  categorical columns entirely instead of capping them (rejected — a
+  column can still carry real signal above the cap; bucketing the long
+  tail keeps that signal instead of discarding the column outright);
+  soft voting for the classification ensemble (rejected — not every
+  catalog estimator exposes a reliable `predict_proba`, e.g. `SVC`
+  without `probability=True`, `Perceptron`, `RidgeClassifier`; hard
+  voting works uniformly across the whole catalog).
+- **Consequence:** `data_engine/modeling/training.py` gained
+  `_is_outlier_heavy`, `_skewness`, `_wrap_target`, `_score_candidate`,
+  and the ensembling block; `_build_preprocessor`/`_build_preprocessor_for`
+  take new `robust_scaling`/`x_train` parameters;
+  `ExpandedCandidateResult.hyperparameters` widened to accept `list[str]`
+  for the ensemble's `members` entry. Quality gates: `pytest` 2166
+  passed / 3 skipped; `ruff` / `ruff format` / `mypy` (181 source files)
+  all green.
+
 ## 0102 — Phase 14.7: real k-fold cross-validation, opt-in rather than always-on
 
 - **Decision:** "proper accuracy" was answered by implementing genuine

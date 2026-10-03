@@ -52,6 +52,7 @@ class ActivityStore:
         dataset_id: str,
         summary: str,
         dataset_filename: str | None = None,
+        user_id: str | None = None,
     ) -> ActivityRecord:
         row = ActivityRow(
             activity_id=str(uuid4()),
@@ -60,14 +61,19 @@ class ActivityStore:
             dataset_filename=dataset_filename,
             summary=summary,
             created_at=datetime.now(timezone.utc),
+            user_id=user_id,
         )
         session.add(row)
         session.commit()
         session.refresh(row)
         return _to_record(row)
 
-    def list_recent(self, session: Session, *, limit: int = 50) -> list[ActivityRecord]:
+    def list_recent(
+        self, session: Session, *, limit: int = 50, user_id: str | None = None
+    ) -> list[ActivityRecord]:
         stmt = select(ActivityRow).order_by(ActivityRow.created_at.desc()).limit(limit)
+        if user_id is not None:
+            stmt = stmt.where(ActivityRow.user_id == user_id)
         rows = session.execute(stmt).scalars().all()
         return [_to_record(row) for row in rows]
 

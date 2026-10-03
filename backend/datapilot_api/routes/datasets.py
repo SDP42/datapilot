@@ -20,16 +20,14 @@ from data_engine.quality import QualityReport, analyze_quality
 from datapilot.contracts import DatasetReference
 from pydantic import BaseModel
 
-from ..activity_store import ActivityStore
-from ..auth import get_current_user
+from ..auth import AuthenticatedUser, get_current_user
 from ..db import get_session
 from ..dependencies import ingest_upload
+from ..instrumentation import record_activity
 
 router = APIRouter(
     prefix="/api/v1/datasets", tags=["datasets"], dependencies=[Depends(get_current_user)]
 )
-
-_activity = ActivityStore()
 
 
 class IngestResponse(BaseModel):
@@ -38,12 +36,17 @@ class IngestResponse(BaseModel):
 
 
 @router.post("/ingest", response_model=IngestResponse)
-async def ingest(file: UploadFile, session: Session = Depends(get_session)) -> IngestResponse:
+async def ingest(
+    file: UploadFile,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> IngestResponse:
     """Ingest an uploaded CSV (Phase 1) and return its reference + profile."""
     reference, _df = await ingest_upload(file)
     profile = profile_dataset(reference)
-    _activity.record(
+    record_activity(
         session,
+        current_user,
         kind="ingest",
         dataset_id=reference.dataset_id,
         dataset_filename=reference.original_filename,
@@ -56,13 +59,15 @@ async def ingest(file: UploadFile, session: Session = Depends(get_session)) -> I
 async def quality(
     file: UploadFile,
     target_column: str | None = Form(default=None),
+    current_user: AuthenticatedUser = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> QualityReport:
     """Ingest an uploaded CSV and run Phase-2 deterministic quality analysis on it."""
     reference, _df = await ingest_upload(file)
     report = analyze_quality(reference, target_column=target_column)
-    _activity.record(
+    record_activity(
         session,
+        current_user,
         kind="quality",
         dataset_id=reference.dataset_id,
         dataset_filename=reference.original_filename,
@@ -72,12 +77,17 @@ async def quality(
 
 
 @router.post("/eda", response_model=EDAReport)
-async def eda(file: UploadFile, session: Session = Depends(get_session)) -> EDAReport:
+async def eda(
+    file: UploadFile,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> EDAReport:
     """Ingest an uploaded CSV and run Phase-4 deterministic EDA on it."""
     reference, df = await ingest_upload(file)
     report = analyze_dataframe(df, dataset_id=reference.dataset_id)
-    _activity.record(
+    record_activity(
         session,
+        current_user,
         kind="eda",
         dataset_id=reference.dataset_id,
         dataset_filename=reference.original_filename,

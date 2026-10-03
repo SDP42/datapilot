@@ -79,3 +79,69 @@ def test_expired_token_returns_401(client):
     )
     response = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {expired_token}"})
     assert response.status_code == 401
+
+
+def _register(client, username="newuser", password="correcthorsebattery", **overrides):
+    payload = {
+        "username": username,
+        "password": password,
+        "confirm_password": password,
+        "experience_level": "beginner",
+        "primary_goal": "learn_data_science",
+    }
+    payload.update(overrides)
+    return client.post("/api/v1/auth/register", json=payload)
+
+
+def test_register_creates_account_and_returns_token(client):
+    response = _register(client)
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["username"] == "newuser"
+    assert body["access_token"]
+
+
+def test_register_duplicate_username_returns_409(client):
+    _register(client, username="dupe")
+    response = _register(client, username="dupe")
+    assert response.status_code == 409
+
+
+def test_register_mismatched_passwords_returns_422(client):
+    response = _register(client, password="aaaaaaaa", confirm_password="bbbbbbbb")
+    assert response.status_code == 422
+
+
+def test_register_short_password_returns_422(client):
+    response = _register(client, password="short", confirm_password="short")
+    assert response.status_code == 422
+
+
+def test_register_then_login_with_new_account_works(client):
+    _register(client, username="loginlater", password="correcthorsebattery")
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"username": "loginlater", "password": "correcthorsebattery"},
+    )
+    assert response.status_code == 200
+
+
+def test_me_includes_onboarding_profile_and_gamification_state(client):
+    response = _register(
+        client,
+        username="profileuser",
+        full_name="Ada Lovelace",
+        experience_level="intermediate",
+        primary_goal="build_ml_models",
+    )
+    token = response.json()["access_token"]
+    me = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert me.status_code == 200
+    body = me.json()
+    assert body["full_name"] == "Ada Lovelace"
+    assert body["experience_level"] == "intermediate"
+    assert body["primary_goal"] == "build_ml_models"
+    assert body["xp"] == 0
+    assert body["level"] == 1
+    assert body["current_streak"] == 0
+    assert body["badges"] == []

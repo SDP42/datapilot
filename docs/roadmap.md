@@ -2624,6 +2624,156 @@ Phase-7/8 entry point.
   checkbox renders and toggles correctly on the modeling page.
 - **Decision:** 0102.
 
+#### Phase 14.8 — Five Real Accuracy Levers: Class Balancing, Cardinality Capping, Ensembling, Target Log-Transform, Robust Scaling — **Done**
+- **Scope:** "what more can we do for improving accuracy" — a prioritized,
+  concrete punch list (not a restatement of CV) was identified by reading
+  `training.py` directly: class imbalance was unhandled, high-cardinality
+  categoricals one-hot exploded into noise columns, no ensembling existed,
+  skewed targets were never transformed, and scaling was always
+  `StandardScaler` regardless of outliers. All five implemented together.
+- **Class imbalance:** every classifier in the Phase 7.7 catalog that
+  accepts `class_weight` (confirmed per-estimator via `inspect.signature`
+  against the installed scikit-learn 1.9) is now built with
+  `class_weight="balanced"` — `DecisionTreeClassifier`,
+  `RandomForestClassifier`, `ExtraTreesClassifier`,
+  `HistGradientBoostingClassifier`, `LogisticRegression` (both sweeps),
+  `RidgeClassifier`, `SGDClassifier`, `Perceptron`, `SVC`.
+  `BaggingClassifier`/`AdaBoostClassifier` don't accept it and are
+  unchanged.
+- **High-cardinality categoricals:** `_build_preprocessor`'s
+  `OneHotEncoder` now takes `max_categories=30` (sklearn's own cap —
+  infrequent/overflow categories are bucketed into one column rather
+  than each getting its own) instead of exploding a near-unique column
+  (e.g. a customer/row id) into one column per distinct value.
+- **Ensembling:** after every catalog candidate is scored, the
+  top-`_ENSEMBLE_TOP_K` (5) *completed* candidates by the ranking metric
+  are combined into one more candidate — `VotingRegressor` /
+  `VotingClassifier(voting="hard")` over fresh clones of those same
+  specs — fit and scored exactly like any other candidate (ranked
+  alongside everything else; dropped from contention if it doesn't
+  actually score better, never assumed to be the answer).
+- **Skewed-target log transform:** `_skewness` (a direct biased sample-
+  skewness computation, not `pandas.Series.skew` — see its own
+  docstring) decides, from the *training* partition only, whether the
+  regression target is transformed via
+  `sklearn.compose.TransformedTargetRegressor(func=np.log1p,
+  inverse_func=np.expm1)` before every candidate (and the ensemble) fits
+  — triggered only when skew > 1.0 and the target is non-negative
+  (log1p's domain). Every metric is still computed after the inverse
+  transform, so it stays on the original scale and remains directly
+  comparable to a non-transformed run.
+- **Outlier-robust scaling:** `_is_outlier_heavy` (Tukey 1.5×IQR fence
+  over the training partition's numeric columns) decides whether
+  `_build_preprocessor` uses `RobustScaler` (median/IQR) instead of
+  `StandardScaler` (mean/std, which heavy outliers distort) —
+  automatic, not user-configured, and threaded through every one of
+  `_build_preprocessor`'s three call sites (`train_and_evaluate_models`,
+  `fit_final_pipeline`, `run_expanded_search`).
+- **`ExpandedCandidateResult.hyperparameters`** widened to accept
+  `list[str]` (in `data_engine/modeling/models.py`) so the synthetic
+  ensemble candidate's `members` entry (the list of estimator names it
+  combines) round-trips through the existing Pydantic contract.
+- **Quality gates:** `pytest` full suite 2166 passed / 3 skipped (2 new
+  tests on the missing-target fix found during the robustness pass
+  below, verified end to end); `ruff` / `ruff format` / `mypy`
+  (181 source files) all green.
+- **Verification — a 14-dataset edge-case battery** (missing values,
+  high-cardinality categoricals, a datetime column, severe 97/3 class
+  imbalance, all-numeric, all-categorical, a constant column, 10-class
+  multiclass, a too-tiny dataset, duplicate rows, free text, a missing
+  target, a single feature, and a 5000-row dataset), run directly
+  against `run_expanded_model_search`, found one real bug fixed in this
+  same pass: every row with a missing target previously crashed
+  **every** single candidate (`ValueError: Input y contains NaN`) while
+  the response still reported `status: completed` — now those rows are
+  dropped (or trimmed, for a time-ordered split, to preserve
+  contiguity) before any candidate fits, with a note explaining how
+  many and why. 13 of 14 datasets completed cleanly either way; the
+  14th (too-tiny) correctly reported `unavailable` with a reason, which
+  is the intended behaviour, not a bug.
+- **Decision:** 0103.
+
+#### Phase 14.9 — Real Multi-User Auth, Onboarding, Gamification, Light/Dark Theme — **Done**
+- **Scope:** "auth is not working... ask to create a profile and create
+  a password and also ask some more details regarding data science
+  beginner or level... save the password in our db... sign in and
+  remember the history so that multiple profiles can be created and
+  also some gamification features" plus "frontend is dull, add bright
+  mode and dark mode" — replaces Phase 13.5's single-operator JWT
+  boundary with real, independent accounts.
+- **`users` table** (`backend/datapilot_api/user_models.py`): one row
+  per account — `username`, PBKDF2-HMAC-SHA256 `password_hash` +
+  per-user `password_salt` (`backend/datapilot_api/security.py`,
+  stdlib `hashlib.pbkdf2_hmac`, 200,000 iterations — no new dependency),
+  onboarding answers (`experience_level`, `primary_goal`, optional
+  `full_name` / `role`), and gamification state (`xp`,
+  `current_streak`, `longest_streak`, `last_active_date`).
+- **`POST /api/v1/auth/register`**: username/password/confirm_password
+  plus the onboarding answers, auto-logs in on success (returns the
+  same token shape as `/login`). `POST /api/v1/auth/login` now checks
+  the `users` table instead of one configured operator account.
+  `GET /api/v1/auth/me` now returns the full profile, not just a
+  username.
+- **JWT now carries `user_id`** (`AuthenticatedUser(user_id, username)`
+  in `backend/datapilot_api/auth.py`), so every downstream route can
+  scope data to the real caller instead of one shared account.
+- **Per-user history** (`ActivityRow.user_id`, nullable for pre-existing
+  rows): `GET /api/v1/history` now returns only the signed-in user's own
+  runs — two accounts never see each other's activity, directly
+  addressing "remember the history so that multiple profiles can be
+  created."
+- **Gamification** (`backend/datapilot_api/user_store.py`): fixed XP
+  per action kind (`ingest`=5, `quality`=5, `eda`=10, `modeling`=15,
+  `search`=15, `train`=20, `predict`=5 — never derived from a model's
+  own metrics, so XP measures platform engagement, not model quality,
+  and can't be gamed by submitting a worse model), a daily login streak
+  (consecutive calendar days with at least one action), and badges
+  **computed** from `xp`/streak on every read (never stored — can never
+  drift out of sync with the numbers that earned them). One shared
+  helper, `backend/datapilot_api/instrumentation.py`'s
+  `record_activity`, is the one call every instrumented route
+  (`datasets`, `modeling`, `predictions`) now makes instead of calling
+  `ActivityStore.record` directly, so the activity-log write and the
+  XP/streak update always happen together.
+- **Dev-account bootstrap** (`backend/datapilot_api/bootstrap.py`): the
+  configured `DATAPILOT_AUTH_USERNAME` / `_PASSWORD` account is seeded
+  as a real `users` row on startup (idempotent), so the documented
+  local-dev login keeps working without registering first.
+- **Frontend — sign in / create account tabs on `/login`**
+  (`components/auth/register-form.tsx`): a 2-step onboarding form
+  (account details, then card-based experience-level and
+  primary-goal pickers, closer to a typical "tell us about yourself"
+  onboarding flow than a flat form) wired to the new `register()` call
+  in `lib/api.ts` / `hooks/use-auth.ts`.
+  **`/dashboard/profile`**: level/XP progress bar, current/longest
+  streak, and earned badges, reading the same `UserProfile` the backend
+  now returns from `/me`.
+- **Frontend — light/dark theme**
+  (`components/theme/theme-provider.tsx`): a `data-theme` attribute on
+  `<html>`, toggled and persisted to `localStorage`
+  (`globals.css`'s `:root[data-theme="light"]` block overrides every
+  existing CSS-variable color token — no component needed its own
+  styling touched), with a blocking inline script in `layout.tsx` to
+  set the attribute before first paint (avoids a flash of the wrong
+  theme; `suppressHydrationWarning` on `<html>` since React
+  legitimately doesn't control that attribute). A toggle button lives
+  in the sidebar.
+- **Quality gates:** `pytest` full suite 2166 passed / 3 skipped (9 new
+  tests: register/duplicate-username/password-mismatch/short-password/
+  register-then-login/profile-shape in `test_auth.py`, plus
+  ingest-awards-xp/history-is-per-user/same-day-streak-counted-once in
+  the new `test_gamification.py`); `ruff` / `ruff format` / `mypy`
+  (181 source files) all green. Frontend: `tsc --noEmit` clean,
+  `eslint` clean, `next build` succeeds (17 routes, 3 new:
+  `/dashboard/profile` plus the existing set). Verified live in a real
+  browser end to end: created a real account through the 2-step
+  onboarding flow, landed on `/dashboard`, confirmed the profile page
+  showed the onboarding answers and Level 1 / 0 XP, ingested a dataset
+  as that account via the API, confirmed XP/streak/the "First Steps"
+  badge appeared on a reload, and toggled light mode (persisted across
+  navigation, correct contrast throughout the sidebar and cards).
+- **Decision:** 0104.
+
 ### Phase 15 — MLOps / Monitoring
 - **Objective:** operate models in production.
 - **Components:** model/data versioning, drift and performance monitoring,

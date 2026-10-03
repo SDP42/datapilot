@@ -25,6 +25,10 @@ class ActivityRow(Base):
     result payload — those can be large, and the full `ModelingSpec` /
     `EDAReport` / etc. a run produced is not re-derivable from this row
     by design; this is a log, not a second copy of every result).
+
+    `user_id` (Phase 15.3) is nullable so rows written before multi-user
+    auth existed still load; a `None` row is simply excluded from every
+    per-user history query.
     """
 
     __tablename__ = "activity_log"
@@ -35,6 +39,7 @@ class ActivityRow(Base):
     dataset_filename: Mapped[str | None] = mapped_column(String(256), nullable=True)
     summary: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
 
 
 __all__ = ["ActivityRow"]

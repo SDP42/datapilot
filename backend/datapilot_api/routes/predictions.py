@@ -30,17 +30,14 @@ from data_engine.modeling import (
 
 from backend.settings import get_settings
 
-from ..activity_store import ActivityStore
-from ..auth import get_current_user
+from ..auth import AuthenticatedUser, get_current_user
 from ..db import get_session
 from ..dependencies import ingest_upload
+from ..instrumentation import record_activity
 
 router = APIRouter(
     prefix="/api/v1/predict", tags=["predict"], dependencies=[Depends(get_current_user)]
 )
-
-
-_activity = ActivityStore()
 
 
 def _store_root() -> Path:
@@ -58,6 +55,7 @@ async def train_and_save(
     file: UploadFile,
     objective: str = Form(...),
     forecast_horizon: int = Form(default=1, ge=1),
+    current_user: AuthenticatedUser = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> TrainAndSaveResponse:
     """Ingest a CSV, run the full Phase-7 pipeline, and persist the selected model.
@@ -72,8 +70,9 @@ async def train_and_save(
         dataset_id=reference.dataset_id, objective=objective, forecast_horizon=forecast_horizon
     )
     spec, metadata = train_and_persist_model(df, request, root=_store_root())
-    _activity.record(
+    record_activity(
         session,
+        current_user,
         kind="train",
         dataset_id=reference.dataset_id,
         dataset_filename=reference.original_filename,
@@ -90,7 +89,10 @@ async def models() -> list[PersistedModelMetadata]:
 
 @router.post("/models/{model_id}/predict", response_model=PredictionResult)
 async def predict(
-    model_id: str, file: UploadFile, session: Session = Depends(get_session)
+    model_id: str,
+    file: UploadFile,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    session: Session = Depends(get_session),
 ) -> PredictionResult:
     """Run a persisted model against new, unseen rows from an uploaded CSV."""
     reference, df = await ingest_upload(file)
@@ -98,8 +100,9 @@ async def predict(
         result = predict_with_model(model_id, df, root=_store_root())
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    _activity.record(
+    record_activity(
         session,
+        current_user,
         kind="predict",
         dataset_id=reference.dataset_id,
         dataset_filename=reference.original_filename,

@@ -17,6 +17,27 @@
   --radius: 1rem;
 }
 
+/* Light mode: explicit opt-in via `data-theme="light"` on <html> (see
+   `components/theme/theme-provider.tsx`) rather than a `prefers-color-scheme`
+   media query — the product defaults to dark regardless of OS preference,
+   matching its existing identity, and a user who picks light should get it
+   even on a dark-preferring OS. */
+:root[data-theme="light"] {
+  --background: #f5f6fb;
+  --surface: #ffffff;
+  --surface-2: #eef0f8;
+  --surface-border: rgba(15, 23, 42, 0.1);
+  --foreground: #11131f;
+  --muted: #5b6075;
+  --primary: #6d4fff;
+  --primary-2: #2f7de0;
+  --accent: #0891a8;
+  --accent-2: #9333ea;
+  --success: #15803d;
+  --warning: #b45309;
+  --danger: #dc2626;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-surface: var(--surface);

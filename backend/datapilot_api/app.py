@@ -11,6 +11,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from .bootstrap import seed_dev_account
 from .db import create_all_tables
 from .routes import analytics, auth, datasets, health, history, jobs, modeling, predictions
 
@@ -21,7 +22,9 @@ def create_app() -> FastAPI:
     Creates every Phase-13.2 table that doesn't already exist
     (idempotent) before returning — so the first request against a
     fresh SQLite dev database, or a `TestClient` wrapping a freshly
-    constructed app, never 500s on a missing `jobs` table.
+    constructed app, never 500s on a missing `jobs` table. Also seeds
+    the configured dev account (Phase 15.1) into `users` so the
+    documented local-dev login keeps working on a fresh database.
     """
     from backend.settings import get_settings
 
@@ -37,6 +40,7 @@ def create_app() -> FastAPI:
     )
 
     create_all_tables()
+    seed_dev_account()
 
     app.include_router(health.router)
     app.include_router(auth.router)

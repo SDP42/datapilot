@@ -41,6 +41,14 @@ def _tiny_df() -> pd.DataFrame:
     return pd.DataFrame({"x1": [1, 2, 3], "x2": [4, 5, 6], "y": [1, 0, 1]})
 
 
+def _regression_df_with_missing_target(n_missing: int = 20) -> pd.DataFrame:
+    df = _regression_df().copy()
+    rng = np.random.default_rng(7)
+    missing_idx = rng.choice(len(df), n_missing, replace=False)
+    df.loc[missing_idx, "price"] = np.nan
+    return df
+
+
 def test_expanded_catalog_has_more_than_100_candidates_per_category():
     assert len(_expanded_catalog("regression")) > 100
     assert len(_expanded_catalog("classification")) > 100
@@ -135,6 +143,29 @@ def test_cross_validation_adds_cv_metrics_and_reranks_by_them():
     # ranked by cv_f1_mean descending among candidates that have it
     cv_means = [c.metrics["cv_f1_mean"] for c in with_cv]
     assert cv_means == sorted(cv_means, reverse=True)
+
+
+def test_run_expanded_search_drops_rows_with_missing_target():
+    df = _regression_df_with_missing_target(n_missing=20)
+    request = ModelingRequest(dataset_id="ds-missing-target", objective="predict price")
+    result = run_expanded_model_search(df, request)
+
+    assert result.status is ModelingStatus.COMPLETED
+    completed = [c for c in result.candidates if c.status is TrainingRunStatus.COMPLETED]
+    # every candidate must still fit cleanly once the NaN-target rows are excluded,
+    # not silently fail every single one with "Input y contains NaN."
+    assert len(completed) == result.candidate_count
+    assert any("missing target" in note for note in result.notes)
+
+
+def test_run_expanded_search_all_targets_missing_is_unavailable():
+    df = _regression_df().copy()
+    df["price"] = np.nan
+    request = ModelingRequest(dataset_id="ds-all-missing-target", objective="predict price")
+    result = run_expanded_model_search(df, request)
+
+    assert result.status is ModelingStatus.UNAVAILABLE
+    assert result.candidates == []
 
 
 def test_run_expanded_search_too_little_data_is_unavailable():

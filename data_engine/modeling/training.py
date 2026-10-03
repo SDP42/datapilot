@@ -293,16 +293,75 @@ def _build_estimator(family: ModelFamily, category: str) -> tuple[str, Any] | No
     return None
 
 
+_MAX_ONEHOT_CATEGORIES = 30
+_OUTLIER_HEAVY_THRESHOLD = 0.05
+
+
+def _skewness(values: Any) -> float:
+    """The (biased) sample skewness of `values`, computed directly rather
+    than via `pandas.Series.skew` (whose stub return type is too broad for
+    `float(...)` to type-check cleanly here). 0.0 for too-few/constant
+    values, matching `pandas`' own convention of a non-informative result
+    rather than raising."""
+    arr = np.asarray(values, dtype=float)
+    arr = arr[~np.isnan(arr)]
+    if arr.size < 3:
+        return 0.0
+    std = float(arr.std())
+    if std == 0.0:
+        return 0.0
+    return float(np.mean(((arr - arr.mean()) / std) ** 3))
+
+
+def _is_outlier_heavy(
+    x_train: pd.DataFrame, numeric_cols: list[str], threshold: float = _OUTLIER_HEAVY_THRESHOLD
+) -> bool:
+    """True when more than `threshold` of numeric training values fall outside
+    1.5x IQR of their own column — the standard Tukey fence. `StandardScaler`
+    centers on the mean / scales by standard deviation, both of which heavy
+    outliers distort; `RobustScaler` (median / IQR) is used instead when this
+    is true. Computed on the training partition only (leakage-safe)."""
+    if not numeric_cols:
+        return False
+    total = 0
+    outliers = 0
+    for col in numeric_cols:
+        series = pd.to_numeric(x_train[col], errors="coerce").dropna()
+        if series.empty:
+            continue
+        q1, q3 = series.quantile(0.25), series.quantile(0.75)
+        iqr = q3 - q1
+        if iqr <= 0:
+            continue
+        lower, upper = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+        outliers += int(((series < lower) | (series > upper)).sum())
+        total += len(series)
+    return total > 0 and (outliers / total) > threshold
+
+
 def _build_preprocessor(
     numeric_cols: list[str],
     categorical_cols: list[str],
     req_by_col: dict[str, set[str]],
+    *,
+    robust_scaling: bool = False,
+    max_onehot_categories: int = _MAX_ONEHOT_CATEGORIES,
 ) -> tuple[Any, str | None]:
-    """A leakage-safe ColumnTransformer built strictly from Phase-6.5 requirements."""
+    """A leakage-safe ColumnTransformer built strictly from Phase-6.5 requirements.
+
+    `robust_scaling=True` swaps `StandardScaler` for `RobustScaler` (median /
+    IQR based, insensitive to outliers) — see `_is_outlier_heavy`.
+    `max_onehot_categories` caps each categorical column's one-hot expansion
+    (sklearn's own `OneHotEncoder(max_categories=...)`): a near-unique column
+    (e.g. a customer/row id) would otherwise explode into one column per
+    distinct value, which both hurts accuracy (the encoding carries no
+    generalisable signal) and training speed; categories beyond the cap are
+    bucketed into a single "infrequent" column instead of being dropped.
+    """
     from sklearn.compose import ColumnTransformer
     from sklearn.impute import SimpleImputer
     from sklearn.pipeline import Pipeline
-    from sklearn.preprocessing import OneHotEncoder, StandardScaler
+    from sklearn.preprocessing import OneHotEncoder, RobustScaler, StandardScaler
 
     transformers: list[tuple[str, Any, list[str]]] = []
 
@@ -312,7 +371,8 @@ def _build_preprocessor(
         if _OP_IMPUTATION in numeric_ops:
             steps.append(("imputer", SimpleImputer(strategy="median")))
         if _OP_SCALING in numeric_ops:
-            steps.append(("scaler", StandardScaler()))
+            scaler = RobustScaler() if robust_scaling else StandardScaler()
+            steps.append(("scaler", scaler))
         numeric_pipeline = Pipeline(steps) if steps else "passthrough"
         transformers.append(("numeric", numeric_pipeline, sorted(numeric_cols)))
 
@@ -326,7 +386,16 @@ def _build_preprocessor(
         steps = []
         if _OP_IMPUTATION in categorical_ops:
             steps.append(("imputer", SimpleImputer(strategy="most_frequent")))
-        steps.append(("encoder", OneHotEncoder(handle_unknown="ignore", sparse_output=False)))
+        steps.append(
+            (
+                "encoder",
+                OneHotEncoder(
+                    handle_unknown="ignore",
+                    sparse_output=False,
+                    max_categories=max_onehot_categories,
+                ),
+            )
+        )
         transformers.append(("categorical", Pipeline(steps), sorted(categorical_cols)))
 
     if not transformers:
@@ -969,7 +1038,12 @@ def _run_candidate(
             ),
         )
 
-    preprocessor, preproc_error = _build_preprocessor(numeric_cols, categorical_cols, req_by_col)
+    preprocessor, preproc_error = _build_preprocessor(
+        numeric_cols,
+        categorical_cols,
+        req_by_col,
+        robust_scaling=_is_outlier_heavy(x_all.iloc[train_idx], numeric_cols),
+    )
     if preproc_error is not None:
         return TrainingRun(
             family=family,
@@ -1130,16 +1204,24 @@ def _resolve_task_and_features(
 
 
 def _build_preprocessor_for(
-    feature_engineering: FeatureEngineeringSpec, ctx: _ResolvedContext
+    feature_engineering: FeatureEngineeringSpec,
+    ctx: _ResolvedContext,
+    *,
+    x_train: pd.DataFrame | None = None,
 ) -> Any:
     """`_build_preprocessor` given an already-resolved `_ResolvedContext`.
+    `x_train`, when given, decides `robust_scaling` via `_is_outlier_heavy`.
     Raises ``ValueError`` with the preprocessor's own reason on failure.
     """
     req_by_col: dict[str, set[str]] = {}
     for requirement in feature_engineering.preprocessing.requirements:
         req_by_col.setdefault(requirement.column, set()).add(requirement.description)
+    robust_scaling = _is_outlier_heavy(x_train, ctx.numeric_cols) if x_train is not None else False
     preprocessor, preproc_error = _build_preprocessor(
-        ctx.numeric_cols, ctx.categorical_cols, req_by_col
+        ctx.numeric_cols,
+        ctx.categorical_cols,
+        req_by_col,
+        robust_scaling=robust_scaling,
     )
     if preproc_error is not None:
         raise ValueError(preproc_error)
@@ -1203,11 +1285,11 @@ def fit_final_pipeline(
             f"family on a {ctx.category} task"
         )
     estimator_name, estimator = built
-    preprocessor = _build_preprocessor_for(feature_engineering, ctx)
+    x_all = df[ctx.feature_cols]
+    preprocessor = _build_preprocessor_for(feature_engineering, ctx, x_train=x_all)
 
     from sklearn.pipeline import Pipeline
 
-    x_all = df[ctx.feature_cols]
     pipeline = Pipeline([("preprocess", preprocessor), ("model", estimator)])
     notes = [
         f"refit on all {len(df)} available rows after family '{family.value}' was selected "
@@ -1520,7 +1602,10 @@ def _expanded_catalog(category: str) -> list[_CandidateSpec]:
             "LogisticRegression",
             [{"C": c} for c in (0.001, 0.01, 0.1, 1.0, 10.0, 100.0, 1000.0)],
             lambda C: LogisticRegression(
-                C=C, max_iter=MODEL_TRAINING_LOGREG_MAX_ITER, random_state=seed
+                C=C,
+                max_iter=MODEL_TRAINING_LOGREG_MAX_ITER,
+                random_state=seed,
+                class_weight="balanced",
             ),
         )
         _sweep(
@@ -1534,6 +1619,7 @@ def _expanded_catalog(category: str) -> list[_CandidateSpec]:
                 solver=solver,
                 max_iter=MODEL_TRAINING_LOGREG_MAX_ITER,
                 random_state=seed,
+                class_weight="balanced",
             ),
         )
         _sweep(
@@ -1541,7 +1627,7 @@ def _expanded_catalog(category: str) -> list[_CandidateSpec]:
             ModelFamily.LINEAR,
             "RidgeClassifier",
             [{"alpha": a} for a in (0.1, 1.0, 10.0)],
-            lambda alpha: RidgeClassifier(alpha=alpha, random_state=seed),
+            lambda alpha: RidgeClassifier(alpha=alpha, random_state=seed, class_weight="balanced"),
         )
         _sweep(
             specs,
@@ -1556,28 +1642,32 @@ def _expanded_catalog(category: str) -> list[_CandidateSpec]:
                     (0.001, "modified_huber"),
                 )
             ],
-            lambda alpha, loss: SGDClassifier(alpha=alpha, loss=loss, random_state=seed),
+            lambda alpha, loss: SGDClassifier(
+                alpha=alpha, loss=loss, random_state=seed, class_weight="balanced"
+            ),
         )
         _sweep(
             specs,
             ModelFamily.LINEAR,
             "PassiveAggressiveClassifier",
             [{"C": c} for c in (0.1, 1.0, 10.0)],
-            lambda C: PassiveAggressiveClassifier(C=C, random_state=seed),
+            lambda C: PassiveAggressiveClassifier(C=C, random_state=seed, class_weight="balanced"),
         )
         _sweep(
             specs,
             ModelFamily.LINEAR,
             "Perceptron",
             [{"alpha": a} for a in (0.0001, 0.001, 0.01)],
-            lambda alpha: Perceptron(alpha=alpha, random_state=seed),
+            lambda alpha: Perceptron(alpha=alpha, random_state=seed, class_weight="balanced"),
         )
         _sweep(
             specs,
             ModelFamily.TREE_BASED,
             "DecisionTreeClassifier",
             _TREE_DEPTHS,
-            lambda max_depth: DecisionTreeClassifier(max_depth=max_depth, random_state=seed),
+            lambda max_depth: DecisionTreeClassifier(
+                max_depth=max_depth, random_state=seed, class_weight="balanced"
+            ),
         )
         _sweep(
             specs,
@@ -1585,7 +1675,11 @@ def _expanded_catalog(category: str) -> list[_CandidateSpec]:
             "RandomForestClassifier",
             _FOREST_GRID,
             lambda n_estimators, max_depth: RandomForestClassifier(
-                n_estimators=n_estimators, max_depth=max_depth, random_state=seed, n_jobs=1
+                n_estimators=n_estimators,
+                max_depth=max_depth,
+                random_state=seed,
+                n_jobs=1,
+                class_weight="balanced",
             ),
         )
         _sweep(
@@ -1594,7 +1688,7 @@ def _expanded_catalog(category: str) -> list[_CandidateSpec]:
             "ExtraTreesClassifier",
             [{"n_estimators": n} for n in (50, 100, 150, 200)],
             lambda n_estimators: ExtraTreesClassifier(
-                n_estimators=n_estimators, random_state=seed, n_jobs=1
+                n_estimators=n_estimators, random_state=seed, n_jobs=1, class_weight="balanced"
             ),
         )
         _sweep(
@@ -1631,7 +1725,10 @@ def _expanded_catalog(category: str) -> list[_CandidateSpec]:
                 for m, lr in ((100, 0.1), (200, 0.1), (100, 0.05), (300, 0.05))
             ],
             lambda max_iter, learning_rate: HistGradientBoostingClassifier(
-                max_iter=max_iter, learning_rate=learning_rate, random_state=seed
+                max_iter=max_iter,
+                learning_rate=learning_rate,
+                random_state=seed,
+                class_weight="balanced",
             ),
         )
         _sweep(
@@ -1686,7 +1783,7 @@ def _expanded_catalog(category: str) -> list[_CandidateSpec]:
                     ("poly", 1.0),
                 )
             ],
-            lambda kernel, C: SVC(kernel=kernel, C=C, random_state=seed),
+            lambda kernel, C: SVC(kernel=kernel, C=C, random_state=seed, class_weight="balanced"),
         )
         _sweep(
             specs,
@@ -1703,6 +1800,7 @@ def _expanded_catalog(category: str) -> list[_CandidateSpec]:
     return specs
 
 
+_ENSEMBLE_TOP_K = 5
 _CV_FOLDS = 5
 _CV_SCORING: dict[str, str] = {
     "rmse": "neg_root_mean_squared_error",
@@ -1803,13 +1901,6 @@ def run_expanded_search(
             status=ModelingStatus.UNAVAILABLE, reason=str(exc), task_type=task.value
         )
 
-    try:
-        preprocessor = _build_preprocessor_for(feature_engineering, ctx)
-    except ValueError as exc:
-        return ExpandedSearchResult(
-            status=ModelingStatus.UNAVAILABLE, reason=str(exc), task_type=task.value
-        )
-
     catalog = _expanded_catalog(category)
     if not catalog:
         return ExpandedSearchResult(
@@ -1820,15 +1911,58 @@ def run_expanded_search(
 
     from sklearn.pipeline import Pipeline
 
-    x_all = df[ctx.feature_cols]
-    y_all = df[ctx.target_column].to_numpy()
-    train_idx, _val_idx, test_idx, _split_notes = _split_indices(len(df), split, y_all)
+    assert ctx.target_column is not None
+    is_time_ordered = split.strategy is DataSplitStrategy.TIME_ORDERED_HOLDOUT
+    work = df
+    dropped_missing_target = 0
+    if is_time_ordered:
+        observed = df[ctx.target_column].notna().to_numpy()
+        if observed.any():
+            first_obs = int(observed.argmax())
+            last_obs = len(observed) - 1 - int(observed[::-1].argmax())
+            dropped_missing_target = len(df) - (last_obs - first_obs + 1)
+            work = df.iloc[first_obs : last_obs + 1].reset_index(drop=True)
+    else:
+        before = len(df)
+        work = df[df[ctx.target_column].notna()].reset_index(drop=True)
+        dropped_missing_target = before - len(work)
+
+    if work.empty:
+        return ExpandedSearchResult(
+            status=ModelingStatus.UNAVAILABLE,
+            reason="every row has a missing target value; nothing is left to train on",
+            task_type=task.value,
+        )
+
+    x_all = work[ctx.feature_cols]
+    y_all = work[ctx.target_column].to_numpy()
+    train_idx, _val_idx, test_idx, _split_notes = _split_indices(len(work), split, y_all)
 
     selection_metric, direction = _TASK_SELECTION_METRIC.get(task, (None, None))
 
     results: list[tuple[ExpandedCandidateResult, float | None]] = []
     x_train, x_test = x_all.iloc[train_idx], x_all.iloc[test_idx]
     y_train, y_test = y_all[train_idx], y_all[test_idx]
+
+    try:
+        preprocessor = _build_preprocessor_for(feature_engineering, ctx, x_train=x_train)
+    except ValueError as exc:
+        return ExpandedSearchResult(
+            status=ModelingStatus.UNAVAILABLE, reason=str(exc), task_type=task.value
+        )
+
+    # a strongly right-skewed, non-negative regression target is log1p-
+    # transformed before every candidate fits (and expm1'd back before any
+    # metric is computed, via `TransformedTargetRegressor`, so every metric
+    # stays on the original scale and remains comparable to a non-transformed
+    # run) — the standard fix for a skewed target such as price / revenue /
+    # counts, which otherwise concentrates a model's error budget on a few
+    # large values instead of the bulk of the distribution.
+    target_log_transform = (
+        category == "regression"
+        and _skewness(y_train) > 1.0
+        and float(np.asarray(y_all, dtype=float).min()) >= 0.0
+    )
 
     cv_splitter = None
     if use_cross_validation and selection_metric in _CV_SCORING:
@@ -1842,12 +1976,49 @@ def run_expanded_search(
             )
         )
 
+    def _wrap_target(estimator: Any) -> Any:
+        if not target_log_transform:
+            return estimator
+        from sklearn.compose import TransformedTargetRegressor
+
+        return TransformedTargetRegressor(regressor=estimator, func=np.log1p, inverse_func=np.expm1)
+
+    def _score_candidate(
+        estimator: Any, metrics: dict[str, float]
+    ) -> tuple[float | None, dict[str, float]]:
+        """Runs CV (if enabled) for an already-fitted-shape `estimator` and
+        returns the score to rank by, mutating `metrics` in place with the
+        `cv_*` entries when CV succeeds."""
+        cv_mean: float | None = None
+        if cv_splitter is not None and selection_metric is not None:
+            try:
+                from sklearn.model_selection import cross_val_score
+
+                scoring = _CV_SCORING[selection_metric]
+                cv_scores = cross_val_score(
+                    estimator, x_all, y_all, cv=cv_splitter, scoring=scoring
+                )
+                cv_mean = float(
+                    -cv_scores.mean() if scoring.startswith("neg_") else cv_scores.mean()
+                )
+                metrics[f"cv_{selection_metric}_mean"] = _round(cv_mean)
+                metrics[f"cv_{selection_metric}_std"] = _round(float(cv_scores.std()))
+            except Exception:  # noqa: BLE001 - CV is a best-effort addition, never fatal
+                cv_mean = None
+        score = (
+            cv_mean
+            if cv_mean is not None
+            else (metrics.get(selection_metric) if selection_metric else None)
+        )
+        return score, metrics
+
     for spec in catalog:
         candidate_start = _perf_counter()
         try:
             pipeline = Pipeline([("preprocess", preprocessor), ("model", spec.build())])
-            pipeline.fit(x_train, y_train)
-            y_pred = np.asarray(pipeline.predict(x_test))
+            estimator = _wrap_target(pipeline)
+            estimator.fit(x_train, y_train)
+            y_pred = np.asarray(estimator.predict(x_test))
             if category == "regression":
                 metrics = _regression_metrics(y_test.astype(float), y_pred.astype(float))
             else:
@@ -1864,28 +2035,7 @@ def run_expanded_search(
                     y_test, y_pred, proba, n_classes=len(np.unique(y_train))
                 )
 
-            cv_mean: float | None = None
-            if cv_splitter is not None and selection_metric is not None:
-                try:
-                    from sklearn.model_selection import cross_val_score
-
-                    scoring = _CV_SCORING[selection_metric]
-                    cv_scores = cross_val_score(
-                        pipeline, x_all, y_all, cv=cv_splitter, scoring=scoring
-                    )
-                    cv_mean = float(
-                        -cv_scores.mean() if scoring.startswith("neg_") else cv_scores.mean()
-                    )
-                    metrics[f"cv_{selection_metric}_mean"] = _round(cv_mean)
-                    metrics[f"cv_{selection_metric}_std"] = _round(float(cv_scores.std()))
-                except Exception:  # noqa: BLE001 - CV is a best-effort addition, never fatal
-                    cv_mean = None
-
-            score = (
-                cv_mean
-                if cv_mean is not None
-                else (metrics.get(selection_metric) if selection_metric else None)
-            )
+            score, metrics = _score_candidate(estimator, metrics)
             results.append(
                 (
                     ExpandedCandidateResult(
@@ -1911,6 +2061,75 @@ def run_expanded_search(
                         status=TrainingRunStatus.FAILED,
                         reason=f"{type(exc).__name__}: {_normalise_error(str(exc))}",
                         fit_seconds=round(_perf_counter() - candidate_start, 4),
+                    ),
+                    None,
+                )
+            )
+
+    # a voting ensemble over the top-performing candidates, fit once more and
+    # scored exactly like any other candidate (ranked alongside everything
+    # else, dropped if it doesn't actually score better) — a single "winner"
+    # rarely beats a small ensemble of genuinely different models, so this is
+    # offered as one more candidate rather than assumed to be the answer.
+    ensemble_members = sorted(
+        (
+            (spec, score)
+            for spec, (result, score) in zip(catalog, results, strict=True)
+            if result.status is TrainingRunStatus.COMPLETED and score is not None
+        ),
+        key=lambda item: -item[1] if direction == "maximize" else item[1],
+    )[:_ENSEMBLE_TOP_K]
+    if len(ensemble_members) >= 2:
+        ensemble_start = _perf_counter()
+        member_names = [spec.estimator_name for spec, _score in ensemble_members]
+        try:
+            from sklearn.base import clone
+            from sklearn.ensemble import VotingClassifier, VotingRegressor
+
+            members = [
+                (f"m{i}", Pipeline([("preprocess", clone(preprocessor)), ("model", spec.build())]))
+                for i, (spec, _score) in enumerate(ensemble_members)
+            ]
+            voting_estimator: Any = (
+                VotingRegressor(estimators=members)
+                if category == "regression"
+                else VotingClassifier(estimators=members, voting="hard")
+            )
+            estimator = _wrap_target(voting_estimator)
+            estimator.fit(x_train, y_train)
+            y_pred = np.asarray(estimator.predict(x_test))
+            if category == "regression":
+                metrics = _regression_metrics(y_test.astype(float), y_pred.astype(float))
+            else:
+                metrics = _classification_metrics(
+                    y_test, y_pred, None, n_classes=len(np.unique(y_train))
+                )
+            score, metrics = _score_candidate(estimator, metrics)
+            results.append(
+                (
+                    ExpandedCandidateResult(
+                        rank=0,
+                        family=ModelFamily.ENSEMBLE,
+                        estimator_name=f"VotingEnsemble(top-{len(ensemble_members)})",
+                        hyperparameters={"members": member_names},
+                        status=TrainingRunStatus.COMPLETED,
+                        metrics=metrics,
+                        fit_seconds=round(_perf_counter() - ensemble_start, 4),
+                    ),
+                    score,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - deterministic, normalised failure record
+            results.append(
+                (
+                    ExpandedCandidateResult(
+                        rank=0,
+                        family=ModelFamily.ENSEMBLE,
+                        estimator_name=f"VotingEnsemble(top-{len(ensemble_members)})",
+                        hyperparameters={"members": member_names},
+                        status=TrainingRunStatus.FAILED,
+                        reason=f"{type(exc).__name__}: {_normalise_error(str(exc))}",
+                        fit_seconds=round(_perf_counter() - ensemble_start, 4),
                     ),
                     None,
                 )
@@ -1969,5 +2188,43 @@ def run_expanded_search(
             "no model artifact was persisted here; use "
             "data_engine.modeling.persistence.save_model with fit_final_pipeline (or an "
             "expanded-search-specific fit) to persist a chosen candidate",
-        ],
+            "classifiers that accept it were built with class_weight='balanced'; a "
+            "categorical column is one-hot encoded with sklearn's own max_categories cap "
+            "(infrequent/high-cardinality values bucketed together) rather than exploding "
+            "into one column per distinct value; numeric scaling switches from "
+            "StandardScaler to RobustScaler automatically when the training partition is "
+            "outlier-heavy (see training._is_outlier_heavy)",
+        ]
+        + (
+            [
+                "the target is strongly right-skewed and non-negative, so every candidate "
+                "was fit on log1p(target) and its predictions were inverse-transformed back "
+                "before any metric below was computed (sklearn's TransformedTargetRegressor) "
+                "— every metric is on the original target scale either way"
+            ]
+            if target_log_transform
+            else []
+        )
+        + (
+            [
+                f"a VotingEnsemble over the top {_ENSEMBLE_TOP_K} candidates (by the same "
+                "ranking metric) was also fit and scored as one more candidate — see its "
+                "'members' hyperparameter for which ones"
+            ]
+            if len(ensemble_members) >= 2
+            else []
+        )
+        + (
+            [
+                f"{dropped_missing_target} row(s) with a missing target were excluded "
+                + (
+                    "(leading / trailing rows trimmed to preserve contiguity for the "
+                    "time-ordered split)"
+                    if is_time_ordered
+                    else "from training"
+                )
+            ]
+            if dropped_missing_target
+            else []
+        ),
     )

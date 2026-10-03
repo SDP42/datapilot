@@ -1,15 +1,18 @@
-"""Phase 13.5 — a single-operator JWT auth boundary.
+"""Phase 15.1 — a real multi-user JWT auth boundary.
 
-Deliberately **not** a user-management system — one configured account
-(`backend.settings.Settings.auth_username` / `auth_password`), issuing a
-short-lived signed JWT on successful login. This exists so the frontend's
-login page gates something real, not a cosmetic form; a multi-user /
-role-based system is explicitly out of scope for this increment (see
-`docs/decisions.md`).
+Replaces Phase 13.5's single configured operator account: credentials are
+now verified against the `users` table (`..user_store.UserStore`), and
+the signed JWT carries both the user's id and username so every
+downstream dependency can scope data (history, gamification) to the
+actual caller rather than a single shared account. A `DATAPILOT_AUTH_*`
+dev account is still bootstrapped on startup (see `..bootstrap`) purely
+for local-dev convenience — it is a real row in `users`, not a special
+case here.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 import jwt
@@ -22,20 +25,23 @@ _security = HTTPBearer(auto_error=False)
 _ALGORITHM = "HS256"
 
 
-def verify_credentials(username: str, password: str) -> bool:
-    settings = get_settings()
-    return username == settings.auth_username and password == settings.auth_password
+@dataclass(frozen=True)
+class AuthenticatedUser:
+    """The identity carried by a verified bearer token."""
+
+    user_id: str
+    username: str
 
 
-def create_access_token(username: str) -> str:
+def create_access_token(user_id: str, username: str) -> str:
     settings = get_settings()
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings.jwt_expire_minutes)
-    payload = {"sub": username, "exp": expires_at}
+    payload = {"sub": username, "uid": user_id, "exp": expires_at}
     return jwt.encode(payload, settings.jwt_secret, algorithm=_ALGORITHM)
 
 
-def decode_access_token(token: str) -> str:
-    """Return the username encoded in `token`. Raises `HTTPException(401)` for anything invalid."""
+def decode_access_token(token: str) -> AuthenticatedUser:
+    """Return the identity encoded in `token`. Raises `HTTPException(401)` for anything invalid."""
     settings = get_settings()
     try:
         payload = jwt.decode(token, settings.jwt_secret, algorithms=[_ALGORITHM])
@@ -44,18 +50,19 @@ def decode_access_token(token: str) -> str:
     except jwt.InvalidTokenError as exc:
         raise HTTPException(status_code=401, detail="invalid token") from exc
     username = payload.get("sub")
-    if not username:
+    user_id = payload.get("uid")
+    if not username or not user_id:
         raise HTTPException(status_code=401, detail="invalid token")
-    return username
+    return AuthenticatedUser(user_id=user_id, username=username)
 
 
 def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(_security),
-) -> str:
-    """A FastAPI dependency: the authenticated username, or a `401`."""
+) -> AuthenticatedUser:
+    """A FastAPI dependency: the authenticated identity, or a `401`."""
     if credentials is None:
         raise HTTPException(status_code=401, detail="missing bearer token")
     return decode_access_token(credentials.credentials)
 
 
-__all__ = ["create_access_token", "decode_access_token", "get_current_user", "verify_credentials"]
+__all__ = ["AuthenticatedUser", "create_access_token", "decode_access_token", "get_current_user"]

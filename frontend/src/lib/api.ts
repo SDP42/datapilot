@@ -29,18 +29,75 @@ export class ApiError extends Error {
   }
 }
 
+export interface LoginResult {
+  access_token: string;
+  token_type: string;
+  username: string;
+}
+
 export async function login(username: string, password: string) {
   const res = await fetch(`${API_BASE}/api/v1/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, password }),
   });
-  return handle<{ access_token: string; token_type: string; username: string }>(res);
+  return handle<LoginResult>(res);
+}
+
+export type ExperienceLevel = "beginner" | "intermediate" | "advanced";
+export type PrimaryGoal =
+  | "learn_data_science"
+  | "analyze_business_data"
+  | "build_ml_models"
+  | "research"
+  | "explore_the_platform"
+  | "other";
+
+export interface RegisterInput {
+  username: string;
+  password: string;
+  confirmPassword: string;
+  experienceLevel: ExperienceLevel;
+  primaryGoal: PrimaryGoal;
+  fullName?: string;
+  role?: string;
+}
+
+export async function register(input: RegisterInput) {
+  const res = await fetch(`${API_BASE}/api/v1/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      username: input.username,
+      password: input.password,
+      confirm_password: input.confirmPassword,
+      experience_level: input.experienceLevel,
+      primary_goal: input.primaryGoal,
+      full_name: input.fullName || null,
+      role: input.role || null,
+    }),
+  });
+  return handle<LoginResult>(res);
+}
+
+export interface UserProfile {
+  user_id: string;
+  username: string;
+  full_name: string | null;
+  experience_level: ExperienceLevel;
+  primary_goal: PrimaryGoal;
+  role: string | null;
+  created_at: string;
+  xp: number;
+  level: number;
+  current_streak: number;
+  longest_streak: number;
+  badges: string[];
 }
 
 export async function getMe() {
   const res = await fetch(`${API_BASE}/api/v1/auth/me`, { headers: authHeaders() });
-  return handle<{ username: string }>(res);
+  return handle<UserProfile>(res);
 }
 
 export async function health() {

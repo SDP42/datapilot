@@ -21,16 +21,14 @@ from data_engine.modeling import (
     run_modeling_pipeline,
 )
 
-from ..activity_store import ActivityStore
-from ..auth import get_current_user
+from ..auth import AuthenticatedUser, get_current_user
 from ..db import get_session
 from ..dependencies import ingest_upload
+from ..instrumentation import record_activity
 
 router = APIRouter(
     prefix="/api/v1/modeling", tags=["modeling"], dependencies=[Depends(get_current_user)]
 )
-
-_activity = ActivityStore()
 
 
 @router.post("/run", response_model=ModelingSpec)
@@ -38,6 +36,7 @@ async def run(
     file: UploadFile,
     objective: str = Form(...),
     forecast_horizon: int = Form(default=1, ge=1),
+    current_user: AuthenticatedUser = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> ModelingSpec:
     """Ingest an uploaded CSV and run the full Phase-7 modeling pipeline on it."""
@@ -46,8 +45,9 @@ async def run(
         dataset_id=reference.dataset_id, objective=objective, forecast_horizon=forecast_horizon
     )
     spec = run_modeling_pipeline(df, request)
-    _activity.record(
+    record_activity(
         session,
+        current_user,
         kind="modeling",
         dataset_id=reference.dataset_id,
         dataset_filename=reference.original_filename,
@@ -63,6 +63,7 @@ async def search(
     file: UploadFile,
     objective: str = Form(...),
     cross_validate: bool = Form(default=False),
+    current_user: AuthenticatedUser = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> ExpandedSearchResult:
     """Ingest an uploaded CSV and fit + rank every candidate in the Phase 7.7
@@ -78,8 +79,9 @@ async def search(
     reference, df = await ingest_upload(file)
     request = ModelingRequest(dataset_id=reference.dataset_id, objective=objective)
     result = run_expanded_model_search(df, request, use_cross_validation=cross_validate)
-    _activity.record(
+    record_activity(
         session,
+        current_user,
         kind="search",
         dataset_id=reference.dataset_id,
         dataset_filename=reference.original_filename,

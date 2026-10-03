@@ -495,9 +495,11 @@ class ExpandedCandidateResult(BaseModel):
     rank: int = Field(description="1-indexed rank by the selection metric; 1 is best.")
     family: ModelFamily
     estimator_name: str
-    hyperparameters: dict[str, str | int | float | bool | list[int] | None] = Field(
+    hyperparameters: dict[str, str | int | float | bool | list[int] | list[str] | None] = Field(
         default_factory=dict,
-        description="The exact hyperparameters this candidate was fit with.",
+        description="The exact hyperparameters this candidate was fit with (a synthetic "
+        "VotingEnsemble candidate's 'members' entry is the list of estimator names it "
+        "combines, not a literal scikit-learn constructor argument).",
     )
     status: TrainingRunStatus
     metrics: dict[str, float] = Field(default_factory=dict)
