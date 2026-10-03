@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .bootstrap import seed_dev_account
 from .db import create_all_tables
-from .routes import analytics, auth, datasets, health, history, jobs, modeling, predictions
+from .routes import analytics, auth, datasets, dl, health, history, jobs, modeling, predictions
 
 
 def create_app() -> FastAPI:
@@ -46,6 +46,7 @@ def create_app() -> FastAPI:
     app.include_router(auth.router)
     app.include_router(datasets.router)
     app.include_router(modeling.router)
+    app.include_router(dl.router)
     app.include_router(predictions.router)
     app.include_router(jobs.router)
     app.include_router(analytics.router)

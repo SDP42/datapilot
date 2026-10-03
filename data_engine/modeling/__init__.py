@@ -65,6 +65,8 @@ from .persistence import (
     save_model,
 )
 from .pipeline import (
+    build_feature_engineering_spec,
+    build_problem_spec,
     run_clustering_search,
     run_deep_tune,
     run_expanded_model_search,
@@ -155,6 +157,8 @@ __all__ = [
     "TrainingRunStatus",
     "assess_model_readiness",
     "build_calendar_features",
+    "build_feature_engineering_spec",
+    "build_problem_spec",
     "build_temporal_features",
     "fit_final_pipeline",
     "generate_model_candidates",

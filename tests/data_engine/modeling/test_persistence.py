@@ -21,7 +21,7 @@ from data_engine.modeling import (
     save_model,
     train_and_persist_model,
 )
-from data_engine.modeling.pipeline import _build_feature_engineering_spec, _build_problem_spec
+from data_engine.modeling.pipeline import build_feature_engineering_spec, build_problem_spec
 
 _N = 300
 
@@ -46,8 +46,8 @@ def _binary_df() -> pd.DataFrame:
 def test_fit_final_pipeline_regression_roundtrip():
     df = _regression_df()
     request = ModelingRequest(dataset_id="ds-reg", objective="predict price")
-    problem = _build_problem_spec(df, request)
-    fe = _build_feature_engineering_spec(df, request, problem)
+    problem = build_problem_spec(df, request)
+    fe = build_feature_engineering_spec(df, request, problem)
 
     fitted = fit_final_pipeline(df, problem, fe, ModelFamily.LINEAR)
     assert fitted.category == "regression"
@@ -63,8 +63,8 @@ def test_fit_final_pipeline_regression_roundtrip():
 def test_fit_final_pipeline_unknown_family_raises():
     df = _regression_df()
     request = ModelingRequest(dataset_id="ds-reg", objective="predict price")
-    problem = _build_problem_spec(df, request)
-    fe = _build_feature_engineering_spec(df, request, problem)
+    problem = build_problem_spec(df, request)
+    fe = build_feature_engineering_spec(df, request, problem)
 
     with pytest.raises(ValueError):
         fit_final_pipeline(
@@ -75,8 +75,8 @@ def test_fit_final_pipeline_unknown_family_raises():
 def test_save_load_predict_roundtrip(tmp_path):
     df = _regression_df()
     request = ModelingRequest(dataset_id="ds-reg", objective="predict price")
-    problem = _build_problem_spec(df, request)
-    fe = _build_feature_engineering_spec(df, request, problem)
+    problem = build_problem_spec(df, request)
+    fe = build_feature_engineering_spec(df, request, problem)
     fitted = fit_final_pipeline(df, problem, fe, ModelFamily.LINEAR)
 
     metadata = save_model(fitted, dataset_id="ds-reg", objective="predict price", root=tmp_path)
@@ -98,8 +98,8 @@ def test_save_load_predict_roundtrip(tmp_path):
 def test_predict_with_missing_feature_column_reports_it_without_predicting(tmp_path):
     df = _regression_df()
     request = ModelingRequest(dataset_id="ds-reg", objective="predict price")
-    problem = _build_problem_spec(df, request)
-    fe = _build_feature_engineering_spec(df, request, problem)
+    problem = build_problem_spec(df, request)
+    fe = build_feature_engineering_spec(df, request, problem)
     fitted = fit_final_pipeline(df, problem, fe, ModelFamily.LINEAR)
     metadata = save_model(fitted, dataset_id="ds-reg", root=tmp_path)
 
@@ -121,8 +121,8 @@ def test_list_models_empty_store_returns_empty_list(tmp_path):
 def test_list_models_newest_first(tmp_path):
     df = _regression_df()
     request = ModelingRequest(dataset_id="ds-reg", objective="predict price")
-    problem = _build_problem_spec(df, request)
-    fe = _build_feature_engineering_spec(df, request, problem)
+    problem = build_problem_spec(df, request)
+    fe = build_feature_engineering_spec(df, request, problem)
     fitted = fit_final_pipeline(df, problem, fe, ModelFamily.LINEAR)
 
     first = save_model(fitted, dataset_id="ds-reg", root=tmp_path)

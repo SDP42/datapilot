@@ -248,6 +248,7 @@ from .execution import (
 )
 from .lstm import build_lstm
 from .mlp import build_mlp
+from .pipeline import run_mlp_pipeline
 from .runtime import DeviceResolution, resolve_device, seed_everything
 from .selection import select_dl_models
 from .tensors import TensorBatch, to_sequence_tensors, to_tensors
@@ -285,6 +286,7 @@ __all__ = [
     "run_cnn_modeling",
     "run_lstm_modeling",
     "run_mlp_modeling",
+    "run_mlp_pipeline",
     "run_transformer_modeling",
     "seed_everything",
     "select_dl_models",

@@ -49,6 +49,7 @@ def test_public_exports_are_intentional():
         "run_cnn_modeling",
         "run_lstm_modeling",
         "run_mlp_modeling",
+        "run_mlp_pipeline",
         "run_transformer_modeling",
         "seed_everything",
         "select_dl_models",

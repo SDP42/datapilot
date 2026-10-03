@@ -3006,6 +3006,72 @@ Phase-7/8 entry point.
   ranking.
 - **Decision:** 0108.
 
+#### Phase 14.14 — Deep Learning: Reachable End to End, Architecture Visualized — **Done**
+- **Scope:** research found `dl_engine` (Phase 8: MLP/CNN/LSTM/Transformer,
+  training, evaluation, selection) was fully implemented in Python but
+  had **zero** wiring to any backend route or frontend page — the
+  landing page's "4 DL architectures" stat was the only place it was
+  even mentioned. This phase makes the MLP (the architecture that
+  supports both regression and classification) reachable end to end,
+  plus the explicitly requested hidden-layer visualization; CNN/LSTM/
+  Transformer (sequence/image architectures needing a different data
+  shape than a tabular DataFrame provides) are left for a future
+  increment, noted here rather than silently expanded into.
+- **`data_engine.modeling.pipeline`'s `_build_problem_spec`/
+  `_build_feature_engineering_spec` promoted to public**
+  (`build_problem_spec`/`build_feature_engineering_spec`, exported from
+  `data_engine.modeling`) — generically useful DataFrame→ProblemSpec/
+  FeatureEngineeringSpec composition, not classical-ML-specific; reusing
+  them (rather than duplicating ~30 lines of composition logic in
+  `dl_engine`) keeps `dl_engine`'s existing "only ever imports
+  `data_engine`'s public API" discipline intact.
+- **`dl_engine/pipeline.py`'s `run_mlp_pipeline`**: the first place an
+  MLP is reachable from a raw DataFrame + objective — resolves the task
+  via the newly-public builders + the existing `assess_model_readiness`,
+  builds a numeric `(X, y)` pair itself (median-impute + standard-scale
+  numeric columns, one-hot encode categoricals, label-encode a
+  classification target — kept local rather than reaching into
+  `data_engine.modeling.training`'s *private* preprocessor, preserving
+  the one-way dependency direction every other `dl_engine` module
+  already has), splits train/eval (80/20, stratified for
+  classification), and hands off to the existing
+  `dl_engine.execution.run_mlp_modeling`. Default `epochs=100`
+  (verified empirically: 15 epochs under-converges on synthetic linear
+  data, R²≈-11; 100 epochs reaches R²≈0.82 in under 2 seconds).
+- **`POST /api/v1/dl/train`** (`routes/dl.py`): `hidden_layer_sizes` as
+  a comma-separated form field (invalid entries fall back to the
+  default `[64, 32]` rather than erroring); `"dl_train"` is now a
+  gamification kind (25 XP, the highest of any action — reflecting that
+  it's the most compute-intensive).
+- **Frontend — `/dashboard/deep-learning`**: an editable hidden-layer
+  list (add/remove/resize), an epochs field, and
+  **`components/dl/network-diagram.tsx`** — a dependency-free SVG
+  diagram rendering the real, currently-configured hidden layers
+  (neuron count per layer, capped display at 8 visible nodes with a
+  "+N more" label for larger layers), bracketed by generic input/output
+  endpoint markers. Deliberately *not* showing an exact input-feature or
+  output-class count on those two endpoints — the frontend has no
+  reliable way to know the post-encoding feature count without
+  fabricating one, and this project's standing discipline is to never
+  display an invented number. Updates live as hidden layers are edited,
+  before any training run. After training: a real loss-per-epoch curve
+  (`training.loss_history`, not synthesized) and real evaluation
+  metrics.
+- **Quality gates:** `pytest` full suite 2197 passed / 3 skipped (6 new
+  `test_pipeline.py` tests — regression/binary-classification complete
+  with real, non-trivial metrics, custom hidden-layer sizes respected,
+  a clustering objective and too-little-data both report unavailable,
+  missing-target rows are dropped — plus 3 new backend API tests, all
+  skipped automatically in an environment without PyTorch installed);
+  `ruff` / `ruff format` / `mypy` (184 source files) all green —
+  including the `dl_engine` public-exports guard test, deliberately
+  updated to expect `run_mlp_pipeline`. Frontend: `tsc --noEmit` clean,
+  `eslint` clean, `next build` succeeds (19 routes, 1 new). Verified
+  live in a real browser: the network diagram renders the configured
+  64/32 hidden layers correctly, and updates immediately when a third
+  layer is added.
+- **Decision:** 0109.
+
 ### Phase 15 — MLOps / Monitoring
 - **Objective:** operate models in production.
 - **Components:** model/data versioning, drift and performance monitoring,

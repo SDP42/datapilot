@@ -22,6 +22,7 @@ import {
   LogOut,
   CornerDownLeft,
   Boxes,
+  Brain,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
@@ -74,6 +75,7 @@ export function CommandPalette() {
       { id: "dashboards", label: "Dashboards", group: "Navigate", icon: LayoutGrid, run: () => router.push("/dashboard/dashboards") },
       { id: "modeling", label: "Modeling", group: "Navigate", icon: Cpu, run: () => router.push("/dashboard/modeling") },
       { id: "clustering", label: "Clustering", group: "Navigate", icon: Boxes, run: () => router.push("/dashboard/clustering") },
+      { id: "deep-learning", label: "Deep learning", group: "Navigate", icon: Brain, run: () => router.push("/dashboard/deep-learning") },
       { id: "predict", label: "Train & Predict", group: "Navigate", icon: Target, run: () => router.push("/dashboard/predict") },
       { id: "jobs", label: "Jobs", group: "Navigate", icon: ListChecks, run: () => router.push("/dashboard/jobs") },
       { id: "analytics", label: "Analytics", group: "Navigate", icon: Database, run: () => router.push("/dashboard/analytics") },

@@ -21,6 +21,7 @@ import {
   Flame,
   UserCircle,
   Boxes,
+  Brain,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
@@ -36,6 +37,7 @@ const NAV = [
   { href: "/dashboard/dashboards", label: "Dashboards", icon: LayoutGrid },
   { href: "/dashboard/modeling", label: "Modeling", icon: Cpu },
   { href: "/dashboard/clustering", label: "Clustering", icon: Boxes },
+  { href: "/dashboard/deep-learning", label: "Deep learning", icon: Brain },
   { href: "/dashboard/predict", label: "Train & Predict", icon: Target },
   { href: "/dashboard/jobs", label: "Jobs", icon: ListChecks },
   { href: "/dashboard/analytics", label: "Analytics", icon: Database },

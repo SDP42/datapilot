@@ -4,6 +4,62 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0109 — Phase 14.14: promote two composition helpers to public rather than duplicate them; never fabricate the diagram's endpoint counts
+
+- **Decision:** two choices define this increment:
+  1. **`data_engine.modeling.pipeline`'s private `_build_problem_spec`/
+     `_build_feature_engineering_spec` were renamed public**
+     (`build_problem_spec`/`build_feature_engineering_spec`) rather than
+     duplicated inside `dl_engine`. `dl_engine` needed the exact same
+     DataFrame→`ProblemSpec`/`FeatureEngineeringSpec` resolution the
+     classical pipeline already builds, and the two functions are
+     generically useful, not classical-ML-specific — nothing about them
+     assumes a scikit-learn estimator follows.
+  2. **The network diagram never displays an exact input-feature or
+     output-class count** — only the real, user-configured hidden-layer
+     sizes. The frontend genuinely does not know the post-one-hot-
+     encoding feature count (that happens server-side, and the response
+     contract doesn't echo it back), so the honest choice was generic
+     endpoint markers, not a plausible-looking fabricated number.
+  3. **CNN/LSTM/Transformer wiring was explicitly left out** of this
+     increment and recorded as such, rather than silently expanded into
+     once MLP wiring was underway — those architectures need sequence/
+     image-shaped input a tabular DataFrame doesn't naturally provide,
+     which is a different, larger problem than "wire up the existing
+     composition."
+  - **Reason:** reusing the existing composition functions, rather than
+    re-deriving the same `ProblemSpec`/`FeatureEngineeringSpec`
+    construction a second time in `dl_engine`, avoids two
+    implementations silently drifting apart on how a dataset's task and
+    features are resolved — the same reasoning that led Phase 14.12 to
+    factor `_prepare_supervised_run` out of `run_expanded_search` rather
+    than duplicate it in `tune_best_candidate`. The diagram and scope
+    decisions both follow this project's standing "never display/build
+    on an invented number" discipline — the same one behind `fit_seconds`
+    being real wall-clock time and badges being computed, not stored.
+  - **Alternatives considered:** duplicating the ~30 lines of Phase-5/6
+    composition logic inside `dl_engine` to preserve a stricter "every
+    function lives in exactly one package" boundary (rejected — the
+    duplication risk was judged worse than widening two functions'
+    visibility, especially since both were already pure compositions of
+    other public functions, not complex logic worth hiding); having the
+    backend route also return the resolved `input_features`/`output_dim`
+    so the diagram could show exact endpoint counts (rejected for this
+    pass — would mean enriching `DLModelingResult`, a contract shared
+    with `dl_engine.selection`/`execution`, for one frontend's display
+    need; the generic-endpoint diagram was judged the better trade for
+    this increment, revisitable if a future caller needs the same data).
+  - **Consequence:** `data_engine/modeling/pipeline.py`'s two renamed
+    functions are now part of `data_engine.modeling`'s public API
+    (`__all__`); `dl_engine/pipeline.py`, `routes/dl.py`, and
+    `/dashboard/deep-learning` (with `components/dl/network-diagram.tsx`)
+    are new. Quality gates: `pytest` 2197 passed / 3 skipped (9 new
+    tests, auto-skipped without PyTorch installed); `ruff` /
+    `ruff format` / `mypy` all green, including two renamed-reference
+    test-file updates and the `dl_engine` exports guard test; frontend
+    `tsc` / `eslint` / `next build` all clean; the diagram verified live,
+    updating correctly as hidden layers are added.
+
 ## 0108 — Phase 14.13: research before building — clustering's gap was reachability, not logic
 
 - **Decision:** before writing any clustering code, a read-only audit

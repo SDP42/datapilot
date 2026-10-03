@@ -173,6 +173,20 @@ export async function runClusterSearch(file: File, objective: string) {
   return uploadForm<ExpandedSearchResult>("/api/v1/modeling/cluster", form);
 }
 
+export async function trainDeepLearningModel(
+  file: File,
+  objective: string,
+  hiddenLayerSizes: number[],
+  epochs: number,
+) {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("objective", objective);
+  form.append("hidden_layer_sizes", hiddenLayerSizes.join(","));
+  form.append("epochs", String(epochs));
+  return uploadForm<DLModelingResult>("/api/v1/dl/train", form);
+}
+
 export async function submitModelingJob(file: File, objective: string, forecastHorizon = 1) {
   const form = new FormData();
   form.append("file", file);
@@ -450,6 +464,42 @@ export interface DeepTuneResult {
   notes: string[];
 }
 
+export interface DLTrainingResult {
+  status: string;
+  reason?: string | null;
+  device_used?: string | null;
+  epochs_requested: number;
+  epochs_completed: number;
+  batch_size: number;
+  learning_rate: number;
+  optimizer: string;
+  loss: string;
+  seed: number;
+  loss_history: number[];
+  final_loss?: number | null;
+  notes: string[];
+}
+
+export interface DLEvaluationResult {
+  status: string;
+  reason?: string | null;
+  task_type: string;
+  sample_count: number;
+  metrics: Record<string, number>;
+  primary_metric?: string | null;
+  notes: string[];
+}
+
+export interface DLModelingResult {
+  status: string;
+  reason?: string | null;
+  task_type: string;
+  family: string;
+  architecture_name?: string | null;
+  training?: DLTrainingResult | null;
+  evaluation?: DLEvaluationResult | null;
+}
+
 export interface ExpandedSearchResult {
   status: string;
   reason?: string | null;
@@ -513,7 +563,8 @@ export interface ActivityRecord {
     | "tune"
     | "train"
     | "predict"
-    | "cluster";
+    | "cluster"
+    | "dl_train";
   dataset_id: string;
   dataset_filename?: string | null;
   summary: string;

@@ -30,6 +30,7 @@ XP_BY_KIND: dict[str, int] = {
     "train": 20,
     "predict": 5,
     "cluster": 15,
+    "dl_train": 25,
 }
 
 #: XP thresholds for level N -> N+1; level = 1 + (how many thresholds `xp` clears).

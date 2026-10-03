@@ -8,6 +8,7 @@ import {
   Database,
   SlidersHorizontal,
   Boxes,
+  Brain,
   type LucideIcon,
 } from "lucide-react";
 import type { ActivityRecord } from "@/lib/api";
@@ -25,4 +26,5 @@ export const ACTIVITY_META: Record<
   train: { label: "Trained & saved a model", icon: Target, color: "text-success" },
   predict: { label: "Ran a prediction", icon: Database, color: "text-primary-2" },
   cluster: { label: "Ran clustering", icon: Boxes, color: "text-accent-2" },
+  dl_train: { label: "Trained a deep learning model", icon: Brain, color: "text-success" },
 };

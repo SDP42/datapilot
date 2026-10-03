@@ -14,7 +14,7 @@ from data_engine.modeling import (
     run_expanded_model_search,
     run_expanded_search,
 )
-from data_engine.modeling.pipeline import _build_feature_engineering_spec, _build_problem_spec
+from data_engine.modeling.pipeline import build_feature_engineering_spec, build_problem_spec
 from data_engine.modeling.training import _expanded_catalog
 
 _N = 300
@@ -171,8 +171,8 @@ def test_run_expanded_search_all_targets_missing_is_unavailable():
 def test_run_expanded_search_too_little_data_is_unavailable():
     df = _tiny_df()
     request = ModelingRequest(dataset_id="ds-tiny", objective="predict y")
-    problem = _build_problem_spec(df, request)
-    fe = _build_feature_engineering_spec(df, request, problem)
+    problem = build_problem_spec(df, request)
+    fe = build_feature_engineering_spec(df, request, problem)
     readiness = assess_model_readiness(df, problem, fe, objective=request.objective)
     split = recommend_data_split(df, problem, fe, objective=request.objective)
 

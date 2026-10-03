@@ -88,7 +88,7 @@ _NOTE_EVAL_SOT = (
 )
 
 
-def _build_problem_spec(df: pd.DataFrame, request: ModelingRequest) -> ProblemSpec:
+def build_problem_spec(df: pd.DataFrame, request: ModelingRequest) -> ProblemSpec:
     """Compose the Phase-5 ``ProblemSpec`` from the existing Phase-5 functions."""
     objective = request.objective
     spec = understand_problem(
@@ -112,7 +112,7 @@ def _build_problem_spec(df: pd.DataFrame, request: ModelingRequest) -> ProblemSp
     )
 
 
-def _build_feature_engineering_spec(
+def build_feature_engineering_spec(
     df: pd.DataFrame, request: ModelingRequest, problem: ProblemSpec
 ) -> FeatureEngineeringSpec:
     """Compose the Phase-6 ``FeatureEngineeringSpec`` from the existing Phase-6 functions."""
@@ -250,8 +250,8 @@ def run_modeling_pipeline(df: pd.DataFrame, request: ModelingRequest) -> Modelin
     spec = understand_modeling(request)
     objective = request.objective
 
-    problem = _build_problem_spec(df, request)
-    feature_engineering = _build_feature_engineering_spec(df, request, problem)
+    problem = build_problem_spec(df, request)
+    feature_engineering = build_feature_engineering_spec(df, request, problem)
 
     readiness = assess_model_readiness(df, problem, feature_engineering, objective=objective)
     split = recommend_data_split(df, problem, feature_engineering, objective=objective)
@@ -304,7 +304,7 @@ def train_and_persist_model(
     A **composition layer only**, exactly like :func:`run_modeling_pipeline`
     itself: it calls :func:`run_modeling_pipeline` verbatim for the
     ``ModelingSpec`` (never reimplementing any of its stages), and reuses
-    this module's own ``_build_problem_spec`` / ``_build_feature_engineering_spec``
+    this module's own ``build_problem_spec`` / ``build_feature_engineering_spec``
     — the same two calls :func:`run_modeling_pipeline` already makes — to
     refit the selected family on the full dataset via
     :func:`data_engine.modeling.training.fit_final_pipeline` and persist it
@@ -321,8 +321,8 @@ def train_and_persist_model(
     if spec.status is not ModelingStatus.COMPLETED or spec.selection.selected_family is None:
         return spec, None
 
-    problem = _build_problem_spec(df, request)
-    feature_engineering = _build_feature_engineering_spec(df, request, problem)
+    problem = build_problem_spec(df, request)
+    feature_engineering = build_feature_engineering_spec(df, request, problem)
     family = ModelFamily(spec.selection.selected_family)
 
     try:
@@ -348,7 +348,7 @@ def run_expanded_model_search(
     (100+ (estimator, hyperparameter) combinations) for this dataset.
 
     A **composition layer only**: reuses this module's own
-    ``_build_problem_spec`` / ``_build_feature_engineering_spec`` (the
+    ``build_problem_spec`` / ``build_feature_engineering_spec`` (the
     same two calls :func:`run_modeling_pipeline` makes) plus the existing
     Phase-7.2/7.3 ``assess_model_readiness`` / ``recommend_data_split``,
     then hands off to :func:`data_engine.modeling.training.run_expanded_search`
@@ -356,8 +356,8 @@ def run_expanded_model_search(
     reimplemented. ``use_cross_validation`` is passed straight through;
     see that function's own docstring for what it changes.
     """
-    problem = _build_problem_spec(df, request)
-    feature_engineering = _build_feature_engineering_spec(df, request, problem)
+    problem = build_problem_spec(df, request)
+    feature_engineering = build_feature_engineering_spec(df, request, problem)
     readiness = assess_model_readiness(
         df, problem, feature_engineering, objective=request.objective
     )
@@ -383,8 +383,8 @@ def run_deep_tune(
     search. `family` + `estimator_name` identify which candidate from an
     earlier `run_expanded_model_search` result to tune further.
     """
-    problem = _build_problem_spec(df, request)
-    feature_engineering = _build_feature_engineering_spec(df, request, problem)
+    problem = build_problem_spec(df, request)
+    feature_engineering = build_feature_engineering_spec(df, request, problem)
     readiness = assess_model_readiness(
         df, problem, feature_engineering, objective=request.objective
     )
@@ -404,13 +404,13 @@ def run_deep_tune(
 def run_clustering_search(df: pd.DataFrame, request: ModelingRequest) -> ExpandedSearchResult:
     """Phase 14.13: fit and rank every candidate in the clustering catalog
     for this dataset. The same composition pattern as
-    `run_expanded_model_search` — reuses `_build_problem_spec` /
-    `_build_feature_engineering_spec` / `assess_model_readiness` — but
+    `run_expanded_model_search` — reuses `build_problem_spec` /
+    `build_feature_engineering_spec` / `assess_model_readiness` — but
     hands off to `training.run_expanded_clustering_search` instead, since
     clustering has no target and no train/test split to plan.
     """
-    problem = _build_problem_spec(df, request)
-    feature_engineering = _build_feature_engineering_spec(df, request, problem)
+    problem = build_problem_spec(df, request)
+    feature_engineering = build_feature_engineering_spec(df, request, problem)
     readiness = assess_model_readiness(
         df, problem, feature_engineering, objective=request.objective
     )
