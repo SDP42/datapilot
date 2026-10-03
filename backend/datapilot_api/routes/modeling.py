@@ -19,6 +19,7 @@ from data_engine.modeling import (
     ModelFamily,
     ModelingRequest,
     ModelingSpec,
+    run_clustering_search,
     run_deep_tune,
     run_expanded_model_search,
     run_modeling_pipeline,
@@ -126,6 +127,34 @@ async def tune(
         dataset_id=reference.dataset_id,
         dataset_filename=reference.original_filename,
         summary=f"status={result.status.value}; deep-tuned {estimator_name}",
+    )
+    return result
+
+
+@router.post("/cluster", response_model=ExpandedSearchResult)
+async def cluster(
+    file: UploadFile,
+    objective: str = Form(...),
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> ExpandedSearchResult:
+    """Ingest an uploaded CSV and fit + rank every candidate in the Phase
+    14.13 clustering catalog (KMeans, AgglomerativeClustering, DBSCAN,
+    GaussianMixture — 50+ (estimator, hyperparameter) combinations).
+    Unsupervised: `objective` should describe a clustering/segmentation
+    goal (e.g. "cluster customers into segments") — a non-clustering
+    objective (predicting a specific target) returns `unavailable`.
+    """
+    reference, df = await ingest_upload(file)
+    request = ModelingRequest(dataset_id=reference.dataset_id, objective=objective)
+    result = run_clustering_search(df, request)
+    record_activity(
+        session,
+        current_user,
+        kind="cluster",
+        dataset_id=reference.dataset_id,
+        dataset_filename=reference.original_filename,
+        summary=f"status={result.status.value}; {result.candidate_count} candidates ranked",
     )
     return result
 

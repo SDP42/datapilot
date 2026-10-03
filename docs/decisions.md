@@ -4,6 +4,46 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0108 — Phase 14.13: research before building — clustering's gap was reachability, not logic
+
+- **Decision:** before writing any clustering code, a read-only audit
+  subagent was sent to establish exactly what already existed
+  (`_build_estimator`'s clustering branch, `_clustering_metrics`,
+  `TaskType.CLUSTERING` inference, `candidate_generation.py`'s
+  clustering recommendations) versus what was actually reachable from
+  an API route or a frontend page (nothing). That finding shaped the
+  fix directly: a new, parallel search entrypoint
+  (`run_expanded_clustering_search`) that reuses every existing piece,
+  rather than a clustering subsystem built from scratch alongside code
+  that already did most of the work.
+- **Reason:** guessing the shape of "clustering needs to be added"
+  without checking the actual code first risked two failure modes —
+  rebuilding logic that already existed (wasted effort, and a second,
+  possibly inconsistent implementation of the same metrics), or
+  missing that the real blocker was `run_expanded_search`'s explicit
+  `category not in ("regression", "classification")` refusal rather
+  than absent logic. Reading first made the actual fix small and
+  correct on the first attempt.
+- **Alternatives considered:** adding a `category == "clustering"`
+  branch directly inside `run_expanded_search` (rejected — that
+  function is supervised-only by design, its train/test-split and
+  cross-validation logic has no clustering equivalent, and bending it
+  to also handle an unsupervised path would have made one function
+  responsible for two genuinely different fitting strategies); defining
+  a new response contract specific to clustering (rejected —
+  `ExpandedSearchResult`/`ExpandedCandidateResult`'s shape — ranked
+  candidates, each with hyperparameters, metrics, fit_seconds — was
+  already general enough, and reusing it kept the frontend table
+  rendering logic nearly identical to the supervised search's).
+- **Consequence:** `training.py` gained `_expanded_clustering_catalog`
+  and `run_expanded_clustering_search`; `pipeline.py` gained
+  `run_clustering_search`; a new `/dashboard/clustering` page and
+  `POST /api/v1/modeling/cluster` route expose it end to end. Quality
+  gates: `pytest` 2188 passed / 3 skipped (8 new tests, including one
+  that verifies the search finds the actual known structure in
+  synthetic blob data, not just that it runs); `ruff` / `ruff format` /
+  `mypy` all green; frontend `tsc` / `eslint` / `next build` all clean.
+
 ## 0107 — Phase 14.12: adaptive tuning added opt-in with a fixed seed, never replacing the catalog's determinism guarantee
 
 - **Decision:** rather than deciding unilaterally whether to reverse

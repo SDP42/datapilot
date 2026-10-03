@@ -65,6 +65,7 @@ from .persistence import (
     save_model,
 )
 from .pipeline import (
+    run_clustering_search,
     run_deep_tune,
     run_expanded_model_search,
     run_modeling_pipeline,
@@ -102,6 +103,7 @@ from .training import (
     MODEL_TRAINING_TREE_MAX_DEPTH,
     FittedPipeline,
     fit_final_pipeline,
+    run_expanded_clustering_search,
     run_expanded_search,
     train_and_evaluate_models,
     tune_best_candidate,
@@ -160,7 +162,9 @@ __all__ = [
     "load_model",
     "predict_with_model",
     "recommend_data_split",
+    "run_clustering_search",
     "run_deep_tune",
+    "run_expanded_clustering_search",
     "run_expanded_model_search",
     "run_expanded_search",
     "run_modeling_pipeline",

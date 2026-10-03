@@ -2952,6 +2952,60 @@ Phase-7/8 entry point.
   uploads (noted here rather than silently skipped).
 - **Decision:** 0107.
 
+#### Phase 14.13 — Clustering: Reachable End to End — **Done**
+- **Scope:** "clustering things needs to be added" — research first
+  (via a read-only audit subagent) found clustering was *already*
+  half-built: `ModelFamily`/`_build_estimator`/`_clustering_metrics`
+  have handled it since Phase 7.1/7.4, `TaskType.CLUSTERING` is
+  inferable from objective text, and `candidate_generation.py`/
+  `split_planning.py` both already branch on it — but `run_expanded_search`
+  explicitly refused the category, and no API route or frontend page
+  ever called anything clustering-related. The gap was reachability,
+  not missing logic, so the fix is a new, parallel search entrypoint —
+  not a rewrite of what already existed.
+- **`_expanded_clustering_catalog`** (`training.py`): a fixed grid across
+  four families — `KMeans` (k=2..10), `AgglomerativeClustering`
+  (k×linkage), `DBSCAN` (eps×min_samples), `GaussianMixture`
+  (n_components×covariance_type) — 75 candidates total, the same
+  "never randomized" discipline as the supervised catalog.
+- **`run_expanded_clustering_search`**: unsupervised, so there is no
+  target and no train/test split — every candidate is fit on the full
+  preprocessed feature matrix via `Pipeline.fit_predict` and scored on
+  that same matrix with the existing `_clustering_metrics` (silhouette,
+  Calinski-Harabasz, Davies-Bouldin), ranked by silhouette (maximize).
+  A candidate that collapses to fewer than 2 clusters (e.g. DBSCAN
+  calling everything noise) is marked `failed` with that reason, never
+  silently dropped. Reuses `ExpandedSearchResult`/
+  `ExpandedCandidateResult` directly — no new response contract needed,
+  since the shape (ranked candidates, each with hyperparameters +
+  metrics + fit_seconds) was already general enough.
+- **`pipeline.run_clustering_search`** and
+  **`POST /api/v1/modeling/cluster`** (`routes/modeling.py`) expose it,
+  mirroring `run_expanded_model_search`'s own composition pattern; a
+  non-clustering objective (e.g. "predict churn") correctly infers a
+  different task type and reports `unavailable` rather than forcing a
+  clustering interpretation. `"cluster"` is now a gamification kind
+  (15 XP, same as `search`).
+- **Frontend**: a new standalone `/dashboard/clustering` page (its own
+  sidebar entry + command-palette entry) — deliberately separate from
+  the already-large Modeling page rather than a second mode bolted
+  onto it. Same visual pattern as the modeling search (StatCards, best-
+  candidate callout, full ranked table) with clustering-specific
+  metric columns (silhouette / Calinski-Harabasz / Davies-Bouldin) and
+  copy.
+- **Quality gates:** `pytest` full suite 2188 passed / 3 skipped (5 new
+  `test_clustering_search.py` tests — catalog size, correctly finds
+  the true cluster count on synthetic 3-blob data with silhouette
+  > 0.5, every family present, rejects a non-clustering objective,
+  too-little-data is unavailable — plus 3 new backend API tests);
+  `ruff` / `ruff format` / `mypy` (182 source files) all green.
+  Frontend: `tsc --noEmit` clean, `eslint` clean, `next build` succeeds
+  (18 routes, 1 new). Verified directly: a synthetic 3-blob dataset's
+  top-ranked candidate was `KMeans(n_clusters=3)` with silhouette 0.82
+  — the search finds the real, known structure, not an arbitrary
+  ranking.
+- **Decision:** 0108.
+
 ### Phase 15 — MLOps / Monitoring
 - **Objective:** operate models in production.
 - **Components:** model/data versioning, drift and performance monitoring,

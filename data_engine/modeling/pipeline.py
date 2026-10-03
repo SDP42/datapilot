@@ -70,6 +70,7 @@ from .selection import select_model
 from .split_planning import recommend_data_split
 from .training import (
     fit_final_pipeline,
+    run_expanded_clustering_search,
     run_expanded_search,
     train_and_evaluate_models,
     tune_best_candidate,
@@ -397,4 +398,22 @@ def run_deep_tune(
         family=family,
         estimator_name=estimator_name,
         objective=request.objective,
+    )
+
+
+def run_clustering_search(df: pd.DataFrame, request: ModelingRequest) -> ExpandedSearchResult:
+    """Phase 14.13: fit and rank every candidate in the clustering catalog
+    for this dataset. The same composition pattern as
+    `run_expanded_model_search` — reuses `_build_problem_spec` /
+    `_build_feature_engineering_spec` / `assess_model_readiness` — but
+    hands off to `training.run_expanded_clustering_search` instead, since
+    clustering has no target and no train/test split to plan.
+    """
+    problem = _build_problem_spec(df, request)
+    feature_engineering = _build_feature_engineering_spec(df, request, problem)
+    readiness = assess_model_readiness(
+        df, problem, feature_engineering, objective=request.objective
+    )
+    return run_expanded_clustering_search(
+        df, problem, feature_engineering, readiness, objective=request.objective
     )

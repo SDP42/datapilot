@@ -2562,3 +2562,219 @@ def tune_best_candidate(
             estimator_name=estimator_name,
             fit_seconds=round(_perf_counter() - start, 4),
         )
+
+
+# --- Phase 14.13 — clustering: a real, reachable expanded search --------
+#
+# `ModelFamily`/`_build_estimator`/`_clustering_metrics` have supported
+# clustering since Phase 7.1/7.4; this is the first place it is actually
+# reachable end to end — `run_expanded_search` above is deliberately
+# supervised-only (see its own docstring), so clustering needed its own
+# search entrypoint rather than another branch jammed into that one.
+
+
+def _expanded_clustering_catalog() -> list[_CandidateSpec]:
+    """A fixed, documented grid across four clustering families — the
+    same "never randomized, always the same candidates for the same
+    data" discipline the supervised catalog (`_expanded_catalog`) uses.
+    """
+    from sklearn.cluster import DBSCAN, AgglomerativeClustering, KMeans
+    from sklearn.mixture import GaussianMixture
+
+    seed = MODEL_TRAINING_RANDOM_SEED
+    specs: list[_CandidateSpec] = []
+
+    _sweep(
+        specs,
+        ModelFamily.DISTANCE_BASED,
+        "KMeans",
+        [{"n_clusters": k} for k in range(2, 11)],
+        lambda n_clusters: KMeans(n_clusters=n_clusters, random_state=seed, n_init=10),
+    )
+    _sweep(
+        specs,
+        ModelFamily.DISTANCE_BASED,
+        "AgglomerativeClustering",
+        [
+            {"n_clusters": k, "linkage": linkage}
+            for k in (2, 3, 4, 5, 6, 8, 10)
+            for linkage in ("ward", "complete", "average")
+        ],
+        lambda n_clusters, linkage: AgglomerativeClustering(n_clusters=n_clusters, linkage=linkage),
+    )
+    _sweep(
+        specs,
+        ModelFamily.DISTANCE_BASED,
+        "DBSCAN",
+        [
+            {"eps": eps, "min_samples": min_samples}
+            for eps in (0.3, 0.5, 0.7, 1.0, 1.5, 2.0)
+            for min_samples in (3, 5, 10)
+        ],
+        lambda eps, min_samples: DBSCAN(eps=eps, min_samples=min_samples),
+    )
+    _sweep(
+        specs,
+        ModelFamily.PROBABILISTIC,
+        "GaussianMixture",
+        [
+            {"n_components": k, "covariance_type": ct}
+            for k in range(2, 11)
+            for ct in ("full", "tied", "diag")
+        ],
+        lambda n_components, covariance_type: GaussianMixture(
+            n_components=n_components, covariance_type=covariance_type, random_state=seed
+        ),
+    )
+    return specs
+
+
+def run_expanded_clustering_search(
+    df: pd.DataFrame,
+    problem: ProblemSpec,
+    feature_engineering: FeatureEngineeringSpec,
+    readiness: ModelReadiness,
+    *,
+    objective: str | None = None,
+) -> ExpandedSearchResult:
+    """Fit and evaluate every candidate in the Phase 14.13 clustering
+    catalog — unsupervised, so there is no train/test split or target:
+    every candidate is fit on the full preprocessed feature matrix and
+    scored on that same matrix via `_clustering_metrics` (silhouette,
+    Calinski-Harabasz, Davies-Bouldin), ranked by silhouette score
+    (higher is better). Reuses `ExpandedSearchResult`/
+    `ExpandedCandidateResult` — the contract shape is identical to the
+    supervised search's, just with clustering-specific metric names
+    and no `cv_*` support (cross-validation is not a meaningful concept
+    without a target to score against).
+
+    A candidate for which fewer than 2 distinct clusters were assigned
+    (e.g. DBSCAN calling everything noise/one cluster for an eps too
+    large or too small) is marked `failed` with that explicit reason,
+    exactly like any other candidate failure — never silently dropped.
+    """
+    del objective
+    task_inference = problem.task_type
+    if task_inference.status is not _PU_COMPLETED or task_inference.task_type is None:
+        return ExpandedSearchResult(
+            status=ModelingStatus.UNAVAILABLE, reason="task-type inference is not completed"
+        )
+    task = task_inference.task_type
+    if task is not TaskType.CLUSTERING:
+        return ExpandedSearchResult(
+            status=ModelingStatus.UNAVAILABLE,
+            reason="the clustering search covers clustering tasks only",
+            task_type=task.value,
+        )
+    if readiness.status is not ModelingStatus.COMPLETED or readiness.ready is False:
+        first = (
+            readiness.blocking_issues[0]
+            if readiness.blocking_issues
+            else (readiness.reason or "the data is not ready for modeling")
+        )
+        return ExpandedSearchResult(
+            status=ModelingStatus.UNAVAILABLE,
+            reason=f"training is blocked by model-readiness issues: {first}",
+            task_type=task.value,
+        )
+    if not _SKLEARN_AVAILABLE:
+        return ExpandedSearchResult(
+            status=ModelingStatus.UNAVAILABLE,
+            reason="scikit-learn is not available in this environment",
+            task_type=task.value,
+        )
+
+    try:
+        ctx = _resolve_task_and_features(df, problem, feature_engineering)
+    except ValueError as exc:
+        return ExpandedSearchResult(
+            status=ModelingStatus.UNAVAILABLE, reason=str(exc), task_type=task.value
+        )
+
+    catalog = _expanded_clustering_catalog()
+    x_all = df[ctx.feature_cols]
+
+    try:
+        preprocessor = _build_preprocessor_for(feature_engineering, ctx, x_train=x_all)
+    except ValueError as exc:
+        return ExpandedSearchResult(
+            status=ModelingStatus.UNAVAILABLE, reason=str(exc), task_type=task.value
+        )
+
+    from sklearn.pipeline import Pipeline
+
+    results: list[tuple[ExpandedCandidateResult, float | None]] = []
+    for spec in catalog:
+        start = _perf_counter()
+        try:
+            pipeline = Pipeline([("preprocess", preprocessor), ("model", spec.build())])
+            labels = np.asarray(pipeline.fit_predict(x_all))
+            transformed = pipeline.named_steps["preprocess"].transform(x_all)
+            metrics = _clustering_metrics(np.asarray(transformed, dtype=float), labels)
+            if not metrics:
+                raise ValueError(
+                    "fewer than 2 distinct clusters were assigned (or every point is its "
+                    "own cluster); no clustering metric is defined"
+                )
+            results.append(
+                (
+                    ExpandedCandidateResult(
+                        rank=0,
+                        family=spec.family,
+                        estimator_name=spec.estimator_name,
+                        hyperparameters=spec.hyperparameters,
+                        status=TrainingRunStatus.COMPLETED,
+                        metrics=metrics,
+                        fit_seconds=round(_perf_counter() - start, 4),
+                    ),
+                    metrics.get("silhouette_score"),
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - deterministic, normalised failure record
+            results.append(
+                (
+                    ExpandedCandidateResult(
+                        rank=0,
+                        family=spec.family,
+                        estimator_name=spec.estimator_name,
+                        hyperparameters=spec.hyperparameters,
+                        status=TrainingRunStatus.FAILED,
+                        reason=f"{type(exc).__name__}: {_normalise_error(str(exc))}",
+                        fit_seconds=round(_perf_counter() - start, 4),
+                    ),
+                    None,
+                )
+            )
+
+    def _sort_key(item: tuple[ExpandedCandidateResult, float | None]) -> tuple[int, float]:
+        result, score = item
+        if score is None:
+            return (1, 0.0)
+        return (0, -score)  # silhouette_score: higher is better
+
+    results.sort(key=_sort_key)
+    ranked = [
+        result.model_copy(update={"rank": i + 1}) for i, (result, _score) in enumerate(results)
+    ]
+
+    return ExpandedSearchResult(
+        status=ModelingStatus.COMPLETED,
+        task_type=task.value,
+        selection_metric="silhouette_score",
+        candidate_count=len(ranked),
+        total_fit_seconds=round(sum(r.fit_seconds for r, _ in results), 4),
+        candidates=ranked,
+        notes=[
+            f"{len(catalog)} (estimator, hyperparameter) clustering candidates — KMeans, "
+            "AgglomerativeClustering, DBSCAN, and GaussianMixture, each swept across a fixed "
+            "hyperparameter grid",
+            "unsupervised: every candidate is fit on the full feature matrix (no target, no "
+            "train/test split) and scored on that same matrix via silhouette / "
+            "Calinski-Harabasz / Davies-Bouldin",
+            "ranked by silhouette_score (maximize) — see each candidate's own metrics for "
+            "the other two, which are reported but not used to rank",
+            f"random seed: {MODEL_TRAINING_RANDOM_SEED} (fixed)",
+            "a candidate that assigned fewer than 2 distinct clusters (e.g. DBSCAN treating "
+            "everything as noise) is marked failed with that reason, never silently dropped",
+        ],
+    )

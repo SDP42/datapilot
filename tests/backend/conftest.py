@@ -81,3 +81,20 @@ def sample_xlsx_bytes(tmp_path):
     buf = io.BytesIO()
     df.to_excel(buf, index=False, engine="openpyxl")
     return buf.getvalue()
+
+
+@pytest.fixture
+def sample_blobs_csv_bytes():
+    """Three well-separated 2D blobs — for Phase 14.13's clustering search,
+    which needs real cluster structure, not a regression/classification
+    target."""
+    import numpy as np
+
+    rng = np.random.default_rng(0)
+    lines = ["x1,x2"]
+    for cx, cy in ((0.0, 0.0), (10.0, 10.0), (0.0, 10.0)):
+        for _ in range(40):
+            x1 = rng.normal(cx, 1.0)
+            x2 = rng.normal(cy, 1.0)
+            lines.append(f"{x1},{x2}")
+    return ("\n".join(lines)).encode()

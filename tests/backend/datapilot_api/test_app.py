@@ -202,3 +202,45 @@ def test_modeling_tune_rejects_unknown_family(client, auth_headers, sample_csv_b
         headers=auth_headers,
     )
     assert response.status_code == 422
+
+
+def test_modeling_cluster_finds_real_cluster_structure(
+    client, auth_headers, sample_blobs_csv_bytes
+):
+    files = {"file": ("blobs.csv", io.BytesIO(sample_blobs_csv_bytes), "text/csv")}
+    response = client.post(
+        "/api/v1/modeling/cluster",
+        files=files,
+        data={"objective": "cluster customers into segments"},
+        headers=auth_headers,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "completed"
+    assert body["task_type"] == "clustering"
+    assert body["selection_metric"] == "silhouette_score"
+    assert body["candidate_count"] > 50
+    assert body["candidates"][0]["rank"] == 1
+    assert body["candidates"][0]["hyperparameters"].get("n_clusters") == 3
+
+
+def test_modeling_cluster_rejects_non_clustering_objective(client, auth_headers, sample_csv_bytes):
+    files = {"file": ("data.csv", io.BytesIO(sample_csv_bytes), "text/csv")}
+    response = client.post(
+        "/api/v1/modeling/cluster",
+        files=files,
+        data={"objective": "predict y"},
+        headers=auth_headers,
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "unavailable"
+
+
+def test_modeling_cluster_requires_auth(client, sample_blobs_csv_bytes):
+    files = {"file": ("blobs.csv", io.BytesIO(sample_blobs_csv_bytes), "text/csv")}
+    response = client.post(
+        "/api/v1/modeling/cluster",
+        files=files,
+        data={"objective": "cluster customers into segments"},
+    )
+    assert response.status_code == 401

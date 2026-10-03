@@ -166,6 +166,13 @@ export async function tuneBestCandidate(
   return uploadForm<DeepTuneResult>("/api/v1/modeling/tune", form);
 }
 
+export async function runClusterSearch(file: File, objective: string) {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("objective", objective);
+  return uploadForm<ExpandedSearchResult>("/api/v1/modeling/cluster", form);
+}
+
 export async function submitModelingJob(file: File, objective: string, forecastHorizon = 1) {
   const form = new FormData();
   form.append("file", file);
