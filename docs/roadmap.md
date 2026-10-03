@@ -2404,6 +2404,65 @@ Phase-7/8 entry point.
   conclusion insight.
 - **Decision:** 0098.
 
+#### Phase 14.4 — MVP-Readiness Pass: 100+ Model Catalog, One-Click Full Pipeline, Voice Control — **Done**
+- **Scope:** direct response to "backend is only 25%" (now addressed
+  concretely: the search catalog grew from ~21-22 candidates to 100+ per
+  task category), "all in one go" (every stage run back to back from one
+  upload), and "a proper voice assistant" (built with the real Web
+  Speech API, not a mock). Also fixed the actual root cause of "backend
+  is not working" reported this session: both dev servers had simply
+  stopped (an environment reset) — restarted, verified login -> ingest
+  -> quality -> EDA -> modeling -> search -> predict -> history all work
+  end to end against the real backend.
+- **Phase 7.7 catalog expanded to 100+ candidates per category
+  (`data_engine.modeling.training._expanded_catalog`).** A new `_sweep`
+  helper keeps the (still fixed, still non-adaptive) hyperparameter
+  grids declarative rather than hand-duplicating `_CandidateSpec`
+  entries. Added, beyond the original six estimator types: SGD, Huber,
+  BayesianRidge, PassiveAggressive regressors/classifiers, RidgeClassifier,
+  Perceptron, AdaBoost, Bagging, HistGradientBoosting
+  (regressors+classifiers), SVR/SVC, BernoulliNB, and both
+  Linear/QuadraticDiscriminantAnalysis — every new type mapped onto the
+  existing fixed 6-value `ModelFamily` enum rather than growing it (SVM
+  under `DISTANCE_BASED`, boosting/bagging variants under `ENSEMBLE`,
+  linear-model variants under `LINEAR`, discriminant analysis alongside
+  `GaussianNB` under `PROBABILISTIC`). Verified: 103 regression / 102
+  classification candidates, fit against a real dataset in ~6-7 seconds
+  total with 0-1 genuine failures (one numerically-degenerate QDA case,
+  caught and reported, never a crash).
+- **Frontend: `/dashboard/all-in-one` — the "run everything" page.**
+  One upload (plus an optional objective), five sequential stages shown
+  with live status (ingest -> quality -> EDA -> modeling -> train &
+  persist), each stage's own summary inline, and a final KPI row. Skips
+  modeling/training gracefully (marked "skipped", not "failed") when no
+  objective is given, since there's nothing to predict.
+- **Frontend: `components/voice/voice-assistant.tsx` — a real, working
+  voice assistant.** Browser-native `SpeechRecognition` +
+  `speechSynthesis` (no paid API, no new dependency) — tap to speak, a
+  fixed command grammar maps phrases ("open history", "run everything",
+  "open modeling", …) to in-app navigation, and the assistant speaks
+  back a confirmation. Verified in-browser: the real mic-permission flow
+  fires correctly; a denied/unavailable microphone degrades to a visible
+  "check browser permissions" message rather than crashing — honestly
+  scoped to navigation commands, not full conversational AI.
+- **Quality gates:** `pytest` full suite 2152 passed / 3 skipped (test
+  assertions updated from ">20" to ">100" candidates to match the
+  expanded catalog); `ruff` / `ruff format` / `mypy` (176 source files)
+  all green. Frontend: `tsc --noEmit` clean, `eslint` clean, `next
+  build` succeeds (14 static routes). Verified end to end in a real
+  browser: the all-in-one pipeline completed all 5 stages on a real HR
+  dataset (80 rows), the voice assistant panel opened and its mic flow
+  behaved correctly.
+- **Explicitly not done in this pass** (scope honestly deferred, not
+  silently dropped): "100+ deep learning and Gen-AI models" — the 100+
+  figure delivered is classical ML (scikit-learn) breadth; wiring the
+  existing `dl_engine` PyTorch architectures and `ai_engine` LLM
+  providers into this same ranked-search UI is a natural Phase 7.8/14.5
+  but was not attempted here. Additional "crazier" frontend component
+  work beyond what Phase 14/14.2 already built was also not attempted
+  this pass, given the time this increment's other items took.
+- **Decision:** 0099.
+
 ### Phase 15 — MLOps / Monitoring
 - **Objective:** operate models in production.
 - **Components:** model/data versioning, drift and performance monitoring,

@@ -15,6 +15,7 @@ import {
   LayoutGrid,
   Target,
   History,
+  Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
@@ -22,6 +23,7 @@ import { Avatar } from "@/components/ui/avatar";
 
 const NAV = [
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
+  { href: "/dashboard/all-in-one", label: "All in one go", icon: Zap },
   { href: "/dashboard/upload", label: "Ingest", icon: UploadCloud },
   { href: "/dashboard/quality", label: "Quality", icon: ShieldCheck },
   { href: "/dashboard/eda", label: "EDA", icon: LineChart },

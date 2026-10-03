@@ -92,7 +92,7 @@ def test_modeling_run_rejects_invalid_forecast_horizon(client, auth_headers, sam
     assert response.status_code == 422
 
 
-def test_modeling_search_returns_more_than_20_ranked_candidates(
+def test_modeling_search_returns_more_than_100_ranked_candidates(
     client, auth_headers, sample_csv_bytes
 ):
     files = {"file": ("data.csv", io.BytesIO(sample_csv_bytes), "text/csv")}
@@ -105,7 +105,7 @@ def test_modeling_search_returns_more_than_20_ranked_candidates(
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["status"] == "completed"
-    assert body["candidate_count"] > 20
+    assert body["candidate_count"] > 100
     assert len(body["candidates"]) == body["candidate_count"]
     assert body["candidates"][0]["rank"] == 1
 

@@ -41,9 +41,9 @@ def _tiny_df() -> pd.DataFrame:
     return pd.DataFrame({"x1": [1, 2, 3], "x2": [4, 5, 6], "y": [1, 0, 1]})
 
 
-def test_expanded_catalog_has_more_than_20_candidates_per_category():
-    assert len(_expanded_catalog("regression")) > 20
-    assert len(_expanded_catalog("classification")) > 20
+def test_expanded_catalog_has_more_than_100_candidates_per_category():
+    assert len(_expanded_catalog("regression")) > 100
+    assert len(_expanded_catalog("classification")) > 100
 
 
 def test_expanded_catalog_unknown_category_is_empty():
@@ -59,7 +59,7 @@ def test_run_expanded_model_search_regression_ranks_every_candidate():
     assert result.status is ModelingStatus.COMPLETED
     assert result.task_type == "regression"
     assert result.selection_metric == "rmse"
-    assert result.candidate_count > 20
+    assert result.candidate_count > 100
     assert len(result.candidates) == result.candidate_count
 
     # ranks are 1..N with no gaps, and sorted by rmse ascending (minimize)
@@ -78,7 +78,7 @@ def test_run_expanded_model_search_classification_ranks_by_f1_descending():
     assert result.status is ModelingStatus.COMPLETED
     assert result.task_type == "binary_classification"
     assert result.selection_metric == "f1"
-    assert result.candidate_count > 20
+    assert result.candidate_count > 100
 
     completed = [c for c in result.candidates if c.status is TrainingRunStatus.COMPLETED]
     f1s = [c.metrics["f1"] for c in completed if "f1" in c.metrics]

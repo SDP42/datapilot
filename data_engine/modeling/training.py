@@ -1239,6 +1239,21 @@ class _CandidateSpec:
     build: Any  # Callable[[], Any] — a zero-arg estimator factory
 
 
+def _sweep(
+    specs: list[_CandidateSpec],
+    family: ModelFamily,
+    name: str,
+    param_sets: list[dict[str, Any]],
+    factory: Any,
+) -> None:
+    """Append one `_CandidateSpec` per entry in `param_sets`, each built by
+    `factory(**params)`. The closure captures `params` by default-argument
+    binding (`p=params`) so every candidate gets its own exact hyperparameters
+    rather than all sharing the loop variable's final value."""
+    for params in param_sets:
+        specs.append(_CandidateSpec(family, name, dict(params), lambda p=params: factory(**p)))
+
+
 def _expanded_catalog(category: str) -> list[_CandidateSpec]:
     """Phase 7.7's expanded candidate catalog for one task category.
 
@@ -1246,210 +1261,441 @@ def _expanded_catalog(category: str) -> list[_CandidateSpec]:
     same data and the same fixed random seed always produce the same
     ranked result. Each entry is a concrete scikit-learn estimator plus
     the exact hyperparameters it was given; nothing here is tuned
-    adaptively from the data.
+    adaptively from the data. 100+ candidates per category — every
+    scikit-learn estimator family with a dependency-light, deterministic
+    `fit`, swept across a documented hyperparameter grid.
+
+    Every new estimator type here is mapped onto the existing, fixed
+    6-value `ModelFamily` enum (declarative since Phase 7.1) rather than
+    growing that enum — e.g. SVM under `DISTANCE_BASED` (margin/kernel
+    methods, the closest existing bucket), SGD/Huber/Perceptron/
+    PassiveAggressive/RidgeClassifier/BayesianRidge under `LINEAR`,
+    AdaBoost/Bagging/HistGradientBoosting under `ENSEMBLE`, and
+    discriminant-analysis/BernoulliNB under `PROBABILISTIC` alongside
+    GaussianNB.
     """
     seed = MODEL_TRAINING_RANDOM_SEED
     specs: list[_CandidateSpec] = []
 
+    _TREE_DEPTHS: list[dict[str, Any]] = [
+        {"max_depth": d} for d in (2, 3, 4, 5, 6, 7, 8, 10, 12, 15, 20, None)
+    ]
+    _FOREST_GRID: list[dict[str, Any]] = [
+        {"n_estimators": n, "max_depth": d}
+        for n, d in (
+            (50, 4),
+            (50, 8),
+            (50, None),
+            (100, 6),
+            (100, 10),
+            (100, None),
+            (150, 8),
+            (200, 10),
+            (200, None),
+        )
+    ]
+    _BOOST_GRID: list[dict[str, Any]] = [
+        {"n_estimators": n, "learning_rate": lr}
+        for n, lr in (
+            (50, 0.1),
+            (100, 0.1),
+            (100, 0.05),
+            (150, 0.05),
+            (200, 0.05),
+            (200, 0.03),
+            (300, 0.02),
+        )
+    ]
+    _KNN_GRID: list[dict[str, Any]] = [
+        {"n_neighbors": k} for k in (2, 3, 4, 5, 6, 7, 8, 10, 12, 15, 20, 25, 30)
+    ]
+    _MLP_GRID: list[dict[str, Any]] = [
+        {"hidden_layer_sizes": list(h)}
+        for h in ((16,), (32,), (64,), (128,), (32, 16), (64, 32), (128, 64), (64, 64, 32))
+    ]
+
     if category == "regression":
         from sklearn.ensemble import (
+            AdaBoostRegressor,
+            BaggingRegressor,
             ExtraTreesRegressor,
             GradientBoostingRegressor,
+            HistGradientBoostingRegressor,
             RandomForestRegressor,
         )
-        from sklearn.linear_model import ElasticNet, Lasso, LinearRegression, Ridge
+        from sklearn.linear_model import (
+            BayesianRidge,
+            ElasticNet,
+            HuberRegressor,
+            Lasso,
+            LinearRegression,
+            PassiveAggressiveRegressor,
+            Ridge,
+            SGDRegressor,
+        )
         from sklearn.neighbors import KNeighborsRegressor
         from sklearn.neural_network import MLPRegressor
+        from sklearn.svm import SVR
         from sklearn.tree import DecisionTreeRegressor
 
-        specs += [
-            _CandidateSpec(ModelFamily.LINEAR, "LinearRegression", {}, LinearRegression),
-            _CandidateSpec(
-                ModelFamily.LINEAR,
-                "Ridge",
-                {"alpha": 1.0},
-                lambda: Ridge(alpha=1.0, random_state=seed),
-            ),
-            _CandidateSpec(
-                ModelFamily.LINEAR,
-                "Ridge",
-                {"alpha": 10.0},
-                lambda: Ridge(alpha=10.0, random_state=seed),
-            ),
-            _CandidateSpec(
-                ModelFamily.LINEAR,
-                "Lasso",
-                {"alpha": 0.1},
-                lambda: Lasso(alpha=0.1, random_state=seed),
-            ),
-            _CandidateSpec(
-                ModelFamily.LINEAR,
-                "Lasso",
-                {"alpha": 1.0},
-                lambda: Lasso(alpha=1.0, random_state=seed),
-            ),
-            _CandidateSpec(
-                ModelFamily.LINEAR,
-                "ElasticNet",
-                {"alpha": 1.0, "l1_ratio": 0.5},
-                lambda: ElasticNet(alpha=1.0, l1_ratio=0.5, random_state=seed),
-            ),
-        ]
-        for depth in (3, 6, 10, None):
-            specs.append(
-                _CandidateSpec(
-                    ModelFamily.TREE_BASED,
-                    "DecisionTreeRegressor",
-                    {"max_depth": depth},
-                    lambda d=depth: DecisionTreeRegressor(max_depth=d, random_state=seed),
-                )
-            )
-        for n_estimators, max_depth in ((50, 6), (100, None), (200, 10)):
-            specs.append(
-                _CandidateSpec(
-                    ModelFamily.ENSEMBLE,
-                    "RandomForestRegressor",
-                    {"n_estimators": n_estimators, "max_depth": max_depth},
-                    lambda n=n_estimators, d=max_depth: RandomForestRegressor(
-                        n_estimators=n, max_depth=d, random_state=seed, n_jobs=1
-                    ),
-                )
-            )
-        for n_estimators, lr in ((100, 0.1), (200, 0.05)):
-            specs.append(
-                _CandidateSpec(
-                    ModelFamily.ENSEMBLE,
-                    "GradientBoostingRegressor",
-                    {"n_estimators": n_estimators, "learning_rate": lr},
-                    lambda n=n_estimators, r=lr: GradientBoostingRegressor(
-                        n_estimators=n, learning_rate=r, random_state=seed
-                    ),
-                )
-            )
+        specs.append(_CandidateSpec(ModelFamily.LINEAR, "LinearRegression", {}, LinearRegression))
         specs.append(
-            _CandidateSpec(
-                ModelFamily.ENSEMBLE,
-                "ExtraTreesRegressor",
-                {"n_estimators": 100},
-                lambda: ExtraTreesRegressor(n_estimators=100, random_state=seed, n_jobs=1),
-            )
+            _CandidateSpec(ModelFamily.LINEAR, "BayesianRidge", {}, lambda: BayesianRidge())
         )
-        for k in (3, 5, 10):
-            specs.append(
-                _CandidateSpec(
-                    ModelFamily.DISTANCE_BASED,
-                    "KNeighborsRegressor",
-                    {"n_neighbors": k},
-                    lambda n=k: KNeighborsRegressor(n_neighbors=n, n_jobs=1),
+        _sweep(
+            specs,
+            ModelFamily.LINEAR,
+            "Ridge",
+            [{"alpha": a} for a in (0.001, 0.01, 0.1, 1.0, 10.0, 100.0, 1000.0)],
+            lambda alpha: Ridge(alpha=alpha, random_state=seed),
+        )
+        _sweep(
+            specs,
+            ModelFamily.LINEAR,
+            "Lasso",
+            [{"alpha": a} for a in (0.001, 0.01, 0.1, 1.0, 10.0)],
+            lambda alpha: Lasso(alpha=alpha, random_state=seed),
+        )
+        _sweep(
+            specs,
+            ModelFamily.LINEAR,
+            "ElasticNet",
+            [{"alpha": a, "l1_ratio": r} for a in (0.1, 1.0, 10.0) for r in (0.2, 0.5, 0.8)],
+            lambda alpha, l1_ratio: ElasticNet(alpha=alpha, l1_ratio=l1_ratio, random_state=seed),
+        )
+        _sweep(
+            specs,
+            ModelFamily.LINEAR,
+            "SGDRegressor",
+            [
+                {"alpha": a, "penalty": p}
+                for a, p in ((0.0001, "l2"), (0.001, "l2"), (0.0001, "l1"), (0.001, "elasticnet"))
+            ],
+            lambda alpha, penalty: SGDRegressor(alpha=alpha, penalty=penalty, random_state=seed),
+        )
+        _sweep(
+            specs,
+            ModelFamily.LINEAR,
+            "HuberRegressor",
+            [{"epsilon": e} for e in (1.1, 1.35, 1.5, 2.0)],
+            lambda epsilon: HuberRegressor(epsilon=epsilon),
+        )
+        _sweep(
+            specs,
+            ModelFamily.LINEAR,
+            "PassiveAggressiveRegressor",
+            [{"C": c} for c in (0.1, 1.0, 10.0)],
+            lambda C: PassiveAggressiveRegressor(C=C, random_state=seed),
+        )
+        _sweep(
+            specs,
+            ModelFamily.TREE_BASED,
+            "DecisionTreeRegressor",
+            _TREE_DEPTHS,
+            lambda max_depth: DecisionTreeRegressor(max_depth=max_depth, random_state=seed),
+        )
+        _sweep(
+            specs,
+            ModelFamily.ENSEMBLE,
+            "RandomForestRegressor",
+            _FOREST_GRID,
+            lambda n_estimators, max_depth: RandomForestRegressor(
+                n_estimators=n_estimators, max_depth=max_depth, random_state=seed, n_jobs=1
+            ),
+        )
+        _sweep(
+            specs,
+            ModelFamily.ENSEMBLE,
+            "ExtraTreesRegressor",
+            [{"n_estimators": n} for n in (50, 100, 150, 200)],
+            lambda n_estimators: ExtraTreesRegressor(
+                n_estimators=n_estimators, random_state=seed, n_jobs=1
+            ),
+        )
+        _sweep(
+            specs,
+            ModelFamily.ENSEMBLE,
+            "GradientBoostingRegressor",
+            _BOOST_GRID,
+            lambda n_estimators, learning_rate: GradientBoostingRegressor(
+                n_estimators=n_estimators, learning_rate=learning_rate, random_state=seed
+            ),
+        )
+        _sweep(
+            specs,
+            ModelFamily.ENSEMBLE,
+            "AdaBoostRegressor",
+            [{"n_estimators": n} for n in (50, 100, 200)],
+            lambda n_estimators: AdaBoostRegressor(n_estimators=n_estimators, random_state=seed),
+        )
+        _sweep(
+            specs,
+            ModelFamily.ENSEMBLE,
+            "BaggingRegressor",
+            [{"n_estimators": n} for n in (10, 50, 100)],
+            lambda n_estimators: BaggingRegressor(
+                n_estimators=n_estimators, random_state=seed, n_jobs=1
+            ),
+        )
+        _sweep(
+            specs,
+            ModelFamily.ENSEMBLE,
+            "HistGradientBoostingRegressor",
+            [
+                {"max_iter": m, "learning_rate": lr}
+                for m, lr in ((100, 0.1), (200, 0.1), (100, 0.05), (300, 0.05))
+            ],
+            lambda max_iter, learning_rate: HistGradientBoostingRegressor(
+                max_iter=max_iter, learning_rate=learning_rate, random_state=seed
+            ),
+        )
+        _sweep(
+            specs,
+            ModelFamily.DISTANCE_BASED,
+            "KNeighborsRegressor",
+            _KNN_GRID,
+            lambda n_neighbors: KNeighborsRegressor(n_neighbors=n_neighbors, n_jobs=1),
+        )
+        _sweep(
+            specs,
+            ModelFamily.DISTANCE_BASED,
+            "SVR",
+            [
+                {"kernel": k, "C": c}
+                for k, c in (
+                    ("rbf", 0.1),
+                    ("rbf", 1.0),
+                    ("rbf", 10.0),
+                    ("linear", 1.0),
+                    ("linear", 10.0),
+                    ("poly", 1.0),
                 )
-            )
-        for hidden in ((32,), (64, 32)):
-            specs.append(
-                _CandidateSpec(
-                    ModelFamily.NEURAL,
-                    "MLPRegressor",
-                    {"hidden_layer_sizes": list(hidden)},
-                    lambda h=hidden: MLPRegressor(
-                        hidden_layer_sizes=h,
-                        max_iter=MODEL_TRAINING_MLP_MAX_ITER,
-                        random_state=seed,
-                    ),
-                )
-            )
+            ],
+            lambda kernel, C: SVR(kernel=kernel, C=C),
+        )
+        _sweep(
+            specs,
+            ModelFamily.NEURAL,
+            "MLPRegressor",
+            _MLP_GRID,
+            lambda hidden_layer_sizes: MLPRegressor(
+                hidden_layer_sizes=hidden_layer_sizes,
+                max_iter=MODEL_TRAINING_MLP_MAX_ITER,
+                random_state=seed,
+            ),
+        )
 
     elif category == "classification":
+        from sklearn.discriminant_analysis import (
+            LinearDiscriminantAnalysis,
+            QuadraticDiscriminantAnalysis,
+        )
         from sklearn.ensemble import (
+            AdaBoostClassifier,
+            BaggingClassifier,
             ExtraTreesClassifier,
             GradientBoostingClassifier,
+            HistGradientBoostingClassifier,
             RandomForestClassifier,
         )
-        from sklearn.linear_model import LogisticRegression
-        from sklearn.naive_bayes import GaussianNB
+        from sklearn.linear_model import (
+            LogisticRegression,
+            PassiveAggressiveClassifier,
+            Perceptron,
+            RidgeClassifier,
+            SGDClassifier,
+        )
+        from sklearn.naive_bayes import BernoulliNB, GaussianNB
         from sklearn.neighbors import KNeighborsClassifier
         from sklearn.neural_network import MLPClassifier
+        from sklearn.svm import SVC
         from sklearn.tree import DecisionTreeClassifier
 
-        for c in (0.1, 1.0, 10.0, 100.0):
-            specs.append(
-                _CandidateSpec(
-                    ModelFamily.LINEAR,
-                    "LogisticRegression",
-                    {"C": c},
-                    lambda c_val=c: LogisticRegression(
-                        C=c_val, max_iter=MODEL_TRAINING_LOGREG_MAX_ITER, random_state=seed
-                    ),
+        _sweep(
+            specs,
+            ModelFamily.LINEAR,
+            "LogisticRegression",
+            [{"C": c} for c in (0.001, 0.01, 0.1, 1.0, 10.0, 100.0, 1000.0)],
+            lambda C: LogisticRegression(
+                C=C, max_iter=MODEL_TRAINING_LOGREG_MAX_ITER, random_state=seed
+            ),
+        )
+        _sweep(
+            specs,
+            ModelFamily.LINEAR,
+            "LogisticRegression",
+            [{"C": c, "penalty": "l1", "solver": "liblinear"} for c in (0.01, 0.1, 1.0, 10.0)],
+            lambda C, penalty, solver: LogisticRegression(
+                C=C,
+                penalty=penalty,
+                solver=solver,
+                max_iter=MODEL_TRAINING_LOGREG_MAX_ITER,
+                random_state=seed,
+            ),
+        )
+        _sweep(
+            specs,
+            ModelFamily.LINEAR,
+            "RidgeClassifier",
+            [{"alpha": a} for a in (0.1, 1.0, 10.0)],
+            lambda alpha: RidgeClassifier(alpha=alpha, random_state=seed),
+        )
+        _sweep(
+            specs,
+            ModelFamily.LINEAR,
+            "SGDClassifier",
+            [
+                {"alpha": a, "loss": loss}
+                for a, loss in (
+                    (0.0001, "log_loss"),
+                    (0.001, "log_loss"),
+                    (0.0001, "hinge"),
+                    (0.001, "modified_huber"),
                 )
-            )
-        for depth in (3, 6, 10, None):
-            specs.append(
-                _CandidateSpec(
-                    ModelFamily.TREE_BASED,
-                    "DecisionTreeClassifier",
-                    {"max_depth": depth},
-                    lambda d=depth: DecisionTreeClassifier(max_depth=d, random_state=seed),
-                )
-            )
-        for n_estimators, max_depth in ((50, 6), (100, None), (200, 10)):
-            specs.append(
-                _CandidateSpec(
-                    ModelFamily.ENSEMBLE,
-                    "RandomForestClassifier",
-                    {"n_estimators": n_estimators, "max_depth": max_depth},
-                    lambda n=n_estimators, d=max_depth: RandomForestClassifier(
-                        n_estimators=n, max_depth=d, random_state=seed, n_jobs=1
-                    ),
-                )
-            )
-        for n_estimators, lr in ((100, 0.1), (200, 0.05)):
-            specs.append(
-                _CandidateSpec(
-                    ModelFamily.ENSEMBLE,
-                    "GradientBoostingClassifier",
-                    {"n_estimators": n_estimators, "learning_rate": lr},
-                    lambda n=n_estimators, r=lr: GradientBoostingClassifier(
-                        n_estimators=n, learning_rate=r, random_state=seed
-                    ),
-                )
-            )
+            ],
+            lambda alpha, loss: SGDClassifier(alpha=alpha, loss=loss, random_state=seed),
+        )
+        _sweep(
+            specs,
+            ModelFamily.LINEAR,
+            "PassiveAggressiveClassifier",
+            [{"C": c} for c in (0.1, 1.0, 10.0)],
+            lambda C: PassiveAggressiveClassifier(C=C, random_state=seed),
+        )
+        _sweep(
+            specs,
+            ModelFamily.LINEAR,
+            "Perceptron",
+            [{"alpha": a} for a in (0.0001, 0.001, 0.01)],
+            lambda alpha: Perceptron(alpha=alpha, random_state=seed),
+        )
+        _sweep(
+            specs,
+            ModelFamily.TREE_BASED,
+            "DecisionTreeClassifier",
+            _TREE_DEPTHS,
+            lambda max_depth: DecisionTreeClassifier(max_depth=max_depth, random_state=seed),
+        )
+        _sweep(
+            specs,
+            ModelFamily.ENSEMBLE,
+            "RandomForestClassifier",
+            _FOREST_GRID,
+            lambda n_estimators, max_depth: RandomForestClassifier(
+                n_estimators=n_estimators, max_depth=max_depth, random_state=seed, n_jobs=1
+            ),
+        )
+        _sweep(
+            specs,
+            ModelFamily.ENSEMBLE,
+            "ExtraTreesClassifier",
+            [{"n_estimators": n} for n in (50, 100, 150, 200)],
+            lambda n_estimators: ExtraTreesClassifier(
+                n_estimators=n_estimators, random_state=seed, n_jobs=1
+            ),
+        )
+        _sweep(
+            specs,
+            ModelFamily.ENSEMBLE,
+            "GradientBoostingClassifier",
+            _BOOST_GRID,
+            lambda n_estimators, learning_rate: GradientBoostingClassifier(
+                n_estimators=n_estimators, learning_rate=learning_rate, random_state=seed
+            ),
+        )
+        _sweep(
+            specs,
+            ModelFamily.ENSEMBLE,
+            "AdaBoostClassifier",
+            [{"n_estimators": n} for n in (50, 100, 200)],
+            lambda n_estimators: AdaBoostClassifier(n_estimators=n_estimators, random_state=seed),
+        )
+        _sweep(
+            specs,
+            ModelFamily.ENSEMBLE,
+            "BaggingClassifier",
+            [{"n_estimators": n} for n in (10, 50, 100)],
+            lambda n_estimators: BaggingClassifier(
+                n_estimators=n_estimators, random_state=seed, n_jobs=1
+            ),
+        )
+        _sweep(
+            specs,
+            ModelFamily.ENSEMBLE,
+            "HistGradientBoostingClassifier",
+            [
+                {"max_iter": m, "learning_rate": lr}
+                for m, lr in ((100, 0.1), (200, 0.1), (100, 0.05), (300, 0.05))
+            ],
+            lambda max_iter, learning_rate: HistGradientBoostingClassifier(
+                max_iter=max_iter, learning_rate=learning_rate, random_state=seed
+            ),
+        )
+        _sweep(
+            specs,
+            ModelFamily.PROBABILISTIC,
+            "GaussianNB",
+            [{"var_smoothing": v} for v in (1e-9, 1e-8, 1e-7, 1e-6)],
+            lambda var_smoothing: GaussianNB(var_smoothing=var_smoothing),
+        )
+        _sweep(
+            specs,
+            ModelFamily.PROBABILISTIC,
+            "BernoulliNB",
+            [{"alpha": a} for a in (0.1, 0.5, 1.0)],
+            lambda alpha: BernoulliNB(alpha=alpha),
+        )
         specs.append(
             _CandidateSpec(
-                ModelFamily.ENSEMBLE,
-                "ExtraTreesClassifier",
-                {"n_estimators": 100},
-                lambda: ExtraTreesClassifier(n_estimators=100, random_state=seed, n_jobs=1),
+                ModelFamily.PROBABILISTIC,
+                "LinearDiscriminantAnalysis",
+                {},
+                lambda: LinearDiscriminantAnalysis(),
             )
         )
-        for var_smoothing in (1e-9, 1e-7):
-            specs.append(
-                _CandidateSpec(
-                    ModelFamily.PROBABILISTIC,
-                    "GaussianNB",
-                    {"var_smoothing": var_smoothing},
-                    lambda v=var_smoothing: GaussianNB(var_smoothing=v),
-                )
+        specs.append(
+            _CandidateSpec(
+                ModelFamily.PROBABILISTIC,
+                "QuadraticDiscriminantAnalysis",
+                {},
+                lambda: QuadraticDiscriminantAnalysis(),
             )
-        for k in (3, 5, 10, 15):
-            specs.append(
-                _CandidateSpec(
-                    ModelFamily.DISTANCE_BASED,
-                    "KNeighborsClassifier",
-                    {"n_neighbors": k},
-                    lambda n=k: KNeighborsClassifier(n_neighbors=n, n_jobs=1),
+        )
+        _sweep(
+            specs,
+            ModelFamily.DISTANCE_BASED,
+            "KNeighborsClassifier",
+            _KNN_GRID,
+            lambda n_neighbors: KNeighborsClassifier(n_neighbors=n_neighbors, n_jobs=1),
+        )
+        _sweep(
+            specs,
+            ModelFamily.DISTANCE_BASED,
+            "SVC",
+            [
+                {"kernel": k, "C": c}
+                for k, c in (
+                    ("rbf", 0.1),
+                    ("rbf", 1.0),
+                    ("rbf", 10.0),
+                    ("linear", 1.0),
+                    ("linear", 10.0),
+                    ("poly", 1.0),
                 )
-            )
-        for hidden in ((32,), (64, 32)):
-            specs.append(
-                _CandidateSpec(
-                    ModelFamily.NEURAL,
-                    "MLPClassifier",
-                    {"hidden_layer_sizes": list(hidden)},
-                    lambda h=hidden: MLPClassifier(
-                        hidden_layer_sizes=h,
-                        max_iter=MODEL_TRAINING_MLP_MAX_ITER,
-                        random_state=seed,
-                    ),
-                )
-            )
+            ],
+            lambda kernel, C: SVC(kernel=kernel, C=C, random_state=seed),
+        )
+        _sweep(
+            specs,
+            ModelFamily.NEURAL,
+            "MLPClassifier",
+            _MLP_GRID,
+            lambda hidden_layer_sizes: MLPClassifier(
+                hidden_layer_sizes=hidden_layer_sizes,
+                max_iter=MODEL_TRAINING_MLP_MAX_ITER,
+                random_state=seed,
+            ),
+        )
 
     return specs
 

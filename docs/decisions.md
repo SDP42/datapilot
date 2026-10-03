@@ -4,6 +4,71 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0099 — Phase 14.4: diagnosing before building, mapping new estimators onto the existing family enum instead of growing it, and scoping the voice assistant honestly
+
+- **Decision:** three choices define this increment:
+  1. **"Backend is not working properly" was diagnosed before any code
+     changed, not assumed.** Both dev servers (backend uvicorn, frontend
+     Next.js dev server) were simply down — a routine environment reset
+     between sessions, confirmed by `curl`ing `/health` and getting a
+     connection refusal before touching a single line of code. Restarted
+     both, then verified the full login -> ingest -> quality -> EDA ->
+     modeling -> search -> predict -> history path still worked exactly
+     as the prior phase left it. Treating a vague "not working" report
+     as a cue to start rewriting things, instead of checking what was
+     actually true first, would have wasted the increment chasing a
+     problem that didn't exist in the code.
+  2. **The 100+-candidate catalog expansion maps every new estimator
+     type onto the existing, fixed 6-value `ModelFamily` enum rather
+     than adding new members to it.** `ModelFamily` is declared
+     "declarative only" since Phase 7.1 and is read by
+     `candidate_generation.py`'s recommendation logic, `selection.py`'s
+     tie-break ordering, and the frontend's badge rendering — growing it
+     would have meant auditing and updating all three for a change whose
+     only real goal was "more algorithms," not "a new taxonomy of
+     algorithms." SVM went under `DISTANCE_BASED`, AdaBoost/Bagging/
+     HistGradientBoosting under `ENSEMBLE`, SGD/Huber/BayesianRidge/
+     PassiveAggressive/RidgeClassifier/Perceptron under `LINEAR`,
+     discriminant analysis and BernoulliNB alongside GaussianNB under
+     `PROBABILISTIC` — every mapping is a reasonable pedagogical fit, and
+     nothing downstream needed to change.
+  3. **The voice assistant is scoped to a fixed command grammar over
+     browser-native `SpeechRecognition`/`speechSynthesis`, not a
+     conversational LLM agent.** "A proper voice assistant" could mean
+     either; a real LLM-backed assistant would need a new backend
+     endpoint, a provider key, and a way to let the model safely trigger
+     in-app actions — a legitimately bigger feature than this increment
+     had room for alongside the catalog expansion and the all-in-one
+     page. A working, honestly-scoped keyword-matched navigation
+     assistant (verified: the real mic-permission flow fires, and a
+     denied/missing microphone degrades to a visible message rather than
+     silently doing nothing or crashing) was judged more valuable than
+     an unfinished attempt at the larger version.
+- **Reason:** all three protect the same thing — doing the verifiable,
+  load-bearing work first (confirm the actual problem, keep the existing
+  contract stable, ship something that genuinely works end to end) over
+  work that looks more impressive on paper but either wasn't needed
+  (rewriting a backend that was simply offline) or would have silently
+  understated its own scope (a "voice assistant" badge on something that
+  doesn't actually do what the words imply).
+- **Alternatives considered:** assuming the backend had a real code
+  defect and auditing broadly before restarting the servers (rejected —
+  the diagnosis took one `curl` call and was conclusive); adding new
+  `ModelFamily` enum members for SVM/boosting/discriminant-analysis
+  (rejected — see point 2, no behavioral benefit over mapping onto the
+  existing six, at the cost of auditing three downstream consumers);
+  building the voice assistant against an LLM backend this session
+  (rejected — out of scope for this increment; flagged explicitly as
+  deferred rather than attempted and left half-working).
+- **Consequence:** both dev servers confirmed healthy end to end; the
+  model search catalog is now 103 regression / 102 classification
+  candidates (verified fit against real data, 0-1 genuine failures, ~6-7s
+  total); `/dashboard/all-in-one` runs the full pipeline from one upload;
+  a real voice assistant navigates the app by spoken command. Quality
+  gates: `pytest` 2152 passed / 3 skipped; `ruff` / `ruff format` / `mypy`
+  all green; frontend `tsc` / `eslint` clean, `next build` succeeds (14
+  static routes).
+
 ## 0098 — Phase 14.3: a fixed hyperparameter grid instead of adaptive search, and slicers that recompute from raw rows instead of filtering pre-aggregated stats
 
 - **Decision:** two choices define this increment:
