@@ -61,3 +61,23 @@ def sample_csv_bytes():
         y = x1 * 2 + x2 + rng.normal() * 0.1
         lines.append(f"{x1},{x2},{y}")
     return ("\n".join(lines)).encode()
+
+
+@pytest.fixture
+def sample_xlsx_bytes(tmp_path):
+    """The same shape as `sample_csv_bytes`, serialized as a real .xlsx
+    workbook — Phase 14.10's Excel ingestion path."""
+    import io
+
+    import numpy as np
+    import pandas as pd
+
+    rng = np.random.default_rng(0)
+    x1 = rng.normal(size=80)
+    x2 = rng.normal(size=80)
+    y = x1 * 2 + x2 + rng.normal(size=80) * 0.1
+    df = pd.DataFrame({"x1": x1, "x2": x2, "y": y})
+
+    buf = io.BytesIO()
+    df.to_excel(buf, index=False, engine="openpyxl")
+    return buf.getvalue()

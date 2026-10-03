@@ -4,6 +4,54 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0105 — Phase 14.10: Excel via the existing format-dispatch seam; rejected SheetJS's npm package on CVEs
+
+- **Decision:** Excel support was added by filling in a dispatch seam
+  that already existed (`DatasetReference.source_format`,
+  `load_dataframe`'s `if source_format is not CSV: raise
+  NotImplementedError` stub, `ingest_dataset`'s extension dispatch) —
+  not by special-casing Excel through the pipeline. `ingest_excel`
+  mirrors `ingest_csv` exactly, and because every downstream engine
+  already goes through `load_dataframe` rather than reading CSV
+  directly, no quality/EDA/modeling code needed to change at all.
+  Separately: the npm-registry `xlsx` (SheetJS) package — the obvious
+  choice for client-side `.xlsx` parsing, which would have let the EDA
+  and Dashboard Builder pages' row-level charts work for Excel uploads
+  too — was installed, found via `npm audit` to carry two high-severity
+  "no fix available" CVEs (prototype pollution, ReDoS) in exactly the
+  file-parsing path that would handle untrusted user uploads, and
+  removed. Those two pages stay CSV-only for their client-enriched
+  charts; an `.xlsx` upload there still gets full backend-driven EDA.
+- **Reason:** the dispatch seam already existed specifically so a new
+  format wouldn't require touching every consumer — using it is both
+  less code and a direct validation that the seam was designed
+  correctly. The SheetJS rejection follows this project's standing
+  security discipline: a library with known, unpatched vulnerabilities
+  in the exact code path handling untrusted input is not an acceptable
+  trade for a UI convenience, regardless of how standard the library is
+  elsewhere.
+- **Alternatives considered:** converting every uploaded `.xlsx` to a
+  normalized CSV at ingestion time and storing *that* as the "raw copy"
+  (rejected — breaks the documented "raw copy is byte-for-byte the
+  original upload" invariant every other ingestion path guarantees, for
+  no benefit once `load_dataframe` dispatches on format anyway);
+  installing SheetJS from its own CDN-hosted tarball instead of the
+  stale npm package (rejected for this increment — introduces a
+  non-registry install source and a new trust decision that a terser,
+  already-correct fallback — backend EDA without the client-side extras
+  — avoids entirely); supporting legacy `.xls` via `xlrd` (rejected —
+  `xlrd` dropped `.xls` write support and is far less maintained than
+  `openpyxl`; every modern spreadsheet app re-saves as `.xlsx` trivially).
+- **Consequence:** `data_engine/ingestion/excel_ingestor.py`,
+  `data_engine/profiling/loader.py`, and
+  `backend/datapilot_api/dependencies.py` carry Excel end to end for
+  every backend-round-trip page; `file-dropzone.tsx` defaults to
+  accepting both formats, with EDA/Dashboards explicitly opted back out
+  to CSV-only. Quality gates: `pytest` 2173 passed / 3 skipped (10 new
+  tests); `ruff` / `ruff format` / `mypy` all green, including the
+  dependency-set guard test updated to expect the new `openpyxl` base
+  dependency.
+
 ## 0104 — Phase 14.9: real per-user accounts replace the single-operator account; badges computed, never stored
 
 - **Decision:** two choices define this increment:

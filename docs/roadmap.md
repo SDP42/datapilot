@@ -2774,6 +2774,70 @@ Phase-7/8 entry point.
   navigation, correct contrast throughout the sidebar and cards).
 - **Decision:** 0104.
 
+#### Phase 14.10 — Excel (.xlsx) Ingestion Alongside CSV — **Done**
+- **Scope:** "should support excel file as well" — Excel is a very common
+  real-world dataset source; CSV-only ingestion was a real gap for "all
+  kinds of datasets."
+- **`DatasetFormat.XLSX`** added to `datapilot/contracts.py`.
+  **`data_engine/ingestion/excel_ingestor.py`** (`ingest_excel`) mirrors
+  `csv_ingestor.py` exactly — validate, fail fast on an unparseable
+  workbook (`InvalidExcelError`, including a corrupt/non-zip file),
+  preserve an immutable raw copy, build the same `DatasetReference`
+  contract. Only the **first sheet** is ingested (one dataset = one
+  rectangular table, the same assumption every other ingestion path
+  already makes); legacy `.xls` is deliberately not accepted (its
+  `xlrd` engine dropped write support and is far less maintained — a
+  user re-saves as `.xlsx`, which every modern spreadsheet app does
+  natively). `data_engine/ingestion/__init__.py`'s `ingest_dataset`
+  dispatches to it by extension, same as CSV.
+- **`data_engine/profiling/loader.py`'s `load_dataframe`** (the single
+  canonical point every downstream engine — quality, EDA, cleaning,
+  modeling — already goes through to turn a `DatasetReference` back
+  into a `DataFrame`) now branches on `source_format` instead of always
+  assuming CSV. Because every one of those engines already calls
+  through this one function, Excel support reached quality/EDA/
+  modeling/predict with no changes to any of them.
+- **`backend/datapilot_api/dependencies.py`'s `ingest_upload`** (every
+  HTTP route's one upload entrypoint) now preserves the uploaded
+  file's real extension when it's a supported one, instead of forcing
+  every upload to `.csv`, and loads the resulting dataframe through
+  the same canonical `load_dataframe` instead of its own hardcoded
+  `pd.read_csv`.
+- **`openpyxl` added as a declared base dependency** (`pyproject.toml`)
+  — pandas' own documented `.xlsx` engine; already installed
+  transitively, now declared explicitly (the same discipline already
+  applied to `joblib`). The npm registry's `xlsx` (SheetJS) package was
+  evaluated for client-side `.xlsx` parsing and explicitly **rejected**:
+  it carries two high-severity, "no fix available" CVEs (prototype
+  pollution, ReDoS) directly in the file-parsing code path that would
+  handle untrusted uploads — exactly the attack surface those CVEs
+  describe. SheetJS's own project recommends installing from their CDN
+  instead of npm for this reason, which was judged not worth the
+  trust/complexity tradeoff for this increment.
+- **Frontend:** `components/ui/file-dropzone.tsx`'s default `accept`
+  widened to `.csv,.xlsx` with generic copy ("Drop a CSV or Excel file
+  here"), covering every backend-round-trip page (Ingest, Quality,
+  Modeling, Train & Predict, Jobs, All-in-one) for free since they all
+  use the component's defaults. The **EDA** and **Dashboard Builder**
+  pages are explicitly kept CSV-only (`accept=".csv"`, with copy
+  explaining why) because they parse rows **client-side**
+  (`lib/csv-parse.ts`) for their scatter/treemap/slicer charts, and no
+  client-side `.xlsx` parser was added (see the SheetJS rejection
+  above) — they get real backend-driven EDA either way, just not the
+  client-enriched extras, for an `.xlsx` upload specifically.
+- **Quality gates:** `pytest` full suite 2173 passed / 3 skipped (8 new
+  ingestion tests covering successful ingestion, loading through the
+  canonical loader, first-sheet-only on a multi-sheet workbook, empty
+  and corrupt-workbook rejection; 2 new backend API tests covering
+  `/datasets/ingest` and `/modeling/run` on a real uploaded `.xlsx`
+  file end to end); `ruff` / `ruff format` / `mypy` (182 source files)
+  all green — including the dependency-set guard test
+  (`test_no_deferred_dependencies.py`), deliberately updated to expect
+  `openpyxl`. Frontend: `tsc --noEmit` clean, `eslint` clean,
+  `next build` succeeds (17 routes, unchanged). Verified live: the
+  Ingest page's dropzone shows the updated "CSV or Excel" copy.
+- **Decision:** 0105.
+
 ### Phase 15 — MLOps / Monitoring
 - **Objective:** operate models in production.
 - **Components:** model/data versioning, drift and performance monitoring,

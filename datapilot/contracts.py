@@ -25,11 +25,12 @@ from pydantic import BaseModel, ConfigDict, Field
 class DatasetFormat(str, Enum):
     """Source file formats DataPilot can ingest.
 
-    Only ``CSV`` is supported today; other members are added in the phase
-    that implements their reader.
+    ``CSV`` (Phase 1) and ``XLSX`` (Phase 14.10) are supported; other
+    members are added in the phase that implements their reader.
     """
 
     CSV = "csv"
+    XLSX = "xlsx"
 
 
 class ColumnType(str, Enum):

@@ -599,6 +599,9 @@ export default function DashboardsPage() {
               setFile(f);
               if (f) setFileLabel(f.name.replace(/\.csv$/i, ""));
             }}
+            accept=".csv"
+            label="Drop a CSV file here, or click to browse"
+            hint="CSV only — dashboards parse rows client-side, up to 50 MB"
           />
           <Button onClick={handleAnalyze} disabled={!file} loading={loading}>
             <Sparkles className="h-4 w-4" /> Analyze dataset

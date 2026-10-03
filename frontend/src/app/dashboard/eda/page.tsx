@@ -73,7 +73,13 @@ export default function EdaPage() {
           <CardDescription>Deterministic and analysis-only.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <FileDropzone file={file} onFileSelect={setFile} />
+          <FileDropzone
+            file={file}
+            onFileSelect={setFile}
+            accept=".csv"
+            label="Drop a CSV file here, or click to browse"
+            hint="CSV only — the relationship charts below parse rows client-side, up to 50 MB"
+          />
           <Button onClick={handleRun} disabled={!file} loading={loading}>
             <LineChart className="h-4 w-4" /> Run EDA
           </Button>

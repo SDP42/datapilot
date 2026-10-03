@@ -6,13 +6,17 @@ import os
 
 import pytest
 
+import pandas as pd
+
 from data_engine.ingestion import (
     InvalidCSVError,
+    InvalidExcelError,
     RawDataStore,
     SourceFileNotFoundError,
     UnsupportedFormatError,
     ingest_dataset,
 )
+from data_engine.profiling.loader import load_dataframe
 from datapilot.contracts import DatasetFormat, DatasetReference
 
 
@@ -66,10 +70,10 @@ def test_missing_file_raises(tmp_path, raw_store):
 
 
 def test_unsupported_extension_raises(tmp_path, raw_store):
-    xlsx = tmp_path / "data.xlsx"
-    xlsx.write_bytes(b"not really excel")
+    parquet = tmp_path / "data.parquet"
+    parquet.write_bytes(b"not really parquet")
     with pytest.raises(UnsupportedFormatError):
-        ingest_dataset(xlsx, raw_store=raw_store)
+        ingest_dataset(parquet, raw_store=raw_store)
 
 
 def test_invalid_csv_raises(tmp_path, raw_store):
@@ -92,3 +96,60 @@ def test_failed_validation_stores_nothing(tmp_path):
     with pytest.raises(SourceFileNotFoundError):
         ingest_dataset(missing, raw_store=store)
     assert not store.root.exists() or not any(store.root.iterdir())
+
+
+def _write_xlsx(path, df: pd.DataFrame) -> None:
+    df.to_excel(path, index=False, engine="openpyxl")
+
+
+def test_successful_xlsx_ingestion(tmp_path, raw_store):
+    path = tmp_path / "customers.xlsx"
+    _write_xlsx(path, pd.DataFrame({"a": [1, 2, 3], "b": ["x", "y", "z"]}))
+
+    ref = ingest_dataset(path, raw_store=raw_store)
+
+    assert isinstance(ref, DatasetReference)
+    assert ref.source_format is DatasetFormat.XLSX
+    assert ref.dataset_id.startswith("ds-")
+    assert ref.original_filename == "customers.xlsx"
+    assert ref.raw_path.exists()
+    assert ref.size_bytes == ref.raw_path.stat().st_size
+    assert len(ref.sha256) == 64
+
+
+def test_xlsx_dataframe_loads_via_canonical_loader(tmp_path, raw_store):
+    path = tmp_path / "data.xlsx"
+    _write_xlsx(path, pd.DataFrame({"a": [1, 2, 3], "b": ["x", "y", "z"]}))
+
+    ref = ingest_dataset(path, raw_store=raw_store)
+    df = load_dataframe(ref)
+
+    assert list(df.columns) == ["a", "b"]
+    assert len(df) == 3
+
+
+def test_xlsx_only_reads_first_sheet(tmp_path, raw_store):
+    path = tmp_path / "multi_sheet.xlsx"
+    with pd.ExcelWriter(path, engine="openpyxl") as writer:
+        pd.DataFrame({"a": [1, 2]}).to_excel(writer, sheet_name="first", index=False)
+        pd.DataFrame({"z": [9, 9, 9]}).to_excel(writer, sheet_name="second", index=False)
+
+    ref = ingest_dataset(path, raw_store=raw_store)
+    df = load_dataframe(ref)
+
+    assert list(df.columns) == ["a"]
+    assert len(df) == 2
+
+
+def test_empty_xlsx_raises(tmp_path, raw_store):
+    path = tmp_path / "empty.xlsx"
+    _write_xlsx(path, pd.DataFrame({"a": []}))
+    with pytest.raises(InvalidExcelError):
+        ingest_dataset(path, raw_store=raw_store)
+
+
+def test_corrupt_xlsx_raises(tmp_path, raw_store):
+    path = tmp_path / "broken.xlsx"
+    path.write_bytes(b"this is not a real xlsx file")
+    with pytest.raises(InvalidExcelError):
+        ingest_dataset(path, raw_store=raw_store)

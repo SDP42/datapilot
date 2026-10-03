@@ -16,8 +16,12 @@ def load_dataframe(reference: DatasetReference) -> pd.DataFrame:
     """Read the preserved raw copy referenced by ``reference``.
 
     The raw file is opened read-only and returned as-is: no dtype
-    coercion, no ``na_values`` tricks, no row filtering.
+    coercion, no ``na_values`` tricks, no row filtering. ``.xlsx`` reads
+    only the first sheet, matching `data_engine.ingestion.excel_ingestor`'s
+    own one-dataset-is-one-sheet assumption.
     """
-    if reference.source_format is not DatasetFormat.CSV:
-        raise NotImplementedError(f"Loading {reference.source_format} is not implemented yet.")
-    return pd.read_csv(reference.raw_path)
+    if reference.source_format is DatasetFormat.CSV:
+        return pd.read_csv(reference.raw_path)
+    if reference.source_format is DatasetFormat.XLSX:
+        return pd.read_excel(reference.raw_path, sheet_name=0, engine="openpyxl")
+    raise NotImplementedError(f"Loading {reference.source_format} is not implemented yet.")

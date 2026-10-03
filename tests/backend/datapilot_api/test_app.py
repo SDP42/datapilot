@@ -33,6 +33,36 @@ def test_ingest_empty_file_returns_400(client, auth_headers):
     assert response.status_code == 400
 
 
+def test_ingest_accepts_xlsx(client, auth_headers, sample_xlsx_bytes):
+    files = {
+        "file": (
+            "data.xlsx",
+            io.BytesIO(sample_xlsx_bytes),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    }
+    response = client.post("/api/v1/datasets/ingest", files=files, headers=auth_headers)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["reference"]["source_format"] == "xlsx"
+    assert body["profile"]["n_rows"] == 80
+    assert body["profile"]["column_names"] == ["x1", "x2", "y"]
+
+
+def test_modeling_run_completes_on_xlsx_upload(client, auth_headers, sample_xlsx_bytes):
+    files = {"file": ("data.xlsx", io.BytesIO(sample_xlsx_bytes), "text/csv")}
+    response = client.post(
+        "/api/v1/modeling/run",
+        files=files,
+        data={"objective": "predict y"},
+        headers=auth_headers,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "completed"
+    assert body["selection"]["selected_family"] is not None
+
+
 def test_quality_endpoint_returns_real_report(client, auth_headers, sample_csv_bytes):
     files = {"file": ("data.csv", io.BytesIO(sample_csv_bytes), "text/csv")}
     response = client.post("/api/v1/datasets/quality", files=files, headers=auth_headers)

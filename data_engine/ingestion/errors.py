@@ -26,3 +26,7 @@ class UnsupportedFormatError(IngestionError):
 
 class InvalidCSVError(IngestionError):
     """The file has a CSV extension but could not be parsed as CSV."""
+
+
+class InvalidExcelError(IngestionError):
+    """The file has a .xlsx extension but could not be parsed as a workbook."""

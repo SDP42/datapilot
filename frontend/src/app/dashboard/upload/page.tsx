@@ -40,7 +40,7 @@ export default function UploadPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Upload CSV</CardTitle>
+          <CardTitle>Upload dataset</CardTitle>
           <CardDescription>The file is stored read-only and never modified in place.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

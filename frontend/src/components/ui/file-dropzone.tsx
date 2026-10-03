@@ -7,12 +7,16 @@ import { cn, formatBytes } from "@/lib/utils";
 export function FileDropzone({
   onFileSelect,
   file,
-  accept = ".csv",
+  accept = ".csv,.xlsx",
+  label = "Drop a CSV or Excel file here, or click to browse",
+  hint = "CSV or .xlsx (first sheet), up to 50 MB",
   className,
 }: {
   onFileSelect: (file: File | null) => void;
   file: File | null;
   accept?: string;
+  label?: string;
+  hint?: string;
   className?: string;
 }) {
   const [isDragging, setIsDragging] = useState(false);
@@ -67,8 +71,8 @@ export function FileDropzone({
       )}
     >
       <UploadCloud className={cn("h-8 w-8", isDragging ? "text-primary" : "text-muted")} />
-      <p className="text-sm font-medium">Drop a CSV file here, or click to browse</p>
-      <p className="text-xs text-muted">Comma-separated values, up to 50&nbsp;MB</p>
+      <p className="text-sm font-medium">{label}</p>
+      <p className="text-xs text-muted">{hint}</p>
       <input
         type="file"
         accept={accept}

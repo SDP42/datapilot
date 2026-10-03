@@ -62,6 +62,15 @@ dependencies = [
     "pydantic-settings>=2.4",
     # Phase 13.5 — the single-operator JWT auth boundary (backend.auth).
     "pyjwt>=2.8",
+    # Phase 14.10 — Excel (.xlsx) ingestion alongside CSV. openpyxl is
+    # pandas' own documented engine for reading/writing .xlsx; declared
+    # explicitly rather than relied on transitively (already installed as
+    # a dependency of another package), matching joblib's own precedent
+    # above. Legacy .xls is deliberately not supported — its engine
+    # (xlrd) dropped .xls write support and is a much less maintained
+    # path; a user with a legacy .xls file re-saves it as .xlsx, which
+    # every modern version of Excel/Sheets/Numbers does natively.
+    "openpyxl>=3.1",
 ]
 
 [project.optional-dependencies]
