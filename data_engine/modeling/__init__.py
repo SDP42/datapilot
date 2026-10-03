@@ -38,6 +38,7 @@ from .models import (
     MODEL_ENGINE_VERSION,
     DataSplitPlan,
     DataSplitStrategy,
+    DeepTuneResult,
     EvaluationResults,
     ExpandedCandidateResult,
     ExpandedSearchResult,
@@ -63,7 +64,12 @@ from .persistence import (
     predict_with_model,
     save_model,
 )
-from .pipeline import run_expanded_model_search, run_modeling_pipeline, train_and_persist_model
+from .pipeline import (
+    run_deep_tune,
+    run_expanded_model_search,
+    run_modeling_pipeline,
+    train_and_persist_model,
+)
 from .readiness import (
     MODEL_READINESS_MIN_ROWS,
     MODEL_READINESS_ROWS_WARNING,
@@ -98,6 +104,7 @@ from .training import (
     fit_final_pipeline,
     run_expanded_search,
     train_and_evaluate_models,
+    tune_best_candidate,
 )
 from .understanding import understand_modeling
 
@@ -125,6 +132,7 @@ __all__ = [
     "SMALL_DATA_TRAIN_FRACTION",
     "DataSplitPlan",
     "DataSplitStrategy",
+    "DeepTuneResult",
     "EvaluationResults",
     "ExpandedCandidateResult",
     "ExpandedSearchResult",
@@ -152,6 +160,7 @@ __all__ = [
     "load_model",
     "predict_with_model",
     "recommend_data_split",
+    "run_deep_tune",
     "run_expanded_model_search",
     "run_expanded_search",
     "run_modeling_pipeline",
@@ -161,5 +170,6 @@ __all__ = [
     "temporal_feature_spec",
     "train_and_evaluate_models",
     "train_and_persist_model",
+    "tune_best_candidate",
     "understand_modeling",
 ]

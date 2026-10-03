@@ -161,3 +161,44 @@ def test_modeling_search_cross_validate_adds_cv_metrics(client, auth_headers, sa
     with_cv = [c for c in body["candidates"] if "cv_rmse_mean" in c["metrics"]]
     assert len(with_cv) > 0
     assert all("cv_rmse_std" in c["metrics"] for c in with_cv)
+
+
+def test_modeling_tune_deep_tunes_a_named_candidate(client, auth_headers, sample_csv_bytes):
+    search_files = {"file": ("data.csv", io.BytesIO(sample_csv_bytes), "text/csv")}
+    search_response = client.post(
+        "/api/v1/modeling/search",
+        files=search_files,
+        data={"objective": "predict y"},
+        headers=auth_headers,
+    )
+    assert search_response.status_code == 200, search_response.text
+    best = search_response.json()["candidates"][0]
+
+    tune_files = {"file": ("data.csv", io.BytesIO(sample_csv_bytes), "text/csv")}
+    response = client.post(
+        "/api/v1/modeling/tune",
+        files=tune_files,
+        data={
+            "objective": "predict y",
+            "family": best["family"],
+            "estimator_name": best["estimator_name"],
+        },
+        headers=auth_headers,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] in ("completed", "unavailable")
+    if body["status"] == "completed":
+        assert body["estimator_name"] == best["estimator_name"]
+        assert body["metrics"]
+
+
+def test_modeling_tune_rejects_unknown_family(client, auth_headers, sample_csv_bytes):
+    files = {"file": ("data.csv", io.BytesIO(sample_csv_bytes), "text/csv")}
+    response = client.post(
+        "/api/v1/modeling/tune",
+        files=files,
+        data={"objective": "predict y", "family": "not_a_family", "estimator_name": "Ridge"},
+        headers=auth_headers,
+    )
+    assert response.status_code == 422

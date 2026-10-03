@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Cpu, Trophy, Layers, Timer, Sparkles } from "lucide-react";
+import { Cpu, Trophy, Layers, Timer, Sparkles, SlidersHorizontal, ArrowRight } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 import { PageHeader } from "@/components/layout/page-header";
@@ -18,9 +18,11 @@ import { StatCard } from "@/components/ui/stat-card";
 import {
   runModeling,
   runModelSearch,
+  tuneBestCandidate,
   ApiError,
   ModelingSpec,
   ExpandedSearchResult,
+  DeepTuneResult,
 } from "@/lib/api";
 
 const REGRESSION_METRIC_ORDER = ["mse", "rmse", "mae", "r2"];
@@ -35,6 +37,9 @@ export default function ModelingPage() {
   const [searching, setSearching] = useState(false);
   const [search, setSearch] = useState<ExpandedSearchResult | null>(null);
   const [crossValidate, setCrossValidate] = useState(false);
+
+  const [tuning, setTuning] = useState(false);
+  const [tuneResult, setTuneResult] = useState<DeepTuneResult | null>(null);
 
   async function handleRun() {
     if (!file || !objective) return;
@@ -69,6 +74,30 @@ export default function ModelingPage() {
       toast.error(err instanceof ApiError ? err.message : "Model search failed");
     } finally {
       setSearching(false);
+    }
+  }
+
+  async function handleDeepTune() {
+    if (!file || !objective || !bestCandidate) return;
+    setTuning(true);
+    setTuneResult(null);
+    try {
+      const data = await tuneBestCandidate(
+        file,
+        objective,
+        bestCandidate.family,
+        bestCandidate.estimator_name,
+      );
+      setTuneResult(data);
+      if (data.status === "completed") {
+        toast.success(`Deep-tuned ${data.estimator_name} over ${data.n_iterations} combinations`);
+      } else {
+        toast.warning(data.reason ?? "Deep-tune could not complete");
+      }
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Deep-tune failed");
+    } finally {
+      setTuning(false);
     }
   }
 
@@ -224,6 +253,89 @@ export default function ModelingPage() {
                 <span className="ml-auto text-xs text-muted">
                   fit in {bestCandidate.fit_seconds.toFixed(3)}s
                 </span>
+                <div className="w-full border-t border-surface-border/60 pt-3">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={handleDeepTune}
+                    loading={tuning}
+                  >
+                    <SlidersHorizontal className="h-3.5 w-3.5" /> Deep-tune this candidate
+                  </Button>
+                  <span className="ml-3 text-xs text-muted">
+                    RandomizedSearchCV over a wider hyperparameter neighborhood — fixed seed,
+                    still reproducible, slower (30 fits × 5-fold CV).
+                  </span>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {tuneResult && bestCandidate && (
+            <Card
+              className={
+                tuneResult.status === "completed"
+                  ? "border-success/30 bg-gradient-to-br from-success/10 to-transparent"
+                  : undefined
+              }
+            >
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <SlidersHorizontal className="h-4 w-4 text-warning" /> Deep-tune result
+                </CardTitle>
+                {tuneResult.status === "completed" && (
+                  <CardDescription>
+                    {tuneResult.n_iterations} hyperparameter combinations tried,{" "}
+                    {tuneResult.cv_folds}-fold cross-validated each — compare against the catalog
+                    candidate above.
+                  </CardDescription>
+                )}
+              </CardHeader>
+              <CardContent>
+                {tuneResult.status !== "completed" ? (
+                  <p className="text-sm text-muted">
+                    {tuneResult.reason ?? "Deep-tune could not complete for this candidate."}
+                  </p>
+                ) : (
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="rounded-xl border border-surface-border bg-surface-2/40 p-4">
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted">
+                        Catalog candidate
+                      </p>
+                      <p className="mt-2 font-mono text-xs text-muted">
+                        {Object.entries(bestCandidate.hyperparameters)
+                          .map(([k, v]) => `${k}=${Array.isArray(v) ? `[${v.join(",")}]` : v}`)
+                          .join(", ") || "default hyperparameters"}
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {Object.entries(bestCandidate.metrics)
+                          .filter(([k]) => !k.startsWith("cv_"))
+                          .map(([k, v]) => (
+                            <Badge key={k} variant="default">
+                              {k}: {v.toFixed(4)}
+                            </Badge>
+                          ))}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-success/30 bg-success/5 p-4">
+                      <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-success">
+                        <ArrowRight className="h-3 w-3" /> Deep-tuned
+                      </p>
+                      <p className="mt-2 font-mono text-xs text-muted">
+                        {Object.entries(tuneResult.best_hyperparameters)
+                          .map(([k, v]) => `${k}=${Array.isArray(v) ? `[${v.join(",")}]` : v}`)
+                          .join(", ") || "default hyperparameters"}
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {Object.entries(tuneResult.metrics).map(([k, v]) => (
+                          <Badge key={k} variant="success">
+                            {k}: {v.toFixed(4)}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           )}

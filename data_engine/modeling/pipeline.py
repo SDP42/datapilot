@@ -52,6 +52,7 @@ from .candidate_generation import generate_model_candidates
 from .evaluation import summarize_evaluation
 from .models import (
     DataSplitPlan,
+    DeepTuneResult,
     EvaluationResults,
     ExpandedSearchResult,
     ModelCandidates,
@@ -67,7 +68,12 @@ from .persistence import PersistedModelMetadata, save_model
 from .readiness import assess_model_readiness
 from .selection import select_model
 from .split_planning import recommend_data_split
-from .training import fit_final_pipeline, run_expanded_search, train_and_evaluate_models
+from .training import (
+    fit_final_pipeline,
+    run_expanded_search,
+    train_and_evaluate_models,
+    tune_best_candidate,
+)
 from .understanding import understand_modeling
 
 _NOTE_COMPOSED = (
@@ -363,4 +369,32 @@ def run_expanded_model_search(
         split,
         objective=request.objective,
         use_cross_validation=use_cross_validation,
+    )
+
+
+def run_deep_tune(
+    df: pd.DataFrame, request: ModelingRequest, *, family: ModelFamily, estimator_name: str
+) -> DeepTuneResult:
+    """Phase 14.12: opt-in `RandomizedSearchCV` deep-tune of one named
+    catalog estimator — the same composition pattern as
+    `run_expanded_model_search`, handed off to
+    `data_engine.modeling.training.tune_best_candidate` for the actual
+    search. `family` + `estimator_name` identify which candidate from an
+    earlier `run_expanded_model_search` result to tune further.
+    """
+    problem = _build_problem_spec(df, request)
+    feature_engineering = _build_feature_engineering_spec(df, request, problem)
+    readiness = assess_model_readiness(
+        df, problem, feature_engineering, objective=request.objective
+    )
+    split = recommend_data_split(df, problem, feature_engineering, objective=request.objective)
+    return tune_best_candidate(
+        df,
+        problem,
+        feature_engineering,
+        readiness,
+        split,
+        family=family,
+        estimator_name=estimator_name,
+        objective=request.objective,
     )

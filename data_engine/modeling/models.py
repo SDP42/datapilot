@@ -538,3 +538,30 @@ class ExpandedSearchResult(BaseModel):
     )
     candidates: list[ExpandedCandidateResult] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
+
+
+class DeepTuneResult(BaseModel):
+    """Phase 14.12 — the result of `training.tune_best_candidate`: one
+    named estimator from the Phase 7.7 catalog, re-fit with
+    `RandomizedSearchCV` (a fixed `random_state`, so the result is still
+    reproducible) over a wider hyperparameter neighborhood than the fixed
+    catalog grid explores. An opt-in addition to the catalog search, never
+    a replacement — see `docs/decisions.md` for why the catalog itself
+    stays fixed.
+    """
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    status: ModelingStatus
+    reason: str | None = None
+    task_type: str | None = None
+    family: ModelFamily | None = None
+    estimator_name: str | None = None
+    best_hyperparameters: dict[str, str | int | float | bool | list[int] | None] = Field(
+        default_factory=dict
+    )
+    metrics: dict[str, float] = Field(default_factory=dict)
+    n_iterations: int = 0
+    cv_folds: int = 0
+    fit_seconds: float = 0.0
+    notes: list[str] = Field(default_factory=list)

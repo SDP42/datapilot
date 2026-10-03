@@ -2892,6 +2892,66 @@ Phase-7/8 entry point.
   label to icon-only and stacks every card correctly.
 - **Decision:** 0106.
 
+#### Phase 14.12 — Opt-In Deep-Tune (RandomizedSearchCV, Fixed Seed) — **Done**
+- **Scope:** "hyperparameter tuning is also one of the important
+  features" — clarified first via a direct question, since real
+  adaptive search (vs. the fixed catalog grid) trades away the
+  determinism decision 0098 made deliberately; the user picked the
+  recommended option: opt-in, still reproducible.
+- **`data_engine/modeling/training.py`'s `_prepare_supervised_run`**: the
+  task-validation / missing-target-drop / train-test-split /
+  outlier-aware-preprocessor / skewed-target-log-transform logic that
+  used to live only inside `run_expanded_search` is now a shared
+  helper (`_PreparedSupervisedRun`, `_PreparationError`), so
+  `run_expanded_search` and the new `tune_best_candidate` can't
+  silently diverge on how a dataset is prepared. `run_expanded_search`
+  itself is behaviour-identical — re-verified by its existing 11 tests
+  passing unchanged.
+- **`tune_best_candidate`**: takes a `(family, estimator_name)` pair —
+  normally the #1-ranked candidate from a prior `/search` call — looks
+  it up in the same Phase 7.7 catalog, and re-fits it with
+  `sklearn.model_selection.RandomizedSearchCV` (30 iterations, 5-fold
+  CV, the one fixed `MODEL_TRAINING_RANDOM_SEED`) over a wider,
+  curated hyperparameter distribution (`_DEEP_TUNE_DISTRIBUTIONS`,
+  covering 18 of the catalog's most tunable estimator names — tree
+  ensembles, boosting, KNN, SVM, linear models with a real
+  regularization path, and MLP). An estimator with no real
+  hyperparameters (`LinearRegression`, `GaussianNB`, …) or one not in
+  the catalog for this task reports `status=unavailable` with an
+  explicit reason rather than silently tuning nothing. Still fully
+  reproducible: same data + same `(family, estimator_name)` always
+  produces the same `best_hyperparameters` (verified by a dedicated
+  test running it twice and asserting identical output).
+- **`DeepTuneResult`** (new Pydantic model, `models.py`) and
+  **`POST /api/v1/modeling/tune`** (`routes/modeling.py`, `family` +
+  `estimator_name` form fields, 422 on an unknown family) expose it;
+  `"tune"` is now an `ActivityStore`/gamification kind (20 XP, same as
+  `train`).
+- **Frontend**: a "Deep-tune this candidate" button on the best-
+  candidate card (`dashboard/modeling/page.tsx`) calls the new
+  `tuneBestCandidate` API function and renders a side-by-side
+  comparison card — catalog candidate's hyperparameters/metrics next
+  to the deep-tuned ones — rather than replacing the original result,
+  so the user can see exactly what the wider search changed.
+- **Quality gates:** `pytest` full suite 2180 passed / 3 skipped (5 new
+  `test_deep_tune.py` tests — regression completes + is reproducible
+  run-to-run, classification completes, an estimator with no
+  hyperparameters reports unavailable, an estimator not in the catalog
+  reports unavailable, deep-tuning a real search's own #1 candidate
+  works — plus 2 new backend API tests); `ruff` / `ruff format` / `mypy`
+  (182 source files) all green (one real bug caught and fixed during
+  this pass: `DeepTuneResult.best_hyperparameters`' Pydantic type
+  didn't accept `list[int]`, which an MLP's `hidden_layer_sizes` always
+  is — same class of bug as `ExpandedCandidateResult.hyperparameters`
+  in an earlier phase). Frontend: `tsc --noEmit` clean, `eslint` clean,
+  `next build` succeeds (17 routes, unchanged). The full upload → tune
+  round trip is verified by the backend API test
+  (`test_modeling_tune_deep_tunes_a_named_candidate`); live
+  click-through wasn't done this pass since the browser pane used for
+  manual verification in this project can't perform native file
+  uploads (noted here rather than silently skipped).
+- **Decision:** 0107.
+
 ### Phase 15 — MLOps / Monitoring
 - **Objective:** operate models in production.
 - **Components:** model/data versioning, drift and performance monitoring,

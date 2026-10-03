@@ -41,6 +41,7 @@ from datapilot.contracts import ColumnType
 from .models import (
     DataSplitPlan,
     DataSplitStrategy,
+    DeepTuneResult,
     ExpandedCandidateResult,
     ExpandedSearchResult,
     ModelCandidates,
@@ -1808,6 +1809,151 @@ _CV_SCORING: dict[str, str] = {
 }
 
 
+class _PreparationError(Exception):
+    """Raised by `_prepare_supervised_run` for any precondition failure.
+    Both `run_expanded_search` and `tune_best_candidate` catch this and
+    translate it into their own `status=unavailable` result type."""
+
+    def __init__(self, reason: str, task_type: str | None = None):
+        super().__init__(reason)
+        self.reason = reason
+        self.task_type = task_type
+
+
+@dataclass(frozen=True)
+class _PreparedSupervisedRun:
+    """Everything `run_expanded_search` and `tune_best_candidate` both need
+    before their own per-candidate logic begins — task validation, the
+    missing-target-aware train/test split, the outlier-aware preprocessor,
+    and the skewed-target log-transform decision. Factored out so the two
+    functions can't silently drift apart on how a dataset is prepared."""
+
+    task: TaskType
+    category: str
+    ctx: _ResolvedContext
+    catalog: list[_CandidateSpec]
+    preprocessor: Any
+    x_all: pd.DataFrame
+    y_all: np.ndarray
+    x_train: pd.DataFrame
+    x_test: pd.DataFrame
+    y_train: np.ndarray
+    y_test: np.ndarray
+    selection_metric: str | None
+    direction: str | None
+    target_log_transform: bool
+    dropped_missing_target: int
+    is_time_ordered: bool
+
+
+def _prepare_supervised_run(
+    df: pd.DataFrame,
+    problem: ProblemSpec,
+    feature_engineering: FeatureEngineeringSpec,
+    readiness: ModelReadiness,
+    split: DataSplitPlan,
+    *,
+    require_catalog: bool = True,
+) -> _PreparedSupervisedRun:
+    task_inference = problem.task_type
+    if task_inference.status is not _PU_COMPLETED or task_inference.task_type is None:
+        raise _PreparationError("task-type inference is not completed")
+    task = task_inference.task_type
+    if task in _UNSUPPORTED_TASKS:
+        raise _PreparationError(
+            f"model training does not support task type '{task.value}'", task.value
+        )
+    category = _TASK_CATEGORY[task]
+    if category not in ("regression", "classification"):
+        raise _PreparationError(
+            "the expanded search covers regression and classification only", task.value
+        )
+    if readiness.status is not ModelingStatus.COMPLETED or readiness.ready is False:
+        first = (
+            readiness.blocking_issues[0]
+            if readiness.blocking_issues
+            else (readiness.reason or "the data is not ready for modeling")
+        )
+        raise _PreparationError(
+            f"training is blocked by model-readiness issues: {first}", task.value
+        )
+    if split.status is not ModelingStatus.COMPLETED:
+        raise _PreparationError("the data-split plan is not completed", task.value)
+    if not _SKLEARN_AVAILABLE:
+        raise _PreparationError("scikit-learn is not available in this environment", task.value)
+
+    try:
+        ctx = _resolve_task_and_features(df, problem, feature_engineering)
+    except ValueError as exc:
+        raise _PreparationError(str(exc), task.value) from exc
+
+    catalog = _expanded_catalog(category)
+    if require_catalog and not catalog:
+        raise _PreparationError(
+            f"no expanded-search catalog is defined for category '{category}'", task.value
+        )
+
+    assert ctx.target_column is not None
+    is_time_ordered = split.strategy is DataSplitStrategy.TIME_ORDERED_HOLDOUT
+    work = df
+    dropped_missing_target = 0
+    if is_time_ordered:
+        observed = df[ctx.target_column].notna().to_numpy()
+        if observed.any():
+            first_obs = int(observed.argmax())
+            last_obs = len(observed) - 1 - int(observed[::-1].argmax())
+            dropped_missing_target = len(df) - (last_obs - first_obs + 1)
+            work = df.iloc[first_obs : last_obs + 1].reset_index(drop=True)
+    else:
+        before = len(df)
+        work = df[df[ctx.target_column].notna()].reset_index(drop=True)
+        dropped_missing_target = before - len(work)
+
+    if work.empty:
+        raise _PreparationError(
+            "every row has a missing target value; nothing is left to train on", task.value
+        )
+
+    x_all = work[ctx.feature_cols]
+    y_all = work[ctx.target_column].to_numpy()
+    train_idx, _val_idx, test_idx, _split_notes = _split_indices(len(work), split, y_all)
+
+    selection_metric, direction = _TASK_SELECTION_METRIC.get(task, (None, None))
+
+    x_train, x_test = x_all.iloc[train_idx], x_all.iloc[test_idx]
+    y_train, y_test = y_all[train_idx], y_all[test_idx]
+
+    try:
+        preprocessor = _build_preprocessor_for(feature_engineering, ctx, x_train=x_train)
+    except ValueError as exc:
+        raise _PreparationError(str(exc), task.value) from exc
+
+    target_log_transform = (
+        category == "regression"
+        and _skewness(y_train) > 1.0
+        and float(np.asarray(y_all, dtype=float).min()) >= 0.0
+    )
+
+    return _PreparedSupervisedRun(
+        task=task,
+        category=category,
+        ctx=ctx,
+        catalog=catalog,
+        preprocessor=preprocessor,
+        x_all=x_all,
+        y_all=y_all,
+        x_train=x_train,
+        x_test=x_test,
+        y_train=y_train,
+        y_test=y_test,
+        selection_metric=selection_metric,
+        direction=direction,
+        target_log_transform=target_log_transform,
+        dropped_missing_target=dropped_missing_target,
+        is_time_ordered=is_time_ordered,
+    )
+
+
 def run_expanded_search(
     df: pd.DataFrame,
     problem: ProblemSpec,
@@ -1850,119 +1996,28 @@ def run_expanded_search(
     Supervised tasks only (regression / classification) — clustering and
     unsupported task types return ``status = unavailable``.
     """
-    task_inference = problem.task_type
-    if task_inference.status is not _PU_COMPLETED or task_inference.task_type is None:
-        return ExpandedSearchResult(
-            status=ModelingStatus.UNAVAILABLE,
-            reason="task-type inference is not completed",
-        )
-    task = task_inference.task_type
-    if task in _UNSUPPORTED_TASKS:
-        return ExpandedSearchResult(
-            status=ModelingStatus.UNAVAILABLE,
-            reason=f"model training does not support task type '{task.value}'",
-            task_type=task.value,
-        )
-    category = _TASK_CATEGORY[task]
-    if category not in ("regression", "classification"):
-        return ExpandedSearchResult(
-            status=ModelingStatus.UNAVAILABLE,
-            reason="the expanded search covers regression and classification only",
-            task_type=task.value,
-        )
-    if readiness.status is not ModelingStatus.COMPLETED or readiness.ready is False:
-        first = (
-            readiness.blocking_issues[0]
-            if readiness.blocking_issues
-            else (readiness.reason or "the data is not ready for modeling")
-        )
-        return ExpandedSearchResult(
-            status=ModelingStatus.UNAVAILABLE,
-            reason=f"training is blocked by model-readiness issues: {first}",
-            task_type=task.value,
-        )
-    if split.status is not ModelingStatus.COMPLETED:
-        return ExpandedSearchResult(
-            status=ModelingStatus.UNAVAILABLE,
-            reason="the data-split plan is not completed",
-            task_type=task.value,
-        )
-    if not _SKLEARN_AVAILABLE:
-        return ExpandedSearchResult(
-            status=ModelingStatus.UNAVAILABLE,
-            reason="scikit-learn is not available in this environment",
-            task_type=task.value,
-        )
-
     try:
-        ctx = _resolve_task_and_features(df, problem, feature_engineering)
-    except ValueError as exc:
+        prep = _prepare_supervised_run(df, problem, feature_engineering, readiness, split)
+    except _PreparationError as exc:
         return ExpandedSearchResult(
-            status=ModelingStatus.UNAVAILABLE, reason=str(exc), task_type=task.value
-        )
-
-    catalog = _expanded_catalog(category)
-    if not catalog:
-        return ExpandedSearchResult(
-            status=ModelingStatus.UNAVAILABLE,
-            reason=f"no expanded-search catalog is defined for category '{category}'",
-            task_type=task.value,
+            status=ModelingStatus.UNAVAILABLE, reason=exc.reason, task_type=exc.task_type
         )
 
     from sklearn.pipeline import Pipeline
 
-    assert ctx.target_column is not None
-    is_time_ordered = split.strategy is DataSplitStrategy.TIME_ORDERED_HOLDOUT
-    work = df
-    dropped_missing_target = 0
-    if is_time_ordered:
-        observed = df[ctx.target_column].notna().to_numpy()
-        if observed.any():
-            first_obs = int(observed.argmax())
-            last_obs = len(observed) - 1 - int(observed[::-1].argmax())
-            dropped_missing_target = len(df) - (last_obs - first_obs + 1)
-            work = df.iloc[first_obs : last_obs + 1].reset_index(drop=True)
-    else:
-        before = len(df)
-        work = df[df[ctx.target_column].notna()].reset_index(drop=True)
-        dropped_missing_target = before - len(work)
-
-    if work.empty:
-        return ExpandedSearchResult(
-            status=ModelingStatus.UNAVAILABLE,
-            reason="every row has a missing target value; nothing is left to train on",
-            task_type=task.value,
-        )
-
-    x_all = work[ctx.feature_cols]
-    y_all = work[ctx.target_column].to_numpy()
-    train_idx, _val_idx, test_idx, _split_notes = _split_indices(len(work), split, y_all)
-
-    selection_metric, direction = _TASK_SELECTION_METRIC.get(task, (None, None))
+    task = prep.task
+    category = prep.category
+    catalog = prep.catalog
+    preprocessor = prep.preprocessor
+    x_all, y_all = prep.x_all, prep.y_all
+    x_train, x_test = prep.x_train, prep.x_test
+    y_train, y_test = prep.y_train, prep.y_test
+    selection_metric, direction = prep.selection_metric, prep.direction
+    target_log_transform = prep.target_log_transform
+    dropped_missing_target = prep.dropped_missing_target
+    is_time_ordered = prep.is_time_ordered
 
     results: list[tuple[ExpandedCandidateResult, float | None]] = []
-    x_train, x_test = x_all.iloc[train_idx], x_all.iloc[test_idx]
-    y_train, y_test = y_all[train_idx], y_all[test_idx]
-
-    try:
-        preprocessor = _build_preprocessor_for(feature_engineering, ctx, x_train=x_train)
-    except ValueError as exc:
-        return ExpandedSearchResult(
-            status=ModelingStatus.UNAVAILABLE, reason=str(exc), task_type=task.value
-        )
-
-    # a strongly right-skewed, non-negative regression target is log1p-
-    # transformed before every candidate fits (and expm1'd back before any
-    # metric is computed, via `TransformedTargetRegressor`, so every metric
-    # stays on the original scale and remains comparable to a non-transformed
-    # run) — the standard fix for a skewed target such as price / revenue /
-    # counts, which otherwise concentrates a model's error budget on a few
-    # large values instead of the bulk of the distribution.
-    target_log_transform = (
-        category == "regression"
-        and _skewness(y_train) > 1.0
-        and float(np.asarray(y_all, dtype=float).min()) >= 0.0
-    )
 
     cv_splitter = None
     if use_cross_validation and selection_metric in _CV_SCORING:
@@ -2228,3 +2283,282 @@ def run_expanded_search(
             else []
         ),
     )
+
+
+# --- Phase 14.12 — opt-in deep-tune over one named catalog estimator -------
+
+_DEEP_TUNE_N_ITER = 30
+_DEEP_TUNE_CV_FOLDS = 5
+
+# A deliberately curated subset of the catalog — the estimator families
+# with enough real hyperparameters to make a randomized search worthwhile.
+# Each value is a `model__`-unprefixed `RandomizedSearchCV`-style parameter
+# distribution (a list is sampled uniformly; `scipy.stats` distributions
+# would work too but are not needed for the ranges used here). An
+# estimator_name not present here (e.g. `LinearRegression`, `GaussianNB`,
+# anything with no real hyperparameters to search) reports `unavailable`
+# with an explicit reason rather than silently tuning nothing.
+_DEEP_TUNE_DISTRIBUTIONS: dict[str, dict[str, list[Any]]] = {
+    "RandomForestRegressor": {
+        "n_estimators": list(range(50, 401, 25)),
+        "max_depth": [None, 4, 6, 8, 10, 12, 16, 20, 24],
+        "min_samples_split": [2, 4, 6, 10],
+        "min_samples_leaf": [1, 2, 4],
+    },
+    "RandomForestClassifier": {
+        "n_estimators": list(range(50, 401, 25)),
+        "max_depth": [None, 4, 6, 8, 10, 12, 16, 20, 24],
+        "min_samples_split": [2, 4, 6, 10],
+        "min_samples_leaf": [1, 2, 4],
+    },
+    "ExtraTreesRegressor": {
+        "n_estimators": list(range(50, 401, 25)),
+        "max_depth": [None, 4, 6, 8, 10, 12, 16, 20],
+        "min_samples_split": [2, 4, 6, 10],
+    },
+    "ExtraTreesClassifier": {
+        "n_estimators": list(range(50, 401, 25)),
+        "max_depth": [None, 4, 6, 8, 10, 12, 16, 20],
+        "min_samples_split": [2, 4, 6, 10],
+    },
+    "GradientBoostingRegressor": {
+        "n_estimators": list(range(50, 401, 25)),
+        "learning_rate": [0.01, 0.02, 0.03, 0.05, 0.07, 0.1, 0.15, 0.2],
+        "max_depth": [2, 3, 4, 5, 6],
+        "subsample": [0.6, 0.7, 0.8, 0.9, 1.0],
+    },
+    "GradientBoostingClassifier": {
+        "n_estimators": list(range(50, 401, 25)),
+        "learning_rate": [0.01, 0.02, 0.03, 0.05, 0.07, 0.1, 0.15, 0.2],
+        "max_depth": [2, 3, 4, 5, 6],
+        "subsample": [0.6, 0.7, 0.8, 0.9, 1.0],
+    },
+    "HistGradientBoostingRegressor": {
+        "max_iter": list(range(50, 401, 25)),
+        "learning_rate": [0.01, 0.02, 0.03, 0.05, 0.07, 0.1, 0.15, 0.2],
+        "max_depth": [None, 3, 4, 5, 6, 8, 10],
+        "l2_regularization": [0.0, 0.01, 0.1, 1.0],
+    },
+    "HistGradientBoostingClassifier": {
+        "max_iter": list(range(50, 401, 25)),
+        "learning_rate": [0.01, 0.02, 0.03, 0.05, 0.07, 0.1, 0.15, 0.2],
+        "max_depth": [None, 3, 4, 5, 6, 8, 10],
+        "l2_regularization": [0.0, 0.01, 0.1, 1.0],
+    },
+    "DecisionTreeRegressor": {
+        "max_depth": [None, 2, 3, 4, 5, 6, 7, 8, 10, 12, 15, 20],
+        "min_samples_split": [2, 4, 6, 10, 20],
+        "min_samples_leaf": [1, 2, 4, 8],
+    },
+    "DecisionTreeClassifier": {
+        "max_depth": [None, 2, 3, 4, 5, 6, 7, 8, 10, 12, 15, 20],
+        "min_samples_split": [2, 4, 6, 10, 20],
+        "min_samples_leaf": [1, 2, 4, 8],
+    },
+    "KNeighborsRegressor": {
+        "n_neighbors": list(range(2, 41)),
+        "weights": ["uniform", "distance"],
+        "p": [1, 2],
+    },
+    "KNeighborsClassifier": {
+        "n_neighbors": list(range(2, 41)),
+        "weights": ["uniform", "distance"],
+        "p": [1, 2],
+    },
+    "SVR": {
+        "C": [0.01, 0.1, 1.0, 10.0, 100.0],
+        "kernel": ["rbf", "linear", "poly"],
+        "gamma": ["scale", "auto"],
+    },
+    "SVC": {
+        "C": [0.01, 0.1, 1.0, 10.0, 100.0],
+        "kernel": ["rbf", "linear", "poly"],
+        "gamma": ["scale", "auto"],
+    },
+    "Ridge": {"alpha": [0.0001, 0.001, 0.01, 0.1, 1.0, 10.0, 100.0, 1000.0, 10000.0]},
+    "RidgeClassifier": {"alpha": [0.001, 0.01, 0.1, 1.0, 10.0, 100.0, 1000.0]},
+    "Lasso": {"alpha": [0.0001, 0.001, 0.01, 0.1, 1.0, 10.0, 100.0]},
+    "ElasticNet": {
+        "alpha": [0.001, 0.01, 0.1, 1.0, 10.0],
+        "l1_ratio": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
+    },
+    "LogisticRegression": {
+        "C": [0.0001, 0.001, 0.01, 0.1, 1.0, 10.0, 100.0, 1000.0],
+    },
+    "MLPRegressor": {
+        "hidden_layer_sizes": [
+            (16,),
+            (32,),
+            (64,),
+            (128,),
+            (32, 16),
+            (64, 32),
+            (128, 64),
+            (64, 64, 32),
+            (128, 64, 32),
+        ],
+        "alpha": [0.0001, 0.001, 0.01, 0.1],
+        "learning_rate_init": [0.0005, 0.001, 0.005, 0.01],
+    },
+    "MLPClassifier": {
+        "hidden_layer_sizes": [
+            (16,),
+            (32,),
+            (64,),
+            (128,),
+            (32, 16),
+            (64, 32),
+            (128, 64),
+            (64, 64, 32),
+            (128, 64, 32),
+        ],
+        "alpha": [0.0001, 0.001, 0.01, 0.1],
+        "learning_rate_init": [0.0005, 0.001, 0.005, 0.01],
+    },
+}
+
+
+def tune_best_candidate(
+    df: pd.DataFrame,
+    problem: ProblemSpec,
+    feature_engineering: FeatureEngineeringSpec,
+    readiness: ModelReadiness,
+    split: DataSplitPlan,
+    *,
+    family: ModelFamily,
+    estimator_name: str,
+    objective: str | None = None,
+) -> DeepTuneResult:
+    """Opt-in, deliberately separate from `run_expanded_search`'s fixed
+    catalog: re-fits one *named* estimator from that catalog with
+    `sklearn.model_selection.RandomizedSearchCV` over a wider hyperparameter
+    neighborhood than the catalog's own fixed grid explores.
+
+    Still fully reproducible — `RandomizedSearchCV` is given the same
+    fixed `MODEL_TRAINING_RANDOM_SEED` this entire module always uses, so
+    the same data and the same `(family, estimator_name)` always produce
+    the same tuned result. This is the explicit tradeoff documented for
+    this feature: wider search, same determinism guarantee, strictly
+    slower (``_DEEP_TUNE_N_ITER`` fits, each cross-validated over
+    ``_DEEP_TUNE_CV_FOLDS`` folds) than any single catalog candidate.
+
+    `objective` is accepted and ignored, exactly like `run_expanded_search`
+    — it has already shaped the upstream `ProblemSpec` this function reads;
+    nothing here re-interprets it.
+    """
+    del objective
+    try:
+        prep = _prepare_supervised_run(
+            df, problem, feature_engineering, readiness, split, require_catalog=False
+        )
+    except _PreparationError as exc:
+        return DeepTuneResult(
+            status=ModelingStatus.UNAVAILABLE, reason=exc.reason, task_type=exc.task_type
+        )
+
+    matching = [
+        spec
+        for spec in _expanded_catalog(prep.category)
+        if spec.estimator_name == estimator_name and spec.family is family
+    ]
+    if not matching:
+        return DeepTuneResult(
+            status=ModelingStatus.UNAVAILABLE,
+            reason=(
+                f"'{estimator_name}' (family '{family.value}') is not in the Phase 7.7 "
+                f"catalog for this task"
+            ),
+            task_type=prep.task.value,
+            family=family,
+            estimator_name=estimator_name,
+        )
+
+    param_distributions = _DEEP_TUNE_DISTRIBUTIONS.get(estimator_name)
+    if not param_distributions:
+        return DeepTuneResult(
+            status=ModelingStatus.UNAVAILABLE,
+            reason=(
+                f"'{estimator_name}' has no deep-tune hyperparameter space defined — either "
+                "it has no real hyperparameters to search, or it is not yet covered"
+            ),
+            task_type=prep.task.value,
+            family=family,
+            estimator_name=estimator_name,
+        )
+
+    from sklearn.model_selection import RandomizedSearchCV
+    from sklearn.pipeline import Pipeline
+
+    start = _perf_counter()
+    try:
+        base_estimator = matching[0].build()
+        pipeline = Pipeline([("preprocess", prep.preprocessor), ("model", base_estimator)])
+        estimator: Any = pipeline
+        if prep.target_log_transform:
+            from sklearn.compose import TransformedTargetRegressor
+
+            estimator = TransformedTargetRegressor(
+                regressor=pipeline, func=np.log1p, inverse_func=np.expm1
+            )
+            prefixed = {f"regressor__model__{k}": v for k, v in param_distributions.items()}
+        else:
+            prefixed = {f"model__{k}": v for k, v in param_distributions.items()}
+
+        scoring = _CV_SCORING.get(prep.selection_metric) if prep.selection_metric else None
+        n_classes = len(np.unique(prep.y_train)) if prep.category == "classification" else 0
+        cv_folds = _DEEP_TUNE_CV_FOLDS
+        if prep.category == "classification":
+            cv_folds = min(cv_folds, int(np.bincount(prep.y_train.astype(int)).min()))
+        cv_folds = max(cv_folds, 2)
+
+        search = RandomizedSearchCV(
+            estimator,
+            param_distributions=prefixed,
+            n_iter=_DEEP_TUNE_N_ITER,
+            cv=cv_folds,
+            scoring=scoring,
+            random_state=MODEL_TRAINING_RANDOM_SEED,
+            n_jobs=1,
+        )
+        search.fit(prep.x_train, prep.y_train)
+
+        y_pred = np.asarray(search.predict(prep.x_test))
+        if prep.category == "regression":
+            metrics = _regression_metrics(prep.y_test.astype(float), y_pred.astype(float))
+        else:
+            metrics = _classification_metrics(prep.y_test, y_pred, None, n_classes=n_classes)
+
+        best_params = {
+            k.split("__")[-1]: (list(v) if isinstance(v, tuple) else v)
+            for k, v in search.best_params_.items()
+        }
+
+        return DeepTuneResult(
+            status=ModelingStatus.COMPLETED,
+            task_type=prep.task.value,
+            family=family,
+            estimator_name=estimator_name,
+            best_hyperparameters=best_params,
+            metrics=metrics,
+            n_iterations=_DEEP_TUNE_N_ITER,
+            cv_folds=cv_folds,
+            fit_seconds=round(_perf_counter() - start, 4),
+            notes=[
+                f"RandomizedSearchCV over {_DEEP_TUNE_N_ITER} candidate hyperparameter "
+                f"combinations, each scored with {cv_folds}-fold cross-validation — "
+                f"{_DEEP_TUNE_N_ITER * cv_folds} total fits",
+                f"random seed: {MODEL_TRAINING_RANDOM_SEED} (fixed) — same data and the same "
+                "(family, estimator_name) always produce this same tuned result",
+                "compare best_hyperparameters and metrics above against this same "
+                "estimator's entry in the catalog search result to see what tuning changed",
+            ],
+        )
+    except Exception as exc:  # noqa: BLE001 - deterministic, normalised failure record
+        return DeepTuneResult(
+            status=ModelingStatus.UNAVAILABLE,
+            reason=f"{type(exc).__name__}: {_normalise_error(str(exc))}",
+            task_type=prep.task.value,
+            family=family,
+            estimator_name=estimator_name,
+            fit_seconds=round(_perf_counter() - start, 4),
+        )

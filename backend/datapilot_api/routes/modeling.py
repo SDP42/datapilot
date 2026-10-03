@@ -10,13 +10,16 @@ endpoint is deliberately kept for the common, fast case.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Form, UploadFile
+from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from data_engine.modeling import (
+    DeepTuneResult,
     ExpandedSearchResult,
+    ModelFamily,
     ModelingRequest,
     ModelingSpec,
+    run_deep_tune,
     run_expanded_model_search,
     run_modeling_pipeline,
 )
@@ -89,6 +92,40 @@ async def search(
             f"status={result.status.value}; {result.candidate_count} candidates ranked"
             f"{' (cross-validated)' if cross_validate else ''}"
         ),
+    )
+    return result
+
+
+@router.post("/tune", response_model=DeepTuneResult)
+async def tune(
+    file: UploadFile,
+    objective: str = Form(...),
+    family: str = Form(...),
+    estimator_name: str = Form(...),
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> DeepTuneResult:
+    """Opt-in, deliberately separate from `/search`'s fixed catalog:
+    deep-tunes one *named* estimator (as identified by a prior `/search`
+    call's `family` + `estimator_name`) with `RandomizedSearchCV` over a
+    wider hyperparameter neighborhood — still fully reproducible (a fixed
+    random seed), just slower than any single catalog candidate.
+    """
+    try:
+        family_enum = ModelFamily(family)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"unknown model family '{family}'") from exc
+
+    reference, df = await ingest_upload(file)
+    request = ModelingRequest(dataset_id=reference.dataset_id, objective=objective)
+    result = run_deep_tune(df, request, family=family_enum, estimator_name=estimator_name)
+    record_activity(
+        session,
+        current_user,
+        kind="tune",
+        dataset_id=reference.dataset_id,
+        dataset_filename=reference.original_filename,
+        summary=f"status={result.status.value}; deep-tuned {estimator_name}",
     )
     return result
 

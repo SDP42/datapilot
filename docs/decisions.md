@@ -4,6 +4,51 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0107 — Phase 14.12: adaptive tuning added opt-in with a fixed seed, never replacing the catalog's determinism guarantee
+
+- **Decision:** rather than deciding unilaterally whether to reverse
+  decision 0098 (no adaptive hyperparameter search, ever), the tradeoff
+  was put to the user directly — opt-in-but-still-deterministic vs.
+  expand the fixed grid vs. skip — because the two real options
+  (reproducible-but-adaptive vs. fixed-but-denser) serve genuinely
+  different values and no default was clearly correct. Given the
+  answer, `RandomizedSearchCV` was implemented with the module's one
+  existing fixed `MODEL_TRAINING_RANDOM_SEED`, as an explicitly separate
+  function (`tune_best_candidate`) the catalog search never calls — the
+  catalog's own ranking is unaffected by this feature existing at all.
+- **Reason:** decision 0098's reasoning (reproducibility, no second
+  randomness source, runtime cost) is still correct for the catalog
+  search itself, which stays exactly as it was; the new function doesn't
+  weaken that guarantee, it adds a second, clearly-labeled, opt-in path
+  with its *own* determinism guarantee (same data + same
+  `(family, estimator_name)` input always produces the same tuned
+  output — verified by a test that runs it twice and asserts identical
+  results). This is the same shape of compromise Phase 14.7's
+  cross-validation feature already used successfully.
+- **Alternatives considered:** silently expanding `tune_best_candidate`'s
+  search to the entire catalog instead of one named estimator (rejected
+  — unbounded runtime, and a user who already has a #1-ranked candidate
+  from `/search` has a specific, obvious thing they want tuned further,
+  not a second full search); using `GridSearchCV` instead of
+  `RandomizedSearchCV` (rejected — several of the curated distributions
+  have enough combinations that an exhaustive grid would run far longer
+  for the same 30-sample budget `RandomizedSearchCV` covers); tuning
+  *every* catalog estimator's hyperparameter space rather than a curated
+  18-estimator subset (rejected for this pass — estimators with no real
+  hyperparameters, like `LinearRegression`/`GaussianNB`, have nothing to
+  search, and covering every remaining estimator well would have meant
+  either thin, low-value distributions or a much larger first pass;
+  curated-but-honest-about-the-gap was judged better than padding
+  coverage with distributions too narrow to matter).
+- **Consequence:** `training.py` gained `_prepare_supervised_run` (shared
+  with `run_expanded_search`, which is behaviour-unchanged — its own 11
+  tests still pass verbatim), `_DEEP_TUNE_DISTRIBUTIONS`, and
+  `tune_best_candidate`; `models.py` gained `DeepTuneResult`;
+  `routes/modeling.py` gained `POST /tune`; the modeling page gained a
+  side-by-side catalog-vs-tuned comparison card. Quality gates: `pytest`
+  2180 passed / 3 skipped (7 new tests); `ruff` / `ruff format` / `mypy`
+  all green; frontend `tsc` / `eslint` / `next build` all clean.
+
 ## 0106 — Phase 14.11: a vague "heavier frontend" request was clarified by a direct multi-choice question, then built from real state
 
 - **Decision:** "frontend should be more heavy" was answered first with

@@ -152,6 +152,20 @@ export async function runModelSearch(file: File, objective: string, crossValidat
   return uploadForm<ExpandedSearchResult>("/api/v1/modeling/search", form);
 }
 
+export async function tuneBestCandidate(
+  file: File,
+  objective: string,
+  family: string,
+  estimatorName: string,
+) {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("objective", objective);
+  form.append("family", family);
+  form.append("estimator_name", estimatorName);
+  return uploadForm<DeepTuneResult>("/api/v1/modeling/tune", form);
+}
+
 export async function submitModelingJob(file: File, objective: string, forecastHorizon = 1) {
   const form = new FormData();
   form.append("file", file);
@@ -408,11 +422,25 @@ export interface ExpandedCandidateResult {
   rank: number;
   family: string;
   estimator_name: string;
-  hyperparameters: Record<string, string | number | boolean | number[] | null>;
+  hyperparameters: Record<string, string | number | boolean | number[] | string[] | null>;
   status: "completed" | "failed" | "unavailable";
   metrics: Record<string, number>;
   fit_seconds: number;
   reason?: string | null;
+}
+
+export interface DeepTuneResult {
+  status: string;
+  reason?: string | null;
+  task_type?: string | null;
+  family?: string | null;
+  estimator_name?: string | null;
+  best_hyperparameters: Record<string, string | number | boolean | number[] | null>;
+  metrics: Record<string, number>;
+  n_iterations: number;
+  cv_folds: number;
+  fit_seconds: number;
+  notes: string[];
 }
 
 export interface ExpandedSearchResult {
@@ -469,7 +497,16 @@ export interface PredictionResult {
 
 export interface ActivityRecord {
   activity_id: string;
-  kind: "ingest" | "quality" | "eda" | "modeling" | "search" | "train" | "predict";
+  kind:
+    | "ingest"
+    | "quality"
+    | "eda"
+    | "modeling"
+    | "search"
+    | "tune"
+    | "train"
+    | "predict"
+    | "cluster";
   dataset_id: string;
   dataset_filename?: string | null;
   summary: string;
