@@ -16,6 +16,10 @@ import {
   TrendingUp,
   Lightbulb,
   X,
+  Search,
+  CalendarRange,
+  ListFilter,
+  Hash,
 } from "lucide-react";
 import {
   Line,
@@ -42,12 +46,14 @@ import { downloadDashboardHtml, printDashboardPdf } from "@/lib/export";
 import { groupColumnsIntoDashboards, suggestDashboardCount, type DashboardGroup } from "@/lib/dashboard-grouping";
 import { parseCsvFile } from "@/lib/csv-parse";
 import {
-  applyFilters,
+  applyAllFilters,
   computeCategoricalAnalysis,
   computeNumericDistribution,
   computeTrend,
   distinctValues,
+  numericBounds,
   strongestCorrelation,
+  type NumericRange,
   type Row,
 } from "@/lib/bi-stats";
 import { analyzeEda, ApiError, EdaReport } from "@/lib/api";
@@ -59,34 +65,122 @@ const tooltipStyle = {
   fontSize: 12,
 };
 
+const SINGLE_SELECT_THRESHOLD = 8;
+
+interface FilterState {
+  categorical: Record<string, string[]>;
+  numericRanges: Record<string, NumericRange>;
+  dateStart: string | null;
+  dateEnd: string | null;
+  search: string;
+  topN: number;
+}
+
+const EMPTY_FILTERS: FilterState = {
+  categorical: {},
+  numericRanges: {},
+  dateStart: null,
+  dateEnd: null,
+  search: "",
+  topN: 8,
+};
+
+function SlicerSection({
+  title,
+  icon: Icon,
+  children,
+}: {
+  title: string;
+  icon: React.ComponentType<{ className?: string }>;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted">
+        <Icon className="h-3 w-3" /> {title}
+      </div>
+      {children}
+    </div>
+  );
+}
+
 function BiDashboardPanel({
   report,
   group,
   rawRows,
   filters,
-  onToggleFilter,
-  onClearFilters,
+  onFiltersChange,
   dateColumn,
   innerRef,
 }: {
   report: EdaReport;
   group: DashboardGroup;
   rawRows: Row[];
-  filters: Record<string, string[]>;
-  onToggleFilter: (column: string, value: string) => void;
-  onClearFilters: () => void;
+  filters: FilterState;
+  onFiltersChange: (next: FilterState) => void;
   dateColumn: string | null;
   innerRef?: React.Ref<HTMLDivElement>;
 }) {
-  const groupNumeric = group.columns.filter(
-    (c) => report.univariate.numeric.some((n) => n.column === c),
+  const groupNumeric = useMemo(
+    () => group.columns.filter((c) => report.univariate.numeric.some((n) => n.column === c)),
+    [group.columns, report.univariate.numeric],
   );
-  const groupCategorical = group.columns.filter(
-    (c) => report.univariate.categorical.some((n) => n.column === c),
+  const groupCategorical = useMemo(
+    () => group.columns.filter((c) => report.univariate.categorical.some((n) => n.column === c)),
+    [group.columns, report.univariate.categorical],
+  );
+  const lowCardinality = useMemo(
+    () => groupCategorical.filter((c) => distinctValues(rawRows, c).length <= SINGLE_SELECT_THRESHOLD),
+    [groupCategorical, rawRows],
+  );
+  const highCardinality = useMemo(
+    () => groupCategorical.filter((c) => distinctValues(rawRows, c).length > SINGLE_SELECT_THRESHOLD),
+    [groupCategorical, rawRows],
   );
 
-  const filteredRows = useMemo(() => applyFilters(rawRows, filters), [rawRows, filters]);
-  const activeFilterCount = Object.values(filters).reduce((a, v) => a + v.length, 0);
+  const filteredRows = useMemo(
+    () =>
+      applyAllFilters(rawRows, {
+        categorical: filters.categorical,
+        numericRanges: filters.numericRanges,
+        dateRange: dateColumn
+          ? { column: dateColumn, start: filters.dateStart, end: filters.dateEnd }
+          : null,
+        search: groupCategorical.length
+          ? { columns: groupCategorical, query: filters.search }
+          : null,
+      }),
+    [rawRows, filters, dateColumn, groupCategorical],
+  );
+
+  const activeFilterCount =
+    Object.values(filters.categorical).reduce((a, v) => a + v.length, 0) +
+    Object.values(filters.numericRanges).filter((r) => r.min !== null || r.max !== null).length +
+    (filters.dateStart || filters.dateEnd ? 1 : 0) +
+    (filters.search.trim() ? 1 : 0);
+
+  function toggleCategorical(column: string, value: string) {
+    const current = filters.categorical[column] ?? [];
+    const next = current.includes(value)
+      ? current.filter((v) => v !== value)
+      : [...current, value];
+    onFiltersChange({ ...filters, categorical: { ...filters.categorical, [column]: next } });
+  }
+
+  function setSingleSelect(column: string, value: string) {
+    onFiltersChange({
+      ...filters,
+      categorical: { ...filters.categorical, [column]: value ? [value] : [] },
+    });
+  }
+
+  function setRange(column: string, patch: Partial<NumericRange>) {
+    const current = filters.numericRanges[column] ?? { min: null, max: null };
+    onFiltersChange({
+      ...filters,
+      numericRanges: { ...filters.numericRanges, [column]: { ...current, ...patch } },
+    });
+  }
 
   const kpiNumeric = groupNumeric.slice(0, 2).map((col) => {
     const values = filteredRows.map((r) => parseFloat(r[col])).filter(Number.isFinite);
@@ -133,8 +227,8 @@ function BiDashboardPanel({
         </div>
       </div>
 
-      {/* Row 2 — Slicers */}
-      {groupCategorical.length > 0 && (
+      {/* Row 2 — Slicers (6 types) */}
+      {(groupCategorical.length > 0 || groupNumeric.length > 0 || dateColumn) && (
         <div>
           <div className="mb-2 flex items-center gap-2">
             <SlidersHorizontal className="h-3.5 w-3.5 text-primary-2" />
@@ -143,39 +237,162 @@ function BiDashboardPanel({
             </h3>
             {activeFilterCount > 0 && (
               <button
-                onClick={onClearFilters}
+                onClick={() => onFiltersChange(EMPTY_FILTERS)}
                 className="ml-auto flex items-center gap-1 text-xs text-muted hover:text-foreground"
               >
-                <X className="h-3 w-3" /> Clear filters
+                <X className="h-3 w-3" /> Clear all filters
               </button>
             )}
           </div>
-          <div className="space-y-2 rounded-xl border border-surface-border bg-surface-2/30 p-4">
-            {groupCategorical.map((col) => (
-              <div key={col} className="flex flex-wrap items-center gap-2">
-                <span className="w-28 shrink-0 font-mono text-xs text-muted">{col}</span>
-                {distinctValues(rawRows, col)
-                  .slice(0, 12)
-                  .map((v) => {
-                    const active = (filters[col] ?? []).includes(v);
-                    return (
-                      <button
-                        key={v}
-                        type="button"
-                        onClick={() => onToggleFilter(col, v)}
-                        className={cn(
-                          "rounded-full border px-2.5 py-1 text-xs transition-colors",
-                          active
-                            ? "border-primary/50 bg-primary/15 text-primary-2"
-                            : "border-surface-border bg-surface/60 text-muted hover:text-foreground",
-                        )}
+          <div className="grid gap-4 rounded-xl border border-surface-border bg-surface-2/30 p-4 sm:grid-cols-2">
+            {groupCategorical.length > 0 && (
+              <SlicerSection title="Search (across categories)" icon={Search}>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
+                  <Input
+                    value={filters.search}
+                    onChange={(e) => onFiltersChange({ ...filters, search: e.target.value })}
+                    placeholder="Type to filter rows…"
+                    className="h-9 pl-8 text-sm"
+                  />
+                </div>
+              </SlicerSection>
+            )}
+
+            {dateColumn && (
+              <SlicerSection title={`Date range — ${dateColumn}`} icon={CalendarRange}>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="date"
+                    value={filters.dateStart ?? ""}
+                    onChange={(e) =>
+                      onFiltersChange({ ...filters, dateStart: e.target.value || null })
+                    }
+                    className="h-9 w-full rounded-lg border border-surface-border bg-surface-2/60 px-2 text-xs text-foreground outline-none focus:border-primary"
+                  />
+                  <span className="text-xs text-muted">to</span>
+                  <input
+                    type="date"
+                    value={filters.dateEnd ?? ""}
+                    onChange={(e) =>
+                      onFiltersChange({ ...filters, dateEnd: e.target.value || null })
+                    }
+                    className="h-9 w-full rounded-lg border border-surface-border bg-surface-2/60 px-2 text-xs text-foreground outline-none focus:border-primary"
+                  />
+                </div>
+              </SlicerSection>
+            )}
+
+            {lowCardinality.length > 0 && (
+              <SlicerSection title="Category filters (multi-select)" icon={ListFilter}>
+                <div className="space-y-2">
+                  {lowCardinality.map((col) => (
+                    <div key={col} className="flex flex-wrap items-center gap-1.5">
+                      <span className="w-24 shrink-0 truncate font-mono text-[11px] text-muted">
+                        {col}
+                      </span>
+                      {distinctValues(rawRows, col).map((v) => {
+                        const active = (filters.categorical[col] ?? []).includes(v);
+                        return (
+                          <button
+                            key={v}
+                            type="button"
+                            onClick={() => toggleCategorical(col, v)}
+                            className={cn(
+                              "rounded-full border px-2 py-0.5 text-[11px] transition-colors",
+                              active
+                                ? "border-primary/50 bg-primary/15 text-primary-2"
+                                : "border-surface-border bg-surface/60 text-muted hover:text-foreground",
+                            )}
+                          >
+                            {v}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+              </SlicerSection>
+            )}
+
+            {highCardinality.length > 0 && (
+              <SlicerSection title="Quick pick (single-select)" icon={ListFilter}>
+                <div className="space-y-2">
+                  {highCardinality.map((col) => (
+                    <div key={col} className="flex items-center gap-2">
+                      <span className="w-24 shrink-0 truncate font-mono text-[11px] text-muted">
+                        {col}
+                      </span>
+                      <select
+                        value={filters.categorical[col]?.[0] ?? ""}
+                        onChange={(e) => setSingleSelect(col, e.target.value)}
+                        className="h-8 w-full rounded-lg border border-surface-border bg-surface-2/60 px-2 text-xs text-foreground outline-none focus:border-primary"
                       >
-                        {v}
-                      </button>
+                        <option value="">All</option>
+                        {distinctValues(rawRows, col).map((v) => (
+                          <option key={v} value={v}>
+                            {v}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              </SlicerSection>
+            )}
+
+            {groupNumeric.length > 0 && (
+              <SlicerSection title="Numeric range" icon={SlidersHorizontal}>
+                <div className="space-y-2">
+                  {groupNumeric.slice(0, 2).map((col) => {
+                    const bounds = numericBounds(rawRows, col);
+                    const current = filters.numericRanges[col] ?? { min: null, max: null };
+                    return (
+                      <div key={col} className="flex items-center gap-2">
+                        <span className="w-24 shrink-0 truncate font-mono text-[11px] text-muted">
+                          {col}
+                        </span>
+                        <input
+                          type="number"
+                          placeholder={bounds ? bounds.min.toFixed(0) : "min"}
+                          value={current.min ?? ""}
+                          onChange={(e) =>
+                            setRange(col, { min: e.target.value ? Number(e.target.value) : null })
+                          }
+                          className="h-8 w-full rounded-lg border border-surface-border bg-surface-2/60 px-2 text-xs text-foreground outline-none focus:border-primary"
+                        />
+                        <span className="text-xs text-muted">–</span>
+                        <input
+                          type="number"
+                          placeholder={bounds ? bounds.max.toFixed(0) : "max"}
+                          value={current.max ?? ""}
+                          onChange={(e) =>
+                            setRange(col, { max: e.target.value ? Number(e.target.value) : null })
+                          }
+                          className="h-8 w-full rounded-lg border border-surface-border bg-surface-2/60 px-2 text-xs text-foreground outline-none focus:border-primary"
+                        />
+                      </div>
                     );
                   })}
-              </div>
-            ))}
+                </div>
+              </SlicerSection>
+            )}
+
+            {groupCategorical.length > 0 && (
+              <SlicerSection title="Top N (chart display limit)" icon={Hash}>
+                <select
+                  value={filters.topN}
+                  onChange={(e) => onFiltersChange({ ...filters, topN: Number(e.target.value) })}
+                  className="h-9 w-full rounded-lg border border-surface-border bg-surface-2/60 px-2 text-xs text-foreground outline-none focus:border-primary"
+                >
+                  {[3, 5, 8, 10, 15, 20].map((n) => (
+                    <option key={n} value={n}>
+                      Top {n} categories
+                    </option>
+                  ))}
+                </select>
+              </SlicerSection>
+            )}
           </div>
         </div>
       )}
@@ -223,7 +440,7 @@ function BiDashboardPanel({
             ) : (
               <CategoricalBarCard
                 key={col}
-                cat={computeCategoricalAnalysis(filteredRows, col)}
+                cat={computeCategoricalAnalysis(filteredRows, col, filters.topN)}
                 variant={i % 2 === 0 ? "bar" : "pie"}
               />
             ),
@@ -270,7 +487,7 @@ export default function DashboardsPage() {
   const [dashboardCount, setDashboardCount] = useState(1);
   const [built, setBuilt] = useState(false);
   const [activeTab, setActiveTab] = useState("0");
-  const [filters, setFilters] = useState<Record<string, string[]>>({});
+  const [filters, setFilters] = useState<FilterState>(EMPTY_FILTERS);
 
   const dashboardRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
@@ -298,7 +515,7 @@ export default function DashboardsPage() {
       const [data, parsed] = await Promise.all([analyzeEda(file), parseCsvFile(file)]);
       setReport(data);
       setRawRows(parsed.rows);
-      setFilters({});
+      setFilters(EMPTY_FILTERS);
       const allColumns = [...data.univariate.numeric, ...data.univariate.categorical].map(
         (c) => c.column,
       );
@@ -329,16 +546,6 @@ export default function DashboardsPage() {
     setDashboardCount(1);
   }
 
-  function toggleFilter(column: string, value: string) {
-    setFilters((prev) => {
-      const current = prev[column] ?? [];
-      const next = current.includes(value)
-        ? current.filter((v) => v !== value)
-        : [...current, value];
-      return { ...prev, [column]: next };
-    });
-  }
-
   const groups = useMemo(() => {
     if (!built || selected.length === 0) return [];
     return groupColumnsIntoDashboards(selected, dashboardCount);
@@ -353,7 +560,7 @@ export default function DashboardsPage() {
     <div>
       <PageHeader
         title="Dashboard builder"
-        description="Upload a dataset and get multiple domain-themed dashboards — KPIs, slicers, trends, and an auto-generated conclusion, like a real BI report."
+        description="Upload a dataset and get multiple domain-themed dashboards — KPIs, six kinds of slicers, trends, and an auto-generated conclusion, like a real BI report."
       />
 
       <Card>
@@ -512,8 +719,7 @@ export default function DashboardsPage() {
                   group={g}
                   rawRows={rawRows}
                   filters={filters}
-                  onToggleFilter={toggleFilter}
-                  onClearFilters={() => setFilters({})}
+                  onFiltersChange={setFilters}
                   dateColumn={dateColumn}
                   innerRef={(el) => {
                     dashboardRefs.current[String(i)] = el;

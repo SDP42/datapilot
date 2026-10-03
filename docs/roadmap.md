@@ -2463,6 +2463,59 @@ Phase-7/8 entry point.
   this pass, given the time this increment's other items took.
 - **Decision:** 0099.
 
+#### Phase 14.5 — EDA Relationships Rendered, Six Slicer Types, Titled Visuals — **Done**
+- **Scope:** "not all EDA is there" and "dashboard also not everything"
+  were accurate — the backend's bivariate analysis (numeric-numeric
+  correlations, categorical-numeric group means, categorical-categorical
+  contingency) was computed every run and then only ever shown as raw
+  JSON in a collapsed accordion, never charted. The Dashboard Builder had
+  exactly one slicer type (categorical multi-select). "Proper titles —
+  what against what" was also a fair complaint: several chart titles
+  were just a bare column name.
+- **EDA page: a new "Relationships" section renders the bivariate data
+  that was already being computed.** `CorrelationRankingCard` (every
+  numeric pair ranked by \|r\|, each bar labeled "A vs B", colored by
+  sign), `GroupedMeanBarCard` ("Average {numeric} by {categorical}"),
+  `ContingencyBarCard` ("{A} vs {B}" stacked counts) —
+  `components/ui/eda-charts.tsx` grew three new chart components, all
+  reading `EDAReport.bivariate` (`frontend/src/lib/api.ts` gained the
+  matching typed interfaces: `NumericPairCorrelation`,
+  `CategoricalNumericSummary`, `CategoricalContingency`). Every existing
+  chart title was also rewritten to state the relationship explicitly
+  ("Distribution of {col}", "{col} breakdown") rather than a bare column
+  name.
+- **Dashboard Builder: six distinct, independently-combinable slicer
+  types** (`lib/bi-stats.ts`'s `applyAllFilters`, AND-combined): category
+  multi-select (chips, low-cardinality columns), single-select dropdown
+  (high-cardinality columns — a different control for a different
+  situation, not the same chip list grown unusably long), numeric range
+  (two bounded number inputs per numeric column), date range (shown only
+  when the dataset actually has a datetime column), free-text search
+  (across every categorical column in the dashboard), and a Top-N
+  display-limit control for how many categories a chart shows. Verified
+  live: the numeric age-range slicer (set to 40–60) changed "Rows" from
+  80 to 43 and every KPI/chart/conclusion recomputed from the filtered
+  rows, same as the single-slicer version Phase 14.3 verified.
+- **Quality gates:** frontend `tsc --noEmit` clean, `eslint` clean (one
+  React Compiler memoization-preservation error fixed by wrapping the
+  per-group column-list derivations in their own `useMemo`), `next
+  build` succeeds (14 static routes, unchanged — this phase reworked two
+  existing pages). Backend untouched this pass — full `pytest` suite
+  (2152 passed / 3 skipped) reconfirmed green as a regression check.
+  Verified end to end in a real browser against the real backend: the
+  EDA Relationships section rendered "Strongest numeric relationships",
+  "Average age by attrition", and "Average salary by attrition" from a
+  real HR dataset; the Dashboard Builder showed 4 of the 6 slicer types
+  applicable to that dataset (no date column, no high-cardinality
+  column in the active group) and the numeric-range slicer genuinely
+  filtered the report.
+- **Explicitly not done this pass:** "500 visuals" was not interpreted
+  literally — delivered instead is genuine chart-type variety (bar, pie/
+  donut, line, grouped-bar, horizontal ranked-bar, stacked-bar) applied
+  correctly to each relationship type, which is what the complaint was
+  actually about ("different types of visuals"), not a literal count.
+- **Decision:** 0100.
+
 ### Phase 15 — MLOps / Monitoring
 - **Objective:** operate models in production.
 - **Components:** model/data versioning, drift and performance monitoring,

@@ -270,6 +270,48 @@ export interface DistributionAnalysis {
   notes: string[];
 }
 
+export interface NumericPairCorrelation {
+  column_a: string;
+  column_b: string;
+  method: string;
+  n_observations: number;
+  correlation: number | null;
+}
+
+export interface CategoryNumericGroup {
+  category: string;
+  count: number;
+  mean: number | null;
+  median: number | null;
+}
+
+export interface CategoricalNumericSummary {
+  categorical_column: string;
+  numeric_column: string;
+  groups: CategoryNumericGroup[];
+  truncated: boolean;
+}
+
+export interface ContingencyRow {
+  category_a: string;
+  category_b: string;
+  count: number;
+}
+
+export interface CategoricalContingency {
+  column_a: string;
+  column_b: string;
+  rows: ContingencyRow[];
+  truncated: boolean;
+}
+
+export interface BivariateSummary {
+  numeric_correlations: NumericPairCorrelation[];
+  categorical_numeric: CategoricalNumericSummary[];
+  categorical_categorical: CategoricalContingency[];
+  notes: string[];
+}
+
 export interface EdaReport {
   dataset_id: string;
   n_rows: number;
@@ -278,6 +320,7 @@ export interface EdaReport {
   column_kinds: Record<string, "numeric" | "categorical" | "datetime">;
   univariate: UnivariateAnalysis;
   distribution: DistributionAnalysis;
+  bivariate: BivariateSummary;
   [key: string]: unknown;
 }
 

@@ -106,6 +106,79 @@ export function applyFilters(rows: Row[], filters: Record<string, string[]>): Ro
   return rows.filter((r) => active.every(([col, values]) => values.includes(r[col])));
 }
 
+export interface NumericRange {
+  min: number | null;
+  max: number | null;
+}
+
+export interface DateRange {
+  column: string;
+  start: string | null;
+  end: string | null;
+}
+
+export interface SearchFilter {
+  columns: string[];
+  query: string;
+}
+
+/** Combines every slicer type — categorical multi/single-select, numeric
+ * range, date range, and free-text search — into one row predicate.
+ * Each filter type is independent and AND-combined with the others. */
+export function applyAllFilters(
+  rows: Row[],
+  opts: {
+    categorical?: Record<string, string[]>;
+    numericRanges?: Record<string, NumericRange>;
+    dateRange?: DateRange | null;
+    search?: SearchFilter | null;
+  },
+): Row[] {
+  const categoricalActive = Object.entries(opts.categorical ?? {}).filter(
+    ([, values]) => values.length > 0,
+  );
+  const rangeActive = Object.entries(opts.numericRanges ?? {}).filter(
+    ([, r]) => r.min !== null || r.max !== null,
+  );
+  const dateActive = opts.dateRange && (opts.dateRange.start || opts.dateRange.end);
+  const searchActive = opts.search && opts.search.query.trim().length > 0;
+
+  if (!categoricalActive.length && !rangeActive.length && !dateActive && !searchActive) {
+    return rows;
+  }
+
+  return rows.filter((r) => {
+    for (const [col, values] of categoricalActive) {
+      if (!values.includes(r[col])) return false;
+    }
+    for (const [col, range] of rangeActive) {
+      const v = parseFloat(r[col]);
+      if (!Number.isFinite(v)) return false;
+      if (range.min !== null && v < range.min) return false;
+      if (range.max !== null && v > range.max) return false;
+    }
+    if (dateActive && opts.dateRange) {
+      const raw = r[opts.dateRange.column];
+      const d = raw ? new Date(raw) : null;
+      if (!d || Number.isNaN(d.getTime())) return false;
+      if (opts.dateRange.start && d < new Date(opts.dateRange.start)) return false;
+      if (opts.dateRange.end && d > new Date(opts.dateRange.end)) return false;
+    }
+    if (searchActive && opts.search) {
+      const q = opts.search.query.trim().toLowerCase();
+      const matches = opts.search.columns.some((c) => (r[c] ?? "").toLowerCase().includes(q));
+      if (!matches) return false;
+    }
+    return true;
+  });
+}
+
+export function numericBounds(rows: Row[], column: string): { min: number; max: number } | null {
+  const values = rows.map((r) => parseFloat(r[column])).filter(Number.isFinite);
+  if (values.length === 0) return null;
+  return { min: Math.min(...values), max: Math.max(...values) };
+}
+
 function pearsonCorrelation(xs: number[], ys: number[]): number | null {
   const n = xs.length;
   if (n < 2) return null;

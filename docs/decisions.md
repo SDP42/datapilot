@@ -4,6 +4,62 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0100 — Phase 14.5: rendering data the backend already computed rather than inventing new analysis, and six independent slicer predicates over one generic filter object
+
+- **Decision:** two choices define this increment:
+  1. **The EDA "Relationships" section renders `EDAReport.bivariate` —
+     data Phase 4 (`data_engine/eda`) has computed on every single run
+     since it was built — rather than adding any new backend analysis.**
+     "Not all EDA is there" was literally true: `numeric_correlations`,
+     `categorical_numeric`, and `categorical_categorical` were
+     serialized into every API response and then only ever dumped into
+     a collapsed raw-JSON accordion. The fix was entirely a frontend
+     rendering gap, not a backend capability gap — confirmed by reading
+     `data_engine/eda/models.py` before writing a line of new chart
+     code, which is the reason no backend file changed this increment.
+  2. **Six slicer types are six independent predicates AND-combined by
+     one `applyAllFilters` function, not six separate filter passes or
+     six copies of the row-filtering logic.** Each slicer type
+     (categorical multi/single-select, numeric range, date range,
+     search, Top-N) reads and writes its own slice of one `FilterState`
+     object, and `applyAllFilters` evaluates all active predicates in a
+     single pass over the rows — adding a seventh slicer type later
+     means adding one more predicate block to that function, not a
+     parallel filtering pipeline. Top-N is implemented differently from
+     the other five on purpose: it doesn't remove rows (it controls how
+     many categories `computeCategoricalAnalysis` returns for display),
+     because truncating *rows* to satisfy a "top N *categories*" request
+     would have silently changed what the KPIs and other charts in the
+     same dashboard meant.
+- **Reason:** both choices follow the same rule — look at what already
+  exists before building something new. The backend already had the
+  bivariate data; the existing `FilterState`/`applyFilters` shape from
+  Phase 14.3 already had the right structure to extend rather than
+  replace.
+- **Alternatives considered:** adding new backend statistical endpoints
+  for "relationships" (rejected — unnecessary, the data already existed
+  and the gap was purely that the frontend never rendered it); six
+  separate `useState` filter variables with six separate `.filter()`
+  calls over the rows (rejected — would have meant re-deriving "is this
+  row kept" in six places instead of one, and real BI tools combine
+  active slicers with AND semantics, which a single predicate function
+  expresses directly); applying Top-N as a row-level filter (rejected —
+  see point 2, would have corrupted every other visual sharing the same
+  filtered row set for a control that should only affect category
+  display count).
+- **Consequence:** the EDA page now shows three new chart types
+  (ranked correlations, grouped means, contingency) with explicit
+  "A vs B" / "by" titles, and every existing chart title states what it
+  shows rather than a bare column name. The Dashboard Builder offers six
+  slicer types, shown only when applicable to the actual dataset (no
+  date-range control fabricated for a dataset with no date column).
+  Verified live: a numeric age-range filter (40-60) took a dashboard
+  from 80 to 43 rows with every KPI, chart, and the conclusion's
+  correlation recomputing from the filtered set. Quality gates: frontend
+  `tsc` / `eslint` clean, `next build` succeeds (14 routes, unchanged);
+  backend `pytest` full suite (2152 passed / 3 skipped) reconfirmed
+  green as a regression check since no backend file changed.
+
 ## 0099 — Phase 14.4: diagnosing before building, mapping new estimators onto the existing family enum instead of growing it, and scoping the voice assistant honestly
 
 - **Decision:** three choices define this increment:

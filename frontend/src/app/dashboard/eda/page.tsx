@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { LineChart, Rows3, Columns3, AlertTriangle, Code2 } from "lucide-react";
+import { LineChart, Rows3, Columns3, AlertTriangle, Code2, GitCompareArrows } from "lucide-react";
 
 import { PageHeader } from "@/components/layout/page-header";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -10,7 +10,13 @@ import { FileDropzone } from "@/components/ui/file-dropzone";
 import { Button } from "@/components/ui/button";
 import { Accordion } from "@/components/ui/accordion";
 import { StatCard } from "@/components/ui/stat-card";
-import { NumericHistogramCard, CategoricalBarCard } from "@/components/ui/eda-charts";
+import {
+  NumericHistogramCard,
+  CategoricalBarCard,
+  CorrelationRankingCard,
+  GroupedMeanBarCard,
+  ContingencyBarCard,
+} from "@/components/ui/eda-charts";
 import { analyzeEda, ApiError, EdaReport } from "@/lib/api";
 
 export default function EdaPage() {
@@ -113,6 +119,33 @@ export default function EdaPage() {
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                 {report.univariate.categorical.map((col) => (
                   <CategoricalBarCard key={col.column} cat={col} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {(report.bivariate.numeric_correlations.length > 0 ||
+            report.bivariate.categorical_numeric.length > 0 ||
+            report.bivariate.categorical_categorical.length > 0) && (
+            <div>
+              <h2 className="mb-1 flex items-center gap-2 text-xl font-semibold tracking-tight">
+                <GitCompareArrows className="h-5 w-5 text-primary-2" /> Relationships
+              </h2>
+              <p className="mb-4 text-sm text-muted">
+                How columns relate to each other — not just what each one looks like alone.
+              </p>
+              <div className="grid gap-4 sm:grid-cols-2">
+                {report.bivariate.numeric_correlations.length > 0 && (
+                  <CorrelationRankingCard correlations={report.bivariate.numeric_correlations} />
+                )}
+                {report.bivariate.categorical_numeric.slice(0, 3).map((s) => (
+                  <GroupedMeanBarCard
+                    key={`${s.categorical_column}-${s.numeric_column}`}
+                    summary={s}
+                  />
+                ))}
+                {report.bivariate.categorical_categorical.slice(0, 2).map((c) => (
+                  <ContingencyBarCard key={`${c.column_a}-${c.column_b}`} contingency={c} />
                 ))}
               </div>
             </div>
