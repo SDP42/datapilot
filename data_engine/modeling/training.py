@@ -27,6 +27,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass, field
+from time import perf_counter as _perf_counter
 from typing import Any
 
 import numpy as np
@@ -403,8 +404,10 @@ def _split_indices(
 def _regression_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
     from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
+    mse = float(mean_squared_error(y_true, y_pred))
     metrics: dict[str, float] = {
-        "rmse": _round(math.sqrt(mean_squared_error(y_true, y_pred))),
+        "mse": _round(mse),
+        "rmse": _round(math.sqrt(mse)),
         "mae": _round(mean_absolute_error(y_true, y_pred)),
     }
     if float(np.var(y_true)) > 0.0:
@@ -1805,6 +1808,7 @@ def run_expanded_search(
     y_train, y_test = y_all[train_idx], y_all[test_idx]
 
     for spec in catalog:
+        candidate_start = _perf_counter()
         try:
             pipeline = Pipeline([("preprocess", preprocessor), ("model", spec.build())])
             pipeline.fit(x_train, y_train)
@@ -1834,6 +1838,7 @@ def run_expanded_search(
                         hyperparameters=spec.hyperparameters,
                         status=TrainingRunStatus.COMPLETED,
                         metrics=metrics,
+                        fit_seconds=round(_perf_counter() - candidate_start, 4),
                     ),
                     score,
                 )
@@ -1848,6 +1853,7 @@ def run_expanded_search(
                         hyperparameters=spec.hyperparameters,
                         status=TrainingRunStatus.FAILED,
                         reason=f"{type(exc).__name__}: {_normalise_error(str(exc))}",
+                        fit_seconds=round(_perf_counter() - candidate_start, 4),
                     ),
                     None,
                 )
@@ -1870,6 +1876,7 @@ def run_expanded_search(
         task_type=task.value,
         selection_metric=selection_metric,
         candidate_count=len(ranked),
+        total_fit_seconds=round(sum(r.fit_seconds for r, _ in results), 4),
         candidates=ranked,
         notes=[
             f"{len(catalog)} (estimator, hyperparameter) candidates from the fixed Phase 7.7 "
@@ -1877,6 +1884,12 @@ def run_expanded_search(
             "see each candidate's own metrics for its test-partition performance",
             f"ranked by '{selection_metric}' ({direction})" if selection_metric else "unranked",
             f"random seed: {MODEL_TRAINING_RANDOM_SEED} (fixed)",
+            "fit_seconds on every candidate and total_fit_seconds here are real wall-clock "
+            "timings, not estimates — these are classical scikit-learn estimators on a single "
+            "train/test split (no cross-validation, no deep learning), which is why 100+ "
+            "candidates typically complete in single-digit seconds on a dataset of a few "
+            "hundred to a few thousand rows; a slower or much larger dataset will show "
+            "correspondingly larger fit_seconds values here",
             "no model artifact was persisted here; use "
             "data_engine.modeling.persistence.save_model with fit_final_pipeline (or an "
             "expanded-search-specific fit) to persist a chosen candidate",

@@ -2516,6 +2516,63 @@ Phase-7/8 entry point.
   actually about ("different types of visuals"), not a literal count.
 - **Decision:** 0100.
 
+#### Phase 14.6 — Scatter & Treemap Charts, Transparent Metrics & Timing — **Done**
+- **Scope:** "why always linear is best", "is it not a proper backend"
+  (given how fast 100+ candidates fit), and "hyperparameter tuning
+  should be visible" were all really the same underlying complaint: the
+  search was a black box showing only the winner's selection metric,
+  with nothing to verify the ranking against or explain the speed.
+  Separately, "treemap, scatter chart" named specific chart types that
+  genuinely didn't exist yet.
+- **`_regression_metrics` now reports `mse` alongside `rmse`/`mae`/`r2`**
+  (`data_engine/modeling/training.py`) — every regression candidate's
+  full metric set is now MSE, RMSE, MAE, and R² together, not just
+  whichever one happens to be the selection metric.
+- **Every candidate now carries real `fit_seconds`, and the overall
+  result carries `total_fit_seconds`** (`ExpandedCandidateResult` /
+  `ExpandedSearchResult` in `data_engine/modeling/models.py`, timed with
+  `time.perf_counter` around each candidate's fit+evaluate in
+  `run_expanded_search`) — makes the actual wall-clock cost of the
+  search visible and verifiable rather than looking implausibly instant;
+  a new note in the result explains *why* it's fast (classical
+  scikit-learn estimators, single train/test split, no cross-validation,
+  no deep learning) rather than leaving that to be inferred.
+- **Modeling page: a "Best candidate & its exact hyperparameters" callout
+  plus a fully structured results table** — MSE/RMSE/MAE/R² (or
+  Accuracy/Precision/Recall/F1/ROC AUC for classification) as their own
+  right-aligned numeric columns, a Fit time column per row, and
+  summary StatCards (candidates trained, total fit time, ranked-by
+  metric, task type) above the table. Verified live on a real HR
+  dataset: 103 regression candidates, 2.87s total, winner was
+  `DecisionTreeRegressor(max_depth=5)` — not linear — directly visible
+  in the table alongside every other candidate's own MSE/RMSE/MAE/R²
+  for independent comparison.
+- **Two new chart types added to `components/ui/eda-charts.tsx`:**
+  `ScatterCorrelationCard` (a real point-per-row scatter of the two
+  columns in the dataset's strongest correlation, titled "A vs B · r =
+  …") and `CategoricalTreemapCard` (an area-proportional treemap
+  alternative to bar/pie for categorical breakdowns). Both wired into
+  the EDA page's Relationships/breakdown sections (which also now
+  parses the CSV client-side via `lib/csv-parse.ts`, mirroring the
+  Dashboard Builder, so the scatter plot has real points to draw) and
+  into every generated dashboard's Breakdown row — addressing "every
+  dashboard should have enough visuals" directly: each dashboard now
+  shows its own strongest-correlation scatter plot in addition to its
+  per-column tiles, and every third categorical column renders as a
+  treemap instead of bar/pie for visual variety.
+- **Quality gates:** `pytest` full suite 2152 passed / 3 skipped (2 new
+  assertions on `test_run_expanded_model_search_regression_ranks_every_candidate`
+  covering `mse` presence and `fit_seconds`/`total_fit_seconds`
+  correctness); `ruff` / `ruff format` / `mypy` (176 source files) all
+  green. Frontend: `tsc --noEmit` clean, `eslint` clean, `next build`
+  succeeds (14 routes, unchanged). Verified end to end in a real
+  browser: scatter plot rendered real HR data points ("age vs
+  satisfaction_score · r = 0.202"), treemap rendered area-proportional
+  attrition counts, and the modeling search table showed the true
+  mixed-family ranking (tree-based and ensemble methods outranking
+  linear ones) rather than linear always winning.
+- **Decision:** 0101.
+
 ### Phase 15 — MLOps / Monitoring
 - **Objective:** operate models in production.
 - **Components:** model/data versioning, drift and performance monitoring,

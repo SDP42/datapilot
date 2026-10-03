@@ -353,6 +353,7 @@ export interface ExpandedCandidateResult {
   hyperparameters: Record<string, string | number | boolean | number[] | null>;
   status: "completed" | "failed" | "unavailable";
   metrics: Record<string, number>;
+  fit_seconds: number;
   reason?: string | null;
 }
 
@@ -362,6 +363,7 @@ export interface ExpandedSearchResult {
   task_type?: string | null;
   selection_metric?: string | null;
   candidate_count: number;
+  total_fit_seconds: number;
   candidates: ExpandedCandidateResult[];
   notes: string[];
 }

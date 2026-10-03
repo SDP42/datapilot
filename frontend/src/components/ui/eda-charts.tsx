@@ -9,9 +9,13 @@ import {
   Pie,
   PieChart,
   ResponsiveContainer,
+  Scatter,
+  ScatterChart,
+  Treemap,
   Tooltip,
   XAxis,
   YAxis,
+  ZAxis,
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "./card";
 import { Badge } from "./badge";
@@ -296,6 +300,127 @@ export function ContingencyBarCard({ contingency }: { contingency: CategoricalCo
                 <Bar key={b} dataKey={b} stackId="a" fill={CHART_COLORS[i % CHART_COLORS.length]} />
               ))}
             </BarChart>
+          </ResponsiveContainer>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** A real scatter of two numeric columns, point-for-point from actual
+ * rows — titled "{A} vs {B}" with the correlation that motivated showing
+ * this specific pair, so the chart's "what against what" is explicit. */
+export function ScatterCorrelationCard({
+  columnA,
+  columnB,
+  points,
+  correlation,
+}: {
+  columnA: string;
+  columnB: string;
+  points: { x: number; y: number }[];
+  correlation?: number | null;
+}) {
+  return (
+    <Card className="overflow-hidden">
+      <CardHeader className="flex-row items-center justify-between space-y-0">
+        <div>
+          <CardTitle className="text-base">
+            <span className="font-mono">{columnA}</span> vs{" "}
+            <span className="font-mono">{columnB}</span>
+          </CardTitle>
+          <CardDescription>
+            one point per row{correlation != null ? ` · r = ${correlation.toFixed(3)}` : ""}
+          </CardDescription>
+        </div>
+        <Badge variant="primary">scatter</Badge>
+      </CardHeader>
+      <CardContent className="h-56">
+        {points.length === 0 ? (
+          <div className="flex h-full items-center justify-center text-sm text-muted">
+            Not enough paired observations to plot.
+          </div>
+        ) : (
+          <ResponsiveContainer width="100%" height="100%">
+            <ScatterChart margin={{ left: -16, bottom: 4 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--surface-border)" />
+              <XAxis
+                type="number"
+                dataKey="x"
+                name={columnA}
+                tick={{ fontSize: 10, fill: "var(--muted)" }}
+              />
+              <YAxis
+                type="number"
+                dataKey="y"
+                name={columnB}
+                tick={{ fontSize: 10, fill: "var(--muted)" }}
+              />
+              <ZAxis range={[24, 24]} />
+              <Tooltip contentStyle={tooltipStyle} cursor={{ strokeDasharray: "3 3" }} />
+              <Scatter data={points} fill="var(--primary-2)" fillOpacity={0.65} />
+            </ScatterChart>
+          </ResponsiveContainer>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** A treemap of a categorical column's top values — an alternative to bar/
+ * pie that reads cardinality differences more clearly at a glance. */
+export function CategoricalTreemapCard({ cat }: { cat: CategoricalColumnAnalysis }) {
+  const data = cat.top_values.map((tv, i) => ({
+    name: tv.value,
+    size: tv.count,
+    fill: CHART_COLORS[i % CHART_COLORS.length],
+  }));
+
+  return (
+    <Card className="overflow-hidden">
+      <CardHeader className="flex-row items-center justify-between space-y-0">
+        <div>
+          <CardTitle className="text-base">
+            <span className="font-mono">{cat.column}</span> by size
+          </CardTitle>
+          <CardDescription>row count per {cat.column} value, area-proportional</CardDescription>
+        </div>
+        <Badge variant="accent">treemap</Badge>
+      </CardHeader>
+      <CardContent className="h-56">
+        {data.length === 0 ? (
+          <div className="flex h-full items-center justify-center text-sm text-muted">No values</div>
+        ) : (
+          <ResponsiveContainer width="100%" height="100%">
+            <Treemap
+              data={data}
+              dataKey="size"
+              stroke="var(--background)"
+              content={(props) => {
+                const { x, y, width, height, name, fill } = props as unknown as {
+                  x: number; y: number; width: number; height: number; name: string; fill: string;
+                };
+                if (width < 2 || height < 2) return <g />;
+                return (
+                  <g>
+                    <rect x={x} y={y} width={width} height={height} fill={fill} rx={3} />
+                    {width > 48 && height > 20 && (
+                      <text
+                        x={x + 6}
+                        y={y + 16}
+                        fontSize={11}
+                        fill="#07080f"
+                        fontWeight={600}
+                      >
+                        {name}
+                      </text>
+                    )}
+                  </g>
+                );
+              }}
+            >
+              <Tooltip contentStyle={tooltipStyle} />
+            </Treemap>
           </ResponsiveContainer>
         )}
       </CardContent>

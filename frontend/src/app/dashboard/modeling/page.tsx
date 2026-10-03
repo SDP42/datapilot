@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Cpu, Trophy, Layers } from "lucide-react";
+import { Cpu, Trophy, Layers, Timer, Sparkles } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 import { PageHeader } from "@/components/layout/page-header";
@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
+import { StatCard } from "@/components/ui/stat-card";
 import {
   runModeling,
   runModelSearch,
@@ -21,6 +22,9 @@ import {
   ModelingSpec,
   ExpandedSearchResult,
 } from "@/lib/api";
+
+const REGRESSION_METRIC_ORDER = ["mse", "rmse", "mae", "r2"];
+const CLASSIFICATION_METRIC_ORDER = ["accuracy", "precision", "recall", "f1", "roc_auc"];
 
 export default function ModelingPage() {
   const [file, setFile] = useState<File | null>(null);
@@ -63,6 +67,20 @@ export default function ModelingPage() {
     }
   }
 
+  const metricColumns = useMemo(() => {
+    if (!search || search.candidates.length === 0) return [];
+    const present = new Set<string>();
+    for (const c of search.candidates) {
+      for (const k of Object.keys(c.metrics)) present.add(k);
+    }
+    const order = present.has("rmse") ? REGRESSION_METRIC_ORDER : CLASSIFICATION_METRIC_ORDER;
+    const ordered = order.filter((k) => present.has(k));
+    const rest = [...present].filter((k) => !ordered.includes(k));
+    return [...ordered, ...rest];
+  }, [search]);
+
+  const bestCandidate = search?.candidates.find((c) => c.rank === 1) ?? null;
+
   const chartData =
     spec?.selection.ranking
       .filter((r) => r.score !== null && r.score !== undefined)
@@ -104,55 +122,115 @@ export default function ModelingPage() {
               disabled={!file || !objective}
               loading={searching}
             >
-              <Layers className="h-4 w-4" /> Run full model search (20+ candidates)
+              <Layers className="h-4 w-4" /> Run full model search (100+ candidates)
             </Button>
           </div>
           <p className="text-xs text-muted">
             The pipeline above fits one baseline per family. Full search fits every
-            (estimator, hyperparameter) combination in the Phase 7.7 catalog — 20+ candidates —
-            and ranks all of them, including a fixed hyperparameter grid per family.
+            (estimator, hyperparameter) combination in the Phase 7.7 catalog — 100+ candidates,
+            each with real fit timing and every metric shown, not just the selection metric — and
+            ranks all of them by a fixed hyperparameter grid per family.
           </p>
         </CardContent>
       </Card>
 
-      {search && (
-        <Card className="mt-8">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Layers className="h-4 w-4 text-primary-2" /> Full model search results
-            </CardTitle>
-            <CardDescription>
-              {search.status === "completed"
-                ? `${search.candidate_count} candidates trained and ranked by ${search.selection_metric} (${search.task_type})`
-                : (search.reason ?? "Search did not complete")}
-            </CardDescription>
-          </CardHeader>
-          {search.status === "completed" && (
+      {search && search.status === "completed" && (
+        <div className="mt-8 space-y-6">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <StatCard
+              icon={<Layers className="h-5 w-5" />}
+              label="Candidates trained"
+              value={search.candidate_count}
+            />
+            <StatCard
+              icon={<Timer className="h-5 w-5" />}
+              label="Total fit time"
+              value={`${search.total_fit_seconds.toFixed(2)}s`}
+            />
+            <StatCard
+              icon={<Sparkles className="h-5 w-5" />}
+              label="Ranked by"
+              value={search.selection_metric ?? "—"}
+            />
+            <StatCard
+              icon={<Trophy className="h-5 w-5" />}
+              label="Task type"
+              value={search.task_type ?? "—"}
+            />
+          </div>
+
+          {bestCandidate && (
+            <Card className="border-primary/30 bg-gradient-to-br from-primary/10 to-transparent">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Trophy className="h-4 w-4 text-warning" /> Best candidate &amp; its exact
+                  hyperparameters
+                </CardTitle>
+                <CardDescription>
+                  This is the hyperparameter-tuning result — every candidate below was fit with a
+                  different, fixed configuration; this one scored best on {search.selection_metric}.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-wrap items-center gap-3">
+                <Badge variant="primary">{bestCandidate.family}</Badge>
+                <span className="font-mono text-sm">{bestCandidate.estimator_name}</span>
+                <span className="font-mono text-xs text-muted">
+                  {Object.entries(bestCandidate.hyperparameters)
+                    .map(([k, v]) => `${k}=${Array.isArray(v) ? `[${v.join(",")}]` : v}`)
+                    .join(", ") || "default hyperparameters"}
+                </span>
+                <Badge variant="success">
+                  {search.selection_metric}:{" "}
+                  {bestCandidate.metrics[search.selection_metric ?? ""]?.toFixed(4) ?? "—"}
+                </Badge>
+                <span className="ml-auto text-xs text-muted">
+                  fit in {bestCandidate.fit_seconds.toFixed(3)}s
+                </span>
+              </CardContent>
+            </Card>
+          )}
+
+          <Card>
+            <CardHeader>
+              <CardTitle>All {search.candidate_count} candidates, ranked</CardTitle>
+              <CardDescription>
+                Every metric for every candidate — not just the selection metric — so you can
+                compare families yourself rather than trust the ranking alone.
+              </CardDescription>
+            </CardHeader>
             <CardContent className="space-y-2">
               <div className="max-h-[32rem] overflow-y-auto rounded-xl border border-surface-border">
                 <table className="w-full text-sm">
                   <thead className="sticky top-0 bg-surface-2/90 backdrop-blur">
                     <tr className="border-b border-surface-border">
-                      <th className="px-4 py-2.5 text-left font-medium text-muted">#</th>
-                      <th className="px-4 py-2.5 text-left font-medium text-muted">Family</th>
-                      <th className="px-4 py-2.5 text-left font-medium text-muted">Estimator</th>
-                      <th className="px-4 py-2.5 text-left font-medium text-muted">
+                      <th className="px-3 py-2.5 text-left font-medium text-muted">#</th>
+                      <th className="px-3 py-2.5 text-left font-medium text-muted">Family</th>
+                      <th className="px-3 py-2.5 text-left font-medium text-muted">Estimator</th>
+                      <th className="px-3 py-2.5 text-left font-medium text-muted">
                         Hyperparameters
                       </th>
-                      <th className="px-4 py-2.5 text-left font-medium text-muted">Metrics</th>
-                      <th className="px-4 py-2.5 text-left font-medium text-muted">Status</th>
+                      {metricColumns.map((m) => (
+                        <th
+                          key={m}
+                          className="px-3 py-2.5 text-right font-medium uppercase text-muted"
+                        >
+                          {m}
+                        </th>
+                      ))}
+                      <th className="px-3 py-2.5 text-right font-medium text-muted">Fit time</th>
+                      <th className="px-3 py-2.5 text-left font-medium text-muted">Status</th>
                     </tr>
                   </thead>
                   <tbody>
                     {search.candidates.map((c) => (
                       <tr
-                        key={`${c.rank}-${c.estimator_name}`}
+                        key={`${c.rank}-${c.estimator_name}-${JSON.stringify(c.hyperparameters)}`}
                         className={
                           "border-b border-surface-border/60 last:border-0 " +
                           (c.rank === 1 ? "bg-primary/10" : "hover:bg-white/[0.02]")
                         }
                       >
-                        <td className="px-4 py-2.5 font-mono text-xs">
+                        <td className="px-3 py-2.5 font-mono text-xs">
                           {c.rank === 1 ? (
                             <Badge variant="primary">
                               <Trophy className="h-3 w-3" /> 1
@@ -161,19 +239,22 @@ export default function ModelingPage() {
                             c.rank
                           )}
                         </td>
-                        <td className="px-4 py-2.5 text-xs text-muted">{c.family}</td>
-                        <td className="px-4 py-2.5 font-mono text-xs">{c.estimator_name}</td>
-                        <td className="px-4 py-2.5 font-mono text-xs text-muted">
+                        <td className="px-3 py-2.5 text-xs text-muted">{c.family}</td>
+                        <td className="px-3 py-2.5 font-mono text-xs">{c.estimator_name}</td>
+                        <td className="px-3 py-2.5 font-mono text-[11px] text-muted">
                           {Object.entries(c.hyperparameters)
                             .map(([k, v]) => `${k}=${Array.isArray(v) ? `[${v.join(",")}]` : v}`)
                             .join(", ") || "—"}
                         </td>
-                        <td className="px-4 py-2.5 font-mono text-xs">
-                          {Object.entries(c.metrics)
-                            .map(([k, v]) => `${k}=${v.toFixed(3)}`)
-                            .join("  ") || "—"}
+                        {metricColumns.map((m) => (
+                          <td key={m} className="px-3 py-2.5 text-right font-mono text-xs">
+                            {c.metrics[m] !== undefined ? c.metrics[m].toFixed(4) : "—"}
+                          </td>
+                        ))}
+                        <td className="px-3 py-2.5 text-right font-mono text-xs text-muted">
+                          {c.fit_seconds.toFixed(3)}s
                         </td>
-                        <td className="px-4 py-2.5">
+                        <td className="px-3 py-2.5">
                           <StatusBadge status={c.status === "completed" ? "completed" : "failed"} />
                         </td>
                       </tr>
@@ -182,8 +263,14 @@ export default function ModelingPage() {
                 </table>
               </div>
             </CardContent>
-          )}
-        </Card>
+          </Card>
+        </div>
+      )}
+
+      {search && search.status !== "completed" && (
+        <Alert variant="warning" title={`Search status: ${search.status}`} className="mt-8">
+          {search.reason ?? "The search could not complete for this dataset."}
+        </Alert>
       )}
 
       {spec && (

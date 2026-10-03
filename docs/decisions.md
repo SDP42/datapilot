@@ -4,6 +4,59 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0101 — Phase 14.6: real timing over a reassurance, showing every metric instead of arguing linear isn't always best
+
+- **Decision:** two choices define this increment:
+  1. **"Why always linear is best" and "is this fast training even
+     real" were answered with data (every candidate's full metric set,
+     real per-candidate `fit_seconds`), not with an explanation in
+     prose.** It would have been easy to just add a sentence saying
+     "these are small, fast models" — instead, `fit_seconds` is a real
+     `time.perf_counter()` measurement around each of the 100+ fits,
+     surfaced per-candidate and summed into `total_fit_seconds`, and
+     every regression candidate now reports MSE *and* RMSE *and* MAE
+     *and* R² together rather than only the one metric used for
+     ranking. The point: a user skeptical of a ranking should be able to
+     check it against the raw numbers themselves, not be asked to trust
+     an explanation. (And checking the real search output on a real
+     dataset in this same session showed a `DecisionTreeRegressor`
+     winning, not a linear model — the "always linear" premise was
+     already specific to whatever run prompted the question, not a
+     property of the search itself.)
+  2. **Scatter and treemap are real, data-backed charts — the EDA page
+     was given client-side CSV parsing specifically so the scatter plot
+     could draw actual points**, rather than approximating a scatter
+     from already-aggregated statistics (which isn't possible — a
+     scatter plot's entire value is the individual observations, which
+     the backend's `EDAReport` deliberately never serializes in full,
+     by the same "never return raw row data" boundary every other Phase
+     4 contract already keeps). The Dashboard Builder already had this
+     capability (Phase 14.5); extending it to the EDA page was the
+     correct fix rather than inventing some synthetic approximation.
+- **Reason:** both choices follow this project's running principle of
+  making a claim checkable rather than just asserting it — the same
+  reasoning that put `fit_seconds` in the API response instead of a
+  comment, and that made the scatter plot real data instead of a
+  plausible-looking placeholder.
+- **Alternatives considered:** adding reassuring prose about why the
+  search is fast without exposing real timing data (rejected — doesn't
+  let a skeptical user verify anything); approximating a scatter plot
+  from the existing histogram bin data (rejected — not mathematically
+  possible to reconstruct point-pairs from two independent marginal
+  histograms, and fabricating points that only *look* plausible would
+  have been a correctness violation); keeping the modeling results table
+  showing only the selection metric (rejected — directly contradicts the
+  "show MSE and R2 of all" request).
+- **Consequence:** the modeling search response and UI now show every
+  metric for every candidate plus real per-candidate and total timing;
+  the EDA page and every generated dashboard now include a real scatter
+  plot and treemap alongside existing chart types. Quality gates:
+  `pytest` 2152 passed / 3 skipped; `ruff` / `ruff format` / `mypy` all
+  green; frontend `tsc` / `eslint` clean, `next build` succeeds.
+  Verified live: 103 real candidates in 2.87s, non-linear winner visible
+  in the table; real scatter points plotted for "age vs
+  satisfaction_score".
+
 ## 0100 — Phase 14.5: rendering data the backend already computed rather than inventing new analysis, and six independent slicer predicates over one generic filter object
 
 - **Decision:** two choices define this increment:

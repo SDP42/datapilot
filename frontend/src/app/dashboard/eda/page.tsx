@@ -16,20 +16,26 @@ import {
   CorrelationRankingCard,
   GroupedMeanBarCard,
   ContingencyBarCard,
+  ScatterCorrelationCard,
+  CategoricalTreemapCard,
 } from "@/components/ui/eda-charts";
+import { parseCsvFile } from "@/lib/csv-parse";
+import type { Row } from "@/lib/bi-stats";
 import { analyzeEda, ApiError, EdaReport } from "@/lib/api";
 
 export default function EdaPage() {
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [report, setReport] = useState<EdaReport | null>(null);
+  const [rawRows, setRawRows] = useState<Row[]>([]);
 
   async function handleRun() {
     if (!file) return;
     setLoading(true);
     try {
-      const data = await analyzeEda(file);
+      const [data, parsed] = await Promise.all([analyzeEda(file), parseCsvFile(file)]);
       setReport(data);
+      setRawRows(parsed.rows);
       toast.success("EDA report generated");
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "EDA failed");
@@ -37,6 +43,18 @@ export default function EdaPage() {
       setLoading(false);
     }
   }
+
+  const topCorrelation = report?.bivariate.numeric_correlations
+    .filter((c) => c.correlation !== null)
+    .sort((a, b) => Math.abs(b.correlation!) - Math.abs(a.correlation!))[0];
+
+  const scatterPoints =
+    topCorrelation && rawRows.length > 0
+      ? rawRows
+          .map((r) => ({ x: parseFloat(r[topCorrelation.column_a]), y: parseFloat(r[topCorrelation.column_b]) }))
+          .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y))
+          .slice(0, 500)
+      : [];
 
   const rawSections = report
     ? Object.entries(report).filter(([key, value]) => key !== "dataset_id" && value !== null)
@@ -117,9 +135,13 @@ export default function EdaPage() {
             <div>
               <h2 className="mb-4 text-xl font-semibold tracking-tight">Categorical breakdowns</h2>
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                {report.univariate.categorical.map((col) => (
-                  <CategoricalBarCard key={col.column} cat={col} />
-                ))}
+                {report.univariate.categorical.map((col, i) =>
+                  i % 3 === 2 ? (
+                    <CategoricalTreemapCard key={col.column} cat={col} />
+                  ) : (
+                    <CategoricalBarCard key={col.column} cat={col} variant={i % 2 === 0 ? "bar" : "pie"} />
+                  ),
+                )}
               </div>
             </div>
           )}
@@ -137,6 +159,14 @@ export default function EdaPage() {
               <div className="grid gap-4 sm:grid-cols-2">
                 {report.bivariate.numeric_correlations.length > 0 && (
                   <CorrelationRankingCard correlations={report.bivariate.numeric_correlations} />
+                )}
+                {topCorrelation && scatterPoints.length > 0 && (
+                  <ScatterCorrelationCard
+                    columnA={topCorrelation.column_a}
+                    columnB={topCorrelation.column_b}
+                    points={scatterPoints}
+                    correlation={topCorrelation.correlation}
+                  />
                 )}
                 {report.bivariate.categorical_numeric.slice(0, 3).map((s) => (
                   <GroupedMeanBarCard

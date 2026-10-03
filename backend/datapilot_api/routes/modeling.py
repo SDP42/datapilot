@@ -65,7 +65,7 @@ async def search(
     session: Session = Depends(get_session),
 ) -> ExpandedSearchResult:
     """Ingest an uploaded CSV and fit + rank every candidate in the Phase 7.7
-    expanded catalog (20+ (estimator, hyperparameter) combinations), not
+    expanded catalog (100+ (estimator, hyperparameter) combinations), not
     just one baseline per family. Slower than `/run` — every candidate is
     its own fit — but returns the full ranked field for comparison.
     """

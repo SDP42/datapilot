@@ -501,6 +501,11 @@ class ExpandedCandidateResult(BaseModel):
     )
     status: TrainingRunStatus
     metrics: dict[str, float] = Field(default_factory=dict)
+    fit_seconds: float = Field(
+        default=0.0,
+        description="Wall-clock time to fit and evaluate this one candidate — makes the "
+        "search's actual compute cost visible rather than looking implausibly instant.",
+    )
     reason: str | None = Field(default=None, description="Populated iff status is not completed.")
 
 
@@ -520,5 +525,8 @@ class ExpandedSearchResult(BaseModel):
     task_type: str | None = None
     selection_metric: str | None = None
     candidate_count: int = 0
+    total_fit_seconds: float = Field(
+        default=0.0, description="Sum of every candidate's fit_seconds — the real wall-clock cost."
+    )
     candidates: list[ExpandedCandidateResult] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)

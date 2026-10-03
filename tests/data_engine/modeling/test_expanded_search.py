@@ -69,6 +69,14 @@ def test_run_expanded_model_search_regression_ranks_every_candidate():
     rmses = [c.metrics["rmse"] for c in completed if "rmse" in c.metrics]
     assert rmses == sorted(rmses)
 
+    # mse/rmse/mae/r2 are all present (not just the selection metric), and timed
+    for c in completed:
+        assert {"mse", "rmse", "mae"} <= set(c.metrics)
+        assert c.metrics["mse"] >= 0.0
+        assert c.fit_seconds >= 0.0
+    assert result.total_fit_seconds > 0.0
+    assert result.total_fit_seconds == round(sum(c.fit_seconds for c in result.candidates), 4)
+
 
 def test_run_expanded_model_search_classification_ranks_by_f1_descending():
     df = _binary_df()

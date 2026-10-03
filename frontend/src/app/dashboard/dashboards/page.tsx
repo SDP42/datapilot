@@ -40,7 +40,12 @@ import { Input } from "@/components/ui/input";
 import { StatCard } from "@/components/ui/stat-card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { NumericHistogramCard, CategoricalBarCard } from "@/components/ui/eda-charts";
+import {
+  NumericHistogramCard,
+  CategoricalBarCard,
+  CategoricalTreemapCard,
+  ScatterCorrelationCard,
+} from "@/components/ui/eda-charts";
 import { cn } from "@/lib/utils";
 import { downloadDashboardHtml, printDashboardPdf } from "@/lib/export";
 import { groupColumnsIntoDashboards, suggestDashboardCount, type DashboardGroup } from "@/lib/dashboard-grouping";
@@ -195,6 +200,12 @@ function BiDashboardPanel({
   const trendData = dateColumn ? computeTrend(filteredRows, dateColumn, trendValueCol) : [];
 
   const insight = strongestCorrelation(filteredRows, groupNumeric);
+  const scatterPoints = insight
+    ? filteredRows
+        .map((r) => ({ x: parseFloat(r[insight.columnA]), y: parseFloat(r[insight.columnB]) }))
+        .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y))
+        .slice(0, 500)
+    : [];
 
   return (
     <div ref={innerRef} className="space-y-6">
@@ -434,9 +445,22 @@ function BiDashboardPanel({
           Breakdown
         </h3>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {insight && scatterPoints.length > 0 && (
+            <ScatterCorrelationCard
+              columnA={insight.columnA}
+              columnB={insight.columnB}
+              points={scatterPoints}
+              correlation={insight.correlation}
+            />
+          )}
           {group.columns.map((col, i) =>
             groupNumeric.includes(col) ? (
               <NumericHistogramCard key={col} dist={computeNumericDistribution(filteredRows, col)} />
+            ) : i % 3 === 2 ? (
+              <CategoricalTreemapCard
+                key={col}
+                cat={computeCategoricalAnalysis(filteredRows, col, filters.topN)}
+              />
             ) : (
               <CategoricalBarCard
                 key={col}
