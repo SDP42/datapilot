@@ -3,6 +3,8 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/sidebar";
+import { TopBar } from "@/components/layout/topbar";
+import { PageTransition } from "@/components/layout/page-transition";
 import { Spinner } from "@/components/ui/spinner";
 import { VoiceAssistant } from "@/components/voice/voice-assistant";
 import { useAuth } from "@/hooks/use-auth";
@@ -29,7 +31,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <div className="noise-overlay" />
       <Sidebar />
       <main className="relative z-10 min-h-screen lg:pl-64">
-        <div className="mx-auto max-w-6xl px-6 py-8 sm:px-8">{children}</div>
+        <TopBar />
+        <div className="mx-auto max-w-6xl px-6 py-8 sm:px-8">
+          <PageTransition>{children}</PageTransition>
+        </div>
       </main>
       <VoiceAssistant />
     </div>

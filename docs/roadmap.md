@@ -2838,6 +2838,60 @@ Phase-7/8 entry point.
   Ingest page's dropzone shows the updated "CSV or Excel" copy.
 - **Decision:** 0105.
 
+#### Phase 14.11 — Command Palette, Notifications, a Data-Backed Overview, Page Transitions — **Done**
+- **Scope:** "frontend should be more heavy" was clarified via a direct
+  multi-choice question; the user selected every option (more visual
+  density, more animation/3D, more pages/features) — all three
+  implemented together, grounded in state the backend already tracks
+  (history, gamification) rather than new placeholder data.
+- **Command palette** (`components/command/command-palette.tsx`):
+  ⌘K/Ctrl+K anywhere in the dashboard, or the topbar's "Search or jump
+  to..." trigger, opens a Radix-`Dialog`-based palette listing every
+  nav destination plus two actions (toggle theme, sign out), with
+  type-to-filter and arrow-key/Enter navigation.
+- **Notifications bell** (`components/layout/notifications-bell.tsx`):
+  a topbar dropdown showing the signed-in user's 8 most recent activity
+  rows (same `/api/v1/history` endpoint the History page and the new
+  Overview page both use), each with an icon/label from the new shared
+  `lib/activity-meta.ts` map and a relative timestamp
+  (`lib/utils.ts`'s new `formatRelativeTime`).
+- **`components/layout/topbar.tsx`**: houses both of the above, added
+  to `dashboard/layout.tsx` above every page's content — the first
+  persistent chrome beyond the sidebar.
+- **Dashboard Overview rebuilt** (`app/dashboard/page.tsx`) from four
+  hardcoded stat cards and static quick links into a real view of the
+  signed-in account: live StatCards (total runs / runs today / level /
+  streak, from `getHistory` + the gamification profile `useAuth`
+  already exposes), a 14-day activity `AreaChart` (recharts, bucketed
+  client-side from `history`'s own timestamps), a progress card
+  (level/XP bar + up to 3 badges, linking to the full profile page),
+  a recent-activity list, and the original quick-links section —
+  nothing on the page is fabricated; every number traces back to a
+  real API call.
+- **`components/ui/dashboard-orb.tsx`**: a lighter sibling of the
+  landing page's `Hero3D` (one ambient distorted sphere, no starfield,
+  smaller canvas) placed behind the Overview header as a subtle
+  animated accent — loaded via `next/dynamic` with `ssr: false`,
+  matching `Hero3D`'s own pattern, and `-z-10`/`pointer-events-none`
+  so it never intercepts clicks or overlaps the stat row.
+- **Page transitions** (`components/layout/page-transition.tsx`): every
+  dashboard route now fades/slides on navigation via Framer Motion's
+  `AnimatePresence` keyed on `usePathname()`, wrapped once in
+  `dashboard/layout.tsx` rather than per-page.
+- **Quality gates:** `tsc --noEmit` clean, `eslint` clean (one
+  `react-hooks/set-state-in-effect` violation in an early command-
+  palette draft was found and fixed — the open/reset/focus logic moved
+  into a `useCallback`'d `openPalette()` called from event handlers,
+  not from an effect body reacting to `open`), `next build` succeeds
+  (17 routes, unchanged). Verified live in a real browser: ⌘K opens the
+  palette, typing "model" filters to exactly "Modeling", Enter
+  navigates there with the transition visible mid-fade; the
+  notifications bell shows real ingest history with a correct relative
+  timestamp; the Overview page's orb sits cleanly behind the header
+  with no card overlap; mobile viewport (375px) collapses the search
+  label to icon-only and stacks every card correctly.
+- **Decision:** 0106.
+
 ### Phase 15 — MLOps / Monitoring
 - **Objective:** operate models in production.
 - **Components:** model/data versioning, drift and performance monitoring,

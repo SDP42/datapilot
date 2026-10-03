@@ -469,7 +469,7 @@ export interface PredictionResult {
 
 export interface ActivityRecord {
   activity_id: string;
-  kind: "ingest" | "quality" | "eda" | "modeling" | "train" | "predict";
+  kind: "ingest" | "quality" | "eda" | "modeling" | "search" | "train" | "predict";
   dataset_id: string;
   dataset_filename?: string | null;
   summary: string;

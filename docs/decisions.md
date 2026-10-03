@@ -4,6 +4,47 @@ Only decisions actually made are recorded here. Newest first.
 
 ---
 
+## 0106 — Phase 14.11: a vague "heavier frontend" request was clarified by a direct multi-choice question, then built from real state
+
+- **Decision:** "frontend should be more heavy" was answered first with
+  a clarifying question (visual density / animation+3D / more pages /
+  all of them) rather than a guess, because the four readings implied
+  genuinely different, non-overlapping work and a wrong guess would
+  have wasted the entire pass. Once the user picked all of them, every
+  piece built was grounded in state the backend already tracks
+  (`/api/v1/history`, the gamification profile from Phase 14.9) rather
+  than inventing placeholder numbers — the Overview page's rebuild
+  replaces four hardcoded stat values with four real ones.
+- **Reason:** this project's standing instruction *"For exploratory
+  questions... respond with a recommendation... Don't implement until
+  user agrees"* applies with extra force here — unlike a technical
+  tradeoff where a defensible default exists, "heavier" has no
+  technically-correct default, so proceeding on a guess would be a
+  coin flip across hours of UI work. Once scope was confirmed, building
+  the new density from already-fetched real data rather than
+  hardcoded/sample numbers follows this project's standing "a claim
+  should be checkable" principle (the same one behind `fit_seconds`,
+  real scatter-plot points, and computed-not-stored badges).
+- **Alternatives considered:** guessing "visual density" alone as the
+  most likely reading and shipping just that (rejected — the user's
+  answer, once asked, was "all of them," which a guess would have
+  missed entirely, and a four-direction question costs one message
+  while a wrong four-hour build costs the whole pass); hardcoding
+  example/placeholder stats on the rebuilt Overview page the way the
+  original page did (`"13"` engine phases, static quick links only)
+  for a faster first pass (rejected — the real data was already one
+  `getHistory()` call away, and a dashboard's own home page is a bad
+  place to set a precedent of showing fabricated numbers).
+- **Consequence:** `components/command/command-palette.tsx`,
+  `components/layout/{topbar,notifications-bell,page-transition}.tsx`,
+  `components/ui/dashboard-orb.tsx`, and `lib/activity-meta.ts` are
+  new; `app/dashboard/page.tsx` is substantially rewritten;
+  `dashboard/layout.tsx` gained the topbar and the transition wrapper.
+  Quality gates: `tsc` / `eslint` clean (after fixing one
+  `set-state-in-effect` violation found during the pass), `next build`
+  succeeds; verified live — command palette filter/navigate, real
+  notifications content, orb positioning, and mobile layout.
+
 ## 0105 — Phase 14.10: Excel via the existing format-dispatch seam; rejected SheetJS's npm package on CVEs
 
 - **Decision:** Excel support was added by filling in a dispatch seam
